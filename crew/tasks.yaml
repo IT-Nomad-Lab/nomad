@@ -1,0 +1,47 @@
+# One milestone-execution pass. {goal}, {criteria}, {milestone} are filled in
+# at runtime (see crew.py / server.py). Each task logs to the Notion Activity
+# Log; high-stakes actions route through the approval gate.
+
+plan_milestone:
+  description: >
+    Goal: "{goal}"
+    Success criteria: "{criteria}"
+    Milestone to execute now: "{milestone}"
+
+    Break this milestone into an ordered list of concrete tasks with
+    dependencies. For EACH task in the list, call create_task(title=<the task
+    title>, agent=<owning specialist: Researcher/Builder/Writer/Comms>,
+    status="Backlog") — exactly ONE Notion Task row per step. Do NOT combine
+    several steps into a single row, and do not skip create_task. Then log a
+    one-line plan summary to the Activity Log. Use the EXACT same task titles
+    later steps will reference.
+  expected_output: >
+    One Notion Task row per planned step (each with an owner, status Backlog),
+    plus a numbered list of the task titles you created and their dependencies.
+  agent: planner
+
+execute_milestone:
+  description: >
+    Execute the planned tasks for milestone "{milestone}" (the task titles were
+    created in the previous step). For EACH task, by its exact title:
+    call update_task_status(title, "In Progress"), do the work (research →
+    save_knowledge, drafts → save_knowledge, etc.), log the action with
+    log_activity, then call update_task_status(title, "Done"). For ANY
+    irreversible action (send external email, merge to main, external invite,
+    share file, publish, delete, spend) call request_approval and STOP that
+    action until approved — do not perform it yourself.
+  expected_output: >
+    Each task moved In Progress → Done (or left for approval), outputs saved to
+    Knowledge, and every action logged to the Activity Log.
+  agent: orchestrator
+
+review_milestone:
+  description: >
+    Review the outputs for milestone "{milestone}" against the success
+    criteria: "{criteria}". If everything passes, mark the milestone's tasks
+    Done and report completion. If not, return specific feedback and which
+    tasks must be redone.
+  expected_output: >
+    A pass/fail verdict per task against the criteria, with actionable feedback
+    for anything that fails.
+  agent: reviewer

@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "nomad-comms": {
+      "command": "python3",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/mcp_comms.py"]
+    },
+    "nomad-research": {
+      "command": "python3",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/mcp_research.py"]
+    },
+    "nomad-content": {
+      "command": "python3",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/mcp_content.py"]
+    },
+    "nomad-dev": {
+      "command": "python3",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/mcp_dev.py"]
+    }
+  }
+}

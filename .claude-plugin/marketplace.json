@@ -1,0 +1,14 @@
+{
+  "name": "nomad-marketplace",
+  "owner": { "name": "Josias" },
+  "metadata": {
+    "description": "NOMAD — personal AI orchestrator. v2 pipeline + build team, packaged for Claude Code."
+  },
+  "plugins": [
+    {
+      "name": "nomad",
+      "source": "./nomad-plugin",
+      "description": "NOMAD v2 orchestrator: capture/route/gate/execute across specialist lanes, with the build-team agents, the guard hook, operator commands, and lane MCP servers."
+    }
+  ]
+}

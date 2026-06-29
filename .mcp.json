@@ -1,0 +1,22 @@
+{
+  "mcpServers": {
+    "nomad-local": {
+      "command": "mcp-local/.venv/bin/python",
+      "args": [
+        "mcp-local/nomad_local.py"
+      ]
+    },
+    "nomad-scrape": {
+      "command": "mcp-local/.venv/bin/python",
+      "args": [
+        "mcp-local/nomad_scrape.py"
+      ]
+    },
+    "nomad-image": {
+      "command": "mcp-local/.venv/bin/python",
+      "args": [
+        "mcp-local/nomad_image.py"
+      ]
+    }
+  }
+}

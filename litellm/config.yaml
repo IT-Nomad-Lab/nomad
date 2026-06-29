@@ -1,0 +1,76 @@
+# Project NOMAD — LiteLLM routing config
+# Interfaces & agents ask for a ROLE alias; the gateway maps it to a real
+# model and falls back automatically. Swap models HERE only — never wire a
+# raw model name into an app.
+#
+# ⚠ Verify every cloud model string and every Ollama tag against current
+#   provider docs before relying on them (names drift — see CLAUDE.md).
+
+model_list:
+  # ── Local (NATIVE Windows Ollama, reached via host.docker.internal) ─
+  # Tags remapped 2026-05-31 to models actually installed (the spec's
+  # qwen3.6:* tags don't exist). `docker exec`/`ollama list` to see options.
+  - model_name: fast            # always-on workhorse: routing, quick Q&A, voice
+    litellm_params:
+      model: ollama/llama3.1:8b
+      api_base: http://host.docker.internal:11434
+
+  - model_name: private         # local reasoning, privacy-sensitive, offline
+    litellm_params:
+      model: ollama/deepseek-r1:32b
+      api_base: http://host.docker.internal:11434
+
+  - model_name: code            # local coding / refactors / FIM
+    litellm_params:
+      model: ollama/qwen2.5-coder:32b
+      api_base: http://host.docker.internal:11434
+
+  # ── Cloud (routed only when worth it) ───────────────────────────
+  # deep/balanced are served by LOCAL Claude Code (subscription, NOT the
+  # Anthropic API) via the native claude-bridge. See claude-bridge/bridge.py.
+  - model_name: deep            # deep reasoning, agentic, architecture → Opus
+    litellm_params:
+      model: openai/opus
+      api_base: http://host.docker.internal:8088/v1
+      api_key: "sk-bridge-noauth"             # bridge ignores auth (local only)
+
+  - model_name: balanced        # everyday cloud reasoning / long-form drafts → Sonnet
+    litellm_params:
+      model: openai/sonnet
+      api_base: http://host.docker.internal:8088/v1
+      api_key: "sk-bridge-noauth"
+
+  - model_name: gpt             # alt reasoning, strong function-calling, vision
+    litellm_params:
+      model: openai/gpt-4o                    # verify tag
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: longdoc         # huge-context jobs, multimodal
+    litellm_params:
+      model: gemini/gemini-2.5-flash          # free-tier OK + 1M context
+      api_key: os.environ/GEMINI_API_KEY      # (switch to gemini-2.5-pro once billing is on)
+
+# NOTE: the "image" role (Adobe Firefly) is NOT an LLM and is NOT routed here.
+# It is a media engine called from n8n / crew/tools/firefly_tool.py.
+
+router_settings:
+  routing_strategy: simple-shuffle
+  num_retries: 2
+  timeout: 120
+  # Every cloud/subscription alias ends with `fast` (local, always-on Ollama) as the
+  # last resort, so NOMAD keeps answering even if the subscription throttles AND cloud
+  # is down. deep→balanced first (cheaper bridge model) then real cloud, then local.
+  fallbacks:
+    - deep: ["balanced", "gpt", "fast"]
+    - balanced: ["gpt", "fast"]
+    - gpt: ["balanced", "fast"]
+    - longdoc: ["gpt", "fast"]
+    - fast: ["private"]
+    - code: ["gpt", "fast"]
+
+litellm_settings:
+  drop_params: true
+  # success_callback: ["langfuse"]   # enable later for observability
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY

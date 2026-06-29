@@ -1,0 +1,217 @@
+# Project NOMAD — full stack
+# Bring up:  docker compose up -d
+# Service/port map is in README.md. Secrets come from .env (never commit it).
+name: nomad
+
+services:
+  # ── Local models ───────────────────────────────────────────────────
+  # NOTE: Ollama runs NATIVELY on Windows (not in Compose), already on the
+  # RTX 5090 with ~95 GB of models. Containers reach it at
+  # host.docker.internal:11434 (see litellm/config.yaml). Nothing to start here.
+
+  # ── The gateway / router (single endpoint for every brain) ─────────
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: nomad-litellm
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./litellm/config.yaml:/app/config.yaml:ro
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    env_file: .env
+    restart: unless-stopped
+
+  # ── Chat UI + voice + mobile PWA ───────────────────────────────────
+  openwebui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: nomad-openwebui
+    ports:
+      - "3000:8080"
+    volumes:
+      - openwebui:/app/backend/data
+    environment:
+      - OPENAI_API_BASE_URL=http://litellm:4000/v1
+      - OPENAI_API_KEY=${LITELLM_MASTER_KEY}
+    depends_on:
+      - litellm
+    restart: unless-stopped
+
+  # ── Vector memory ──────────────────────────────────────────────────
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: nomad-qdrant
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant:/qdrant/storage
+    restart: unless-stopped
+
+  # ── State / relational memory (also backs n8n) ─────────────────────
+  postgres:
+    image: postgres:16
+    container_name: nomad-postgres
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  # ── NOMAD v2: mission control / inbox / source of truth (on existing Postgres) ──
+  nocodb:
+    image: nocodb/nocodb:latest
+    container_name: nomad-nocodb
+    ports:
+      - "127.0.0.1:8095:8080"   # http://localhost:8095  (host-only)
+    environment:
+      - NC_DB=pg://postgres:5432?u=${POSTGRES_USER}&p=${POSTGRES_PASSWORD}&d=nomad_v2
+      - NC_PUBLIC_URL=http://localhost:8095
+      - NC_DISABLE_TELE=true
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
+  # ── NOMAD v2 engine: pipeline state machine + cockpit + gate (managed service) ──
+  nomad-v2-engine:
+    build: ./v2
+    container_name: nomad-v2-engine
+    ports:
+      - "127.0.0.1:8099:8099"   # cockpit/API host-only; reachable internally as nomad-v2-engine:8099
+    env_file: .env              # NC_API_TOKEN, LITELLM_MASTER_KEY, OPERATOR_EMAIL, …
+    environment:
+      - NOMAD_RUNTIME=litellm                                  # SDK runtime is host/dev (see Dockerfile)
+      - NOMAD_V2_ENGINE_HOST=0.0.0.0
+      - NC_BASE_URL=http://nocodb:8080                         # NocoDB on the compose network
+      - NOMAD_PG_HOST=postgres                                 # push gate: LISTEN/NOTIFY
+      - NOMAD_PG_DB=nomad_v2
+      - LITELLM_BASE_URL=http://litellm:4000
+      - N8N_V2_SEND_URL=http://host.docker.internal:5678/webhook/v2-send  # standalone n8n
+      - NOMAD_DISPATCH_URL=http://host.docker.internal:8090               # dev lane → Builder (native dispatcher)
+      - NOMAD_VOICE_URL=http://nomad-voice:8200                           # 3D: local Piper/Whisper
+      - NOMAD_CONSOLE_URL=http://nomad-console:8000                       # cockpit telemetry strip (CPU/MEM/GPU)
+      - NOMAD_TERM_URL=ws://host.docker.internal:8091                     # interactive project terminal (PTY daemon)
+      - QDRANT_URL=http://qdrant:6333                                     # cockpit chat memory (unified w/ console)
+      - OLLAMA_URL=http://host.docker.internal:11434                      # embeddings (nomic-embed-text)
+      - NOMAD_SCRAPER_URL=http://nomad-scraper:8210                       # research lane → web scraping (ScrapeGraphAI)
+      # ── image generation (gated): local ComfyUI first, then OpenAI, then Adobe Firefly ──
+      - NOMAD_IMAGE_PROVIDER=comfyui,openai,firefly
+      - COMFYUI_URL=http://host.docker.internal:8188                      # local ComfyUI on the host GPU
+      - COMFYUI_MODEL=sdxl                                                # sdxl (reliable) | flux (FLUX.1 schnell)
+      - OPENAI_IMAGE_MODEL=gpt-image-1                                    # OpenAI Images (uses OPENAI_API_KEY)
+      - NOMAD_IMAGE_DIR=/app/generated_images
+    volumes:
+      - ${HOME}/.config/nomad:/term-secret:ro   # read the terminal daemon's shared token
+      - ./v2/generated_images:/app/generated_images    # persisted generated images (served at /images)
+    depends_on:
+      - nocodb
+      - litellm
+      - nomad-voice
+      - postgres
+      - qdrant
+      - nomad-scraper
+    restart: unless-stopped
+
+  # ── Automation + integrations + APPROVAL GATES ─────────────────────
+  # NOTE: nomad/n8n/ has a *standalone* compose for bringing n8n up first
+  # (per CLAUDE.md). This service is n8n as part of the full stack.
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: nomad-n8n
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - N8N_SECURE_COOKIE=false
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_DATABASE=${POSTGRES_DB}
+      - DB_POSTGRESDB_USER=${POSTGRES_USER}
+      - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
+      - GENERIC_TIMEZONE=America/New_York
+    volumes:
+      - n8n:/home/node/.n8n
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
+  # ── The autonomous agent team ──────────────────────────────────────
+  crew:
+    build: ./crew
+    container_name: nomad-crew
+    ports:
+      - "8001:8001"
+    env_file: .env
+    environment:
+      - LITELLM_BASE_URL=http://litellm:4000
+      - NOMAD_DISPATCH_URL=http://host.docker.internal:8090  # engineering crew → Builder
+    depends_on:
+      - litellm
+    restart: unless-stopped
+
+  # ── Local speech: Piper TTS + faster-whisper STT (on-device voice) ─
+  nomad-voice:
+    build: ./nomad-voice
+    container_name: nomad-voice
+    ports:
+      - "127.0.0.1:8200:8200"   # host-only; console reaches it on the compose network
+    environment:
+      - WHISPER_MODEL=base.en
+      - WHISPER_DEVICE=cpu       # set to 'cuda' to try the GPU (needs Blackwell CTranslate2 compat)
+    restart: unless-stopped
+
+  # ── Web scraping: ScrapeGraphAI behind HTTP (LLM-driven scrape/search) ─
+  nomad-scraper:
+    build: ./nomad-scraper
+    container_name: nomad-scraper
+    ports:
+      - "127.0.0.1:8210:8210"   # host-only; engine reaches it on the compose network
+    env_file: .env              # LITELLM_MASTER_KEY (+ optional OPENAI/GEMINI keys via aliases)
+    environment:
+      - LITELLM_BASE_URL=http://litellm:4000   # LLM via the gateway (no new keys)
+      - SCRAPER_MODEL=gpt                       # alias: gpt (reliable extraction) | fast (local/free)
+      - OLLAMA_URL=http://host.docker.internal:11434  # embeddings (nomic-embed-text)
+    depends_on:
+      - litellm
+    restart: unless-stopped
+
+  # ── LCARS command console (dashboard + NOMAD chat) ─────────────────
+  nomad-console:
+    build: ./nomad-console
+    container_name: nomad-console
+    ports:
+      - "127.0.0.1:1701:8000"  # http://localhost:1701  🖖  (host-only; not on LAN/internet)
+    env_file: .env             # NOTION_*, LITELLM_MASTER_KEY, NOMAD_AUTH_* (optional)
+    environment:
+      - LITELLM_BASE_URL=http://litellm:4000
+      - NOMAD_MODEL=deep
+      - PROJECT_ROOTS=/host
+      - QDRANT_URL=http://qdrant:6333          # long-term conversational memory
+      - OLLAMA_URL=http://host.docker.internal:11434  # embeddings (nomic-embed-text)
+      - NOMAD_VOICE_URL=http://nomad-voice:8200  # local Piper TTS + Whisper STT
+      - NOMAD_TERM_URL=ws://host.docker.internal:8091  # interactive project terminal (native PTY daemon)
+      - NOMAD_SOURCE=nocodb                       # CUTOVER 2026-06-03: NocoDB is authoritative (flip back to 'notion' to roll back)
+      - NC_BASE_URL=http://nocodb:8080            # mission-control reads when NOMAD_SOURCE=nocodb
+    volumes:
+      # read-only; backend only reads Nomad.md + CLAUDE.md/AGENTS.md/README per project
+      - ${HOME}:/host:ro
+    depends_on:
+      - litellm
+      - qdrant
+      - nomad-voice
+    deploy:                    # GPU so nvidia-smi telemetry works
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+
+volumes:
+  openwebui:
+  qdrant:
+  postgres:
+  n8n:

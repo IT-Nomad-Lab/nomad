@@ -1,0 +1,26 @@
+# Standalone local n8n — bring this up FIRST (per CLAUDE.md NEXT STEPS #2).
+# Self-contained (its own SQLite-backed volume); does not need the full stack.
+#   start-n8n.bat   →  http://localhost:5678
+name: nomad-n8n
+
+services:
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: nomad-n8n-standalone
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - N8N_SECURE_COOKIE=false
+      - GENERIC_TIMEZONE=America/New_York
+      # Encryption key for stored credentials — set in .env (see .env.example).
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+    env_file: .env
+    volumes:
+      - n8n_data:/home/node/.n8n
+    restart: unless-stopped
+
+volumes:
+  n8n_data:

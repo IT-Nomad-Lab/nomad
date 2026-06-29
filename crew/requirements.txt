@@ -1,0 +1,11 @@
+# Pin loosely; verify latest compatible versions when building.
+crewai>=0.80
+litellm>=1.40            # crewai 1.x makes this an optional extra; needed so the
+                         # openai/<alias> models route through our LiteLLM proxy
+fastapi>=0.110
+uvicorn[standard]>=0.29
+notion-client>=2.2
+python-dotenv>=1.0
+requests>=2.31
+pyyaml>=6.0
+pydantic>=2.6

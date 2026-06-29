@@ -1,0 +1,63 @@
+[
+  {
+    "id": "nomadselfdevcron",
+    "name": "NOMAD Self-Dev Scheduler",
+    "active": false,
+    "nodes": [
+      {
+        "id": "sched1",
+        "name": "Daily 07:00",
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          420,
+          300
+        ],
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "field": "cronExpression",
+                "expression": "0 7 * * *"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "http1",
+        "name": "Run engineering backlog",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          680,
+          300
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "http://host.docker.internal:8001/run-backlog",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "{\"limit\": 3}",
+          "options": {}
+        }
+      }
+    ],
+    "connections": {
+      "Daily 07:00": {
+        "main": [
+          [
+            {
+              "node": "Run engineering backlog",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "settings": {
+      "executionOrder": "v1"
+    }
+  }
+]

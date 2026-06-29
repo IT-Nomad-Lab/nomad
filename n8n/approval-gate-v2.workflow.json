@@ -1,0 +1,573 @@
+[
+  {
+    "updatedAt": "2026-05-31T13:39:45.000Z",
+    "createdAt": "2026-05-31T13:10:59.055Z",
+    "id": "nomadgatev2clean",
+    "name": "NOMAD Approval Gate v2",
+    "description": null,
+    "active": true,
+    "isArchived": false,
+    "nodes": [
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "approval",
+          "responseMode": "responseNode",
+          "options": {}
+        },
+        "id": "node-webhook",
+        "name": "Approval request",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2,
+        "position": [
+          -368,
+          304
+        ],
+        "webhookId": "nomad-approval"
+      },
+      {
+        "parameters": {
+          "respondWith": "json",
+          "responseBody": "={\n  \"status\": \"pending\",\n  \"message\": \"NOMAD: approval request received; awaiting human decision.\",\n  \"action\": \"{{ $json.body.action }}\",\n  \"type\": \"{{ $json.body.type }}\"\n}",
+          "options": {}
+        },
+        "id": "node-respond",
+        "name": "Ack: pending",
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1.1,
+        "position": [
+          -144,
+          304
+        ]
+      },
+      {
+        "parameters": {
+          "resume": "webhook",
+          "options": {}
+        },
+        "id": "node-wait",
+        "name": "Wait for human approval",
+        "type": "n8n-nodes-base.wait",
+        "typeVersion": 1.1,
+        "position": [
+          80,
+          304
+        ],
+        "webhookId": "9d49837b-e44c-4dc5-86f7-dd5321716052"
+      },
+      {
+        "parameters": {
+          "mode": "expression",
+          "numberOutputs": 2,
+          "output": "={{ ( ($json.body && $json.body.decision) || $json.decision || $json.query && $json.query.decision ) === 'approved' ? 0 : 1 }}"
+        },
+        "id": "node-decision",
+        "name": "Approved?",
+        "type": "n8n-nodes-base.switch",
+        "typeVersion": 3,
+        "position": [
+          304,
+          304
+        ]
+      },
+      {
+        "parameters": {
+          "mode": "expression",
+          "numberOutputs": 7,
+          "output": "={{ ({'Send Email':0,'Merge to main':1,'External Invite':2,'Share File':3,'Publish':4,'Delete':5,'Spend':6})[$('Approval request').item.json.body.type] ?? 0 }}"
+        },
+        "id": "node-typeswitch",
+        "name": "Route by action type",
+        "type": "n8n-nodes-base.switch",
+        "typeVersion": 3,
+        "position": [
+          544,
+          192
+        ]
+      },
+      {
+        "parameters": {
+          "sendTo": "={{ $('Approval request').item.json.body.to }}",
+          "subject": "={{ $('Approval request').item.json.body.subject }}",
+          "emailType": "text",
+          "message": "={{ $('Approval request').item.json.body.body }}",
+          "options": {}
+        },
+        "id": "node-act-email",
+        "name": "Send Email (Gmail)",
+        "type": "n8n-nodes-base.gmail",
+        "typeVersion": 2.1,
+        "position": [
+          800,
+          -128
+        ],
+        "notesInFlow": true,
+        "webhookId": "8857d6b4-e6bb-477c-a420-e7f7fa0c0885",
+        "credentials": {
+          "gmailOAuth2": {
+            "id": "YOUR_GMAIL_CRED_ID",
+            "name": "Gmail account"
+          }
+        },
+        "notes": "Attach your Gmail OAuth2 credential. Sends only on the Approved branch."
+      },
+      {
+        "parameters": {
+          "method": "PUT",
+          "url": "=https://api.github.com/repos/{{ $('Approval request').item.json.body.owner }}/{{ $('Approval request').item.json.body.repo }}/pulls/{{ $('Approval request').item.json.body.pull_number }}/merge",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "githubApi",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ commit_title: ($('Approval request').item.json.body.action || 'Merged via NOMAD') }) }}",
+          "options": {},
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Accept",
+                "value": "application/vnd.github+json"
+              },
+              {
+                "name": "User-Agent",
+                "value": "NOMAD"
+              }
+            ]
+          }
+        },
+        "id": "node-act-merge",
+        "name": "Merge to main (GitHub)",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          800,
+          -48
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "=https://www.googleapis.com/calendar/v3/calendars/primary/events?sendUpdates=all",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "googleCalendarOAuth2Api",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ summary: $('Approval request').item.json.body.summary, start: { dateTime: $('Approval request').item.json.body.start }, end: { dateTime: $('Approval request').item.json.body.end }, attendees: ($('Approval request').item.json.body.attendees||'').split(',').map(e=>e.trim()).filter(Boolean).map(email=>({email})) }) }}",
+          "options": {}
+        },
+        "id": "node-act-invite",
+        "name": "Create event / invite (Calendar)",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          800,
+          48
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "=https://www.googleapis.com/drive/v3/files/{{ $('Approval request').item.json.body.file_id }}/permissions?sendNotificationEmail=true",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "googleDriveOAuth2Api",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ role: ($('Approval request').item.json.body.role||'reader'), type: 'user', emailAddress: $('Approval request').item.json.body.email }) }}",
+          "options": {}
+        },
+        "id": "node-act-share",
+        "name": "Share file (Drive)",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          800,
+          128
+        ]
+      },
+      {
+        "parameters": {},
+        "id": "node-act-publish",
+        "name": "TODO: Publish",
+        "type": "n8n-nodes-base.noOp",
+        "typeVersion": 1,
+        "position": [
+          800,
+          208
+        ]
+      },
+      {
+        "parameters": {},
+        "id": "node-act-delete",
+        "name": "TODO: Delete",
+        "type": "n8n-nodes-base.noOp",
+        "typeVersion": 1,
+        "position": [
+          800,
+          288
+        ]
+      },
+      {
+        "parameters": {},
+        "id": "node-act-spend",
+        "name": "TODO: Spend (e.g. Firefly)",
+        "type": "n8n-nodes-base.noOp",
+        "typeVersion": 1,
+        "position": [
+          800,
+          368
+        ]
+      },
+      {
+        "parameters": {},
+        "id": "node-rejected",
+        "name": "Rejected: no action taken",
+        "type": "n8n-nodes-base.noOp",
+        "typeVersion": 1,
+        "position": [
+          544,
+          464
+        ]
+      },
+      {
+        "parameters": {
+          "content": "## NOMAD Approval Gate\n\nThe crew's `request_approval` POSTs here (path **/webhook/approval**) with `{ approval_id, action, type, context, requested_by }` and a Notion Approvals row is already created (Status = Pending).\n\n**Flow:** receive \u2192 ack pending \u2192 **Wait (pauses execution)** \u2192 decision \u2192 route by action type \u2192 execute.\n\nNothing irreversible runs before the Wait node resumes. This is the safety valve.",
+          "height": 260,
+          "width": 420
+        },
+        "id": "note-overview",
+        "name": "Note: overview",
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -384,
+          0
+        ]
+      },
+      {
+        "parameters": {
+          "content": "### Approve / Reject\n\nThe **Wait** node resumes when its **resume URL** is called. Call it with a body/query `decision=approved` or `decision=rejected`.\n\n**To wire \"approve from Notion / phone\":** add a node BEFORE Wait that notifies you with the resume URL \u2014 e.g. Gmail/Slack/Telegram `Send and wait`, or write `{{$execution.resumeUrl}}?decision=approved` into the Notion Approvals row. Then approving simply calls that URL.",
+          "height": 260,
+          "width": 360
+        },
+        "id": "note-approve",
+        "name": "Note: approve/reject",
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          48,
+          0
+        ]
+      },
+      {
+        "parameters": {
+          "content": "### Replace these TODO placeholders\n\nEach NoOp is where the **real action** goes, on the **Approved** branch only. Add the credentialed node (Gmail: Send, GitHub: Merge PR, Calendar invite, Drive share, etc.) after the matching output, then a Notion node to set the Approvals row Status and append to the Activity Log.\n\n**Guardrail:** never place a send/merge/publish/spend node before the Wait node.",
+          "height": 280,
+          "width": 380
+        },
+        "id": "note-actions",
+        "name": "Note: actions",
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          784,
+          -256
+        ]
+      },
+      {
+        "parameters": {
+          "resource": "message",
+          "operation": "send",
+          "sendTo": "you@example.com",
+          "subject": "=NOMAD approval needed: {{ $('Approval request').item.json.body.action }}",
+          "emailType": "html",
+          "message": "=<p><b>NOMAD needs your approval.</b></p><p><b>Action:</b> {{ $('Approval request').item.json.body.action }}<br><b>Type:</b> {{ $('Approval request').item.json.body.type }}<br><b>Requested by:</b> {{ $('Approval request').item.json.body.requested_by }}</p><pre>{{ $('Approval request').item.json.body.context }}</pre><p><a href=\"{{ $execution.resumeUrl }}&decision=approved\">&#9989; APPROVE</a> &nbsp;&nbsp;|&nbsp;&nbsp; <a href=\"{{ $execution.resumeUrl }}&decision=rejected\">&#10060; REJECT</a></p>",
+          "options": {}
+        },
+        "id": "node-notify",
+        "name": "Notify approver (Gmail)",
+        "type": "n8n-nodes-base.gmail",
+        "typeVersion": 2.1,
+        "position": [
+          -30,
+          470
+        ],
+        "notesInFlow": true,
+        "notes": "Emails the owner Approve/Reject links (signed resumeUrl). Runs before the Wait.",
+        "credentials": {
+          "gmailOAuth2": {
+            "id": "YOUR_GMAIL_CRED_ID",
+            "name": "Gmail account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "method": "PATCH",
+          "url": "=https://api.notion.com/v1/pages/{{ $('Approval request').item.json.body.approval_id }}",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "notionApi",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ properties: { Status: { select: { name: 'Approved' } } } }) }}",
+          "options": {}
+        },
+        "id": "node-notion-approved",
+        "name": "Mark Approved (Notion)",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          400,
+          120
+        ],
+        "credentials": {
+          "notionApi": {
+            "id": "YOUR_NOTION_CRED_ID",
+            "name": "Notion account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.notion.com/v1/pages",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "notionApi",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ parent: { database_id: 'YOUR_NOTION_DATABASE_ID' }, properties: {  Action: { title: [ { text: { content: ('Approved & executed: ' + ($('Approval request').item.json.body.action || 'action')).slice(0,200) } } ] },  Agent: { select: { name: ($('Approval request').item.json.body.requested_by || 'Comms') } },  Timestamp: { date: { start: $now.toISO() } },  Detail: { rich_text: [ { text: { content: ($('Approval request').item.json.body.context || '').slice(0,1900) } } ] } } }) }}",
+          "options": {}
+        },
+        "id": "node-notion-log",
+        "name": "Log to Activity (Notion)",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          560,
+          120
+        ],
+        "credentials": {
+          "notionApi": {
+            "id": "YOUR_NOTION_CRED_ID",
+            "name": "Notion account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "method": "PATCH",
+          "url": "=https://api.notion.com/v1/pages/{{ $('Approval request').item.json.body.approval_id }}",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "notionApi",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ properties: { Status: { select: { name: 'Rejected' } } } }) }}",
+          "options": {}
+        },
+        "id": "node-notion-rejected",
+        "name": "Mark Rejected (Notion)",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          400,
+          470
+        ],
+        "credentials": {
+          "notionApi": {
+            "id": "YOUR_NOTION_CRED_ID",
+            "name": "Notion account"
+          }
+        }
+      }
+    ],
+    "connections": {
+      "Approval request": {
+        "main": [
+          [
+            {
+              "node": "Ack: pending",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Ack: pending": {
+        "main": [
+          [
+            {
+              "node": "Notify approver (Gmail)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Wait for human approval": {
+        "main": [
+          [
+            {
+              "node": "Approved?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Approved?": {
+        "main": [
+          [
+            {
+              "node": "Mark Approved (Notion)",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Mark Rejected (Notion)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Route by action type": {
+        "main": [
+          [
+            {
+              "node": "Send Email (Gmail)",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Merge to main (GitHub)",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Create event / invite (Calendar)",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Share file (Drive)",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "TODO: Publish",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "TODO: Delete",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "TODO: Spend (e.g. Firefly)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Notify approver (Gmail)": {
+        "main": [
+          [
+            {
+              "node": "Wait for human approval",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Mark Approved (Notion)": {
+        "main": [
+          [
+            {
+              "node": "Log to Activity (Notion)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Log to Activity (Notion)": {
+        "main": [
+          [
+            {
+              "node": "Route by action type",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Mark Rejected (Notion)": {
+        "main": [
+          [
+            {
+              "node": "Rejected: no action taken",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "settings": {
+      "executionOrder": "v1",
+      "binaryMode": "separate",
+      "timeSavedMode": "fixed",
+      "callerPolicy": "workflowsFromSameOwner",
+      "availableInMCP": true
+    },
+    "staticData": null,
+    "meta": {
+      "templateCredsSetupCompleted": true
+    },
+    "pinData": {},
+    "versionId": "89a75dac-aa6c-4887-942f-2ed02816c41e",
+    "activeVersionId": "89a75dac-aa6c-4887-942f-2ed02816c41e",
+    "versionCounter": 6,
+    "triggerCount": 1,
+    "tags": [],
+    "shared": [
+      {
+        "updatedAt": "2026-05-31T13:10:59.059Z",
+        "createdAt": "2026-05-31T13:10:59.059Z",
+        "role": "workflow:owner",
+        "workflowId": "nomadgatev2clean",
+        "projectId": "jkFKdcc0c38SAYQm",
+        "project": {
+          "updatedAt": "2026-05-31T10:26:57.550Z",
+          "createdAt": "2026-05-31T10:23:36.613Z",
+          "id": "jkFKdcc0c38SAYQm",
+          "name": "NOMAD operator",
+          "type": "personal",
+          "icon": null,
+          "description": null,
+          "creatorId": "f2f82071-89aa-4534-9f62-331ca7a77df1"
+        }
+      }
+    ],
+    "versionMetadata": {
+      "name": "Version 882c478d",
+      "description": ""
+    }
+  }
+]

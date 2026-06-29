@@ -1,0 +1,36 @@
+# ── internal planning docs (not for public release) ────────────────
+docs/
+
+# ── secrets (NEVER commit) ──────────────────────────────────────────
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# ── python ──────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# ── node / frontend ─────────────────────────────────────────────────
+node_modules/
+
+# ── local data / runtime state ──────────────────────────────────────
+*.log
+*.sqlite
+*.db
+.DS_Store
+
+# ── n8n local runtime (encryption key lives here) ───────────────────
+n8n/.n8n/
+
+# termd websocket service venv
+dispatcher/.venv-term/
+
+# local MCP servers venv
+mcp-local/.venv/

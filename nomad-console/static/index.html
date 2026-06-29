@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NOMAD · Command Console</title>
+  <link rel="manifest" href="/static/manifest.json">
+  <meta name="theme-color" content="#ffb000">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="NOMAD">
+  <link rel="apple-touch-icon" href="/static/icon-192.png">
+  <link rel="icon" type="image/png" href="/static/icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Antonio:wght@400;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/lcars.css">
+  <link rel="stylesheet" href="/static/vendor/xterm.css">
+</head>
+<body>
+<div id="frame">
+
+  <!-- top bar -->
+  <header id="topbar">
+    <div class="elbow"></div>
+    <div class="title">NOMAD<span class="sub">NETWORKED OPERATIONS &amp; MANAGEMENT ASSISTANT FOR DECISIONS</span></div>
+    <div class="readout">
+      <span class="lab">STARDATE</span><span id="stardate">—</span>
+      <span class="lab">UTC</span><span id="clock">—</span>
+    </div>
+    <div id="alert" class="alert nominal">● NOMINAL</div>
+  </header>
+
+  <div id="body">
+
+    <!-- decorative LCARS rail -->
+    <nav id="rail">
+      <div class="rail-cap"></div>
+      <div class="rail-btn c-amber">LCARS</div>
+      <div class="rail-btn c-orange">01·OPS</div>
+      <div class="rail-btn c-blue">02·INTEL</div>
+      <div class="rail-btn c-purple">03·CREW</div>
+      <div class="rail-btn c-amber">04·SYS</div>
+      <div class="rail-fill"></div>
+      <div class="rail-btn c-orange" id="rail-uptime">UP —</div>
+      <div class="rail-btn c-blue">NCC·1701</div>
+    </nav>
+
+    <!-- dashboard -->
+    <main id="dash">
+      <section class="panel span2">
+        <h2 class="c-orange">SYSTEMS ONLINE</h2>
+        <div class="pbody" id="systems"><div class="muted">scanning…</div></div>
+      </section>
+
+      <section class="panel">
+        <h2 class="c-amber">CORE TELEMETRY</h2>
+        <div class="pbody" id="telemetry"><div class="muted">…</div></div>
+      </section>
+
+      <section class="panel">
+        <h2 class="c-blue">GPU · RTX 5090</h2>
+        <div class="pbody" id="gpu"><div class="muted">…</div></div>
+      </section>
+
+      <section class="panel">
+        <h2 class="c-orange">PROJECTS</h2>
+        <div class="pbody scroll" id="projects"><div class="muted">…</div></div>
+      </section>
+
+      <section class="panel">
+        <h2 class="c-purple">AGENT ROSTER</h2>
+        <div class="pbody scroll" id="agents"><div class="muted">…</div></div>
+      </section>
+
+      <section class="panel">
+        <h2 class="c-purple">ENGINEERING CREW <span id="builder-stat" class="tag off">BUILDER —</span></h2>
+        <div class="pbody scroll" id="devteam"><div class="muted">…</div></div>
+      </section>
+
+      <section class="panel">
+        <h2 class="c-blue">MISSION LOG</h2>
+        <div class="pbody scroll" id="activity"><div class="muted">…</div></div>
+      </section>
+
+      <section class="panel" id="p-approvals">
+        <h2 class="c-red">APPROVAL QUEUE</h2>
+        <div class="pbody scroll" id="approvals"><div class="muted">…</div></div>
+      </section>
+    </main>
+
+    <!-- NOMAD comms / chat -->
+    <aside id="comms">
+      <h2 class="c-amber">NOMAD // COMMS</h2>
+      <div id="chatlog"></div>
+      <div id="chatbar">
+        <select id="model" title="reasoning core">
+          <option value="deep">DEEP · Opus</option>
+          <option value="balanced">BALANCED · Sonnet</option>
+          <option value="fast">FAST · local</option>
+          <option value="gpt">GPT</option>
+          <option value="longdoc">LONGDOC · Gemini</option>
+        </select>
+        <button id="mic" title="push to talk (local Whisper)" aria-label="Microphone">
+          <svg viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="17" x2="12" y2="21"/><line x1="8" y1="21" x2="16" y2="21"/></svg>
+        </button>
+        <button id="wake" title="always-on wake word: say “Hey Jarvis …”" class="off" aria-label="Wake word">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="2"/><path d="M8.5 8.8a5 5 0 0 0 0 6.4"/><path d="M15.5 8.8a5 5 0 0 1 0 6.4"/><path d="M6 6a9 9 0 0 0 0 12"/><path d="M18 6a9 9 0 0 1 0 12"/></svg>
+        </button>
+        <button id="tts" title="spoken replies (local Piper voice)" class="off" aria-label="Speaker">
+          <svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5.5a9 9 0 0 1 0 13"/></svg>
+        </button>
+      </div>
+      <form id="chatform" autocomplete="off">
+        <input id="chatin" placeholder="Address NOMAD…" autocomplete="off">
+        <button type="submit" id="send">SEND</button>
+      </form>
+    </aside>
+
+  </div>
+</div>
+
+<!-- PROJECT WORKSPACE: full interactive claude session in the selected repo (PTY over WS) -->
+<div id="workspace" class="ws-hidden">
+  <header id="ws-bar">
+    <span class="ws-title">PROJECT WORKSPACE</span>
+    <span id="ws-project" class="ws-project">—</span>
+    <span id="ws-status" class="ws-status">●</span>
+    <span class="ws-spacer"></span>
+    <button id="ws-reconnect" title="reconnect the session">RECONNECT</button>
+    <button id="ws-close" title="close (the claude session keeps running)">✕ CLOSE</button>
+  </header>
+  <div id="ws-term"></div>
+</div>
+
+<script src="/static/vendor/xterm.js"></script>
+<script src="/static/vendor/addon-fit.js"></script>
+<script src="/static/workspace.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

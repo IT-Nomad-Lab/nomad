@@ -1,0 +1,64 @@
+[
+  {
+    "id": "nomadv2send",
+    "name": "NOMAD v2 Send",
+    "active": false,
+    "nodes": [
+      {
+        "id": "wh",
+        "name": "v2-send",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2,
+        "position": [
+          420,
+          300
+        ],
+        "webhookId": "v2-send",
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "v2-send",
+          "responseMode": "onReceived"
+        }
+      },
+      {
+        "id": "gm",
+        "name": "Gmail Send",
+        "type": "n8n-nodes-base.gmail",
+        "typeVersion": 2,
+        "position": [
+          680,
+          300
+        ],
+        "parameters": {
+          "sendTo": "={{ $json.body.to }}",
+          "subject": "={{ $json.body.subject }}",
+          "emailType": "text",
+          "message": "={{ $json.body.body }}",
+          "options": {}
+        },
+        "credentials": {
+          "gmailOAuth2": {
+            "id": "YOUR_GMAIL_CRED_ID",
+            "name": "Gmail account"
+          }
+        }
+      }
+    ],
+    "connections": {
+      "v2-send": {
+        "main": [
+          [
+            {
+              "node": "Gmail Send",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "settings": {
+      "executionOrder": "v1"
+    }
+  }
+]

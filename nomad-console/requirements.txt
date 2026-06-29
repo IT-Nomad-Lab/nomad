@@ -1,0 +1,6 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+httpx>=0.27
+psutil>=5.9
+notion-client>=3.0
+websockets>=13      # /ws/terminal proxy → native PTY daemon (interactive project terminal)

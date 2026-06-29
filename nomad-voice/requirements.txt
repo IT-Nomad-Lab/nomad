@@ -1,0 +1,7 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+python-multipart>=0.0.9
+faster-whisper>=1.0
+piper-tts==1.2.0
+openwakeword>=0.6      # local always-on wake word ('hey jarvis'); free, no account (Porcupine replacement)
+onnxruntime>=1.16      # openWakeWord inference backend

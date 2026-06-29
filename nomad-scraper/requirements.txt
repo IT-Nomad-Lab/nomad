@@ -1,0 +1,4 @@
+scrapegraphai>=1.27,<2
+ddgs>=9.0          # SearchGraph's duckduckgo dep was renamed duckduckgo-search → ddgs
+fastapi>=0.110
+uvicorn[standard]>=0.27
