@@ -31,6 +31,46 @@ Capture → Clarify → Route → Process → Human Gate → Execute → Log & L
 - **Execute → Log & Learn** — on approval the action runs, then a provenance record is written
   back so future routing is informed by past outcomes.
 
+## Working model — one platform, many projects
+
+NOMAD is the **hub**; each of my projects is a **spoke** that *consumes* the platform's services
+without owning them.
+
+```
+        ┌──────────────────────────────┐
+        │   NOMAD platform (this repo)  │   ← single owner of all services,
+        │   engine · gateway · gate ·   │     resources, and the approval gate
+        │   MCP tools · voice · memory  │
+        └──────────────┬───────────────┘
+            read-only capabilities, declared per project
+       ┌────────────┬──┴───────────┬────────────┐
+   project-a/    project-b/     project-c/    …            ← my projects, one folder in WSL2
+   Nomad.md      Nomad.md       Nomad.md                     each carries a Nomad.md marker
+```
+
+In practice:
+
+- **All projects live in one folder under WSL2**, each its own git repo. I work on one at a time
+  by opening **its own VS Code window** in WSL — normal per-project editing, with Claude Code /
+  agents scoped to that repo.
+- **Every project carries a [`Nomad.md`](Nomad.md) marker** at its root. It declares the project
+  to the platform (name, status, lane, stack) **and** documents which NOMAD capabilities the
+  project may use and how to reach them (the LiteLLM gateway, the v2 engine, the MCP tools, the
+  approval gate, voice, memory…). Drop a `Nomad.md` into any repo and it joins the platform.
+- **NOMAD discovers projects from those markers.**
+  [`nomad-console/sync_projects.py`](nomad-console/sync_projects.py) scans the project roots,
+  reads each `Nomad.md`, and upserts it into mission control — so the cockpit/console shows every
+  project's status in one place. *(The status UI is a work in progress.)*
+- **It's a read-only / centralized model.** Projects **use** NOMAD's capabilities but never
+  **modify** them. This repo is the single source of truth for the platform: all services,
+  resources, and the gate live and change here. A project can *call* NOMAD; it can't reconfigure
+  it.
+- **Updates flow one way.** When the platform changes, I refresh the `Nomad.md` files in the
+  projects so each one's declared capabilities stay in sync with what NOMAD actually offers.
+
+> The `Nomad.md` in *this* repo is NOMAD describing itself; the same marker in a consumer repo
+> describes that project plus the platform surface it's allowed to use.
+
 ## Repository map
 
 | Path | What it is | Docs |
