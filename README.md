@@ -1,5 +1,11 @@
-# Project NOMAD — Starter Kit
-**Networked Operations & Management Assistant for Decisions**
+<p align="center">
+  <img src="assets/nomad-logo.png" alt="NOMAD logo" width="160">
+</p>
+
+<h1 align="center">Project NOMAD</h1>
+<p align="center"><b>Networked Operations &amp; Management Assistant for Decisions</b></p>
+
+---
 
 Your personal AI orchestrator + autonomous agent team. This folder is the runnable
 skeleton of the architecture in `NOMAD_Orchestrator_Architecture.md`.
