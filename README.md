@@ -4,6 +4,10 @@
 Your personal AI orchestrator + autonomous agent team. This folder is the runnable
 skeleton of the architecture in `NOMAD_Orchestrator_Architecture.md`.
 
+## Architecture
+
+![NOMAD architecture — hardware, remote access, user interfaces, the human-gated mission pipeline, the Claude Agent SDK team, model/memory/control planes, MCP integrations, and n8n automation](assets/nomad-architecture.png)
+
 ```
 nomad/
 ├─ docker-compose.yml      # the whole stack
