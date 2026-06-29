@@ -7,115 +7,120 @@
 
 ---
 
-Your personal AI orchestrator + autonomous agent team. This folder is the runnable
-skeleton of the architecture in `NOMAD_Orchestrator_Architecture.md`.
+NOMAD is a personal AI orchestrator plus an autonomous multi-agent team that runs projects
+end-to-end. A manager agent delegates to lane specialists (comms, research, dev, support, ads)
+who work across email, calendar, docs, code, web, and image generation. **Agents act
+autonomously on anything reversible but pause for human approval on irreversible/external
+actions** — send email, merge to main, publish, share externally, spend, delete.
 
 ## Architecture
 
 ![NOMAD architecture — hardware, remote access, user interfaces, the human-gated mission pipeline, the Claude Agent SDK team, model/memory/control planes, MCP integrations, and n8n automation](assets/nomad-architecture.png)
 
+The orchestration is an **explicit state machine** (the "mission pipeline"):
+
 ```
-nomad/
-├─ docker-compose.yml      # the whole stack
-├─ .env.example            # copy to .env and fill in
-├─ litellm/config.yaml     # model routing (role aliases → real models)
-├─ notion/
-│  ├─ schema.md            # the 7 Mission-Control databases
-│  └─ setup_notion.py      # creates them via the Notion API
-└─ crew/                   # the CrewAI agent team
-   ├─ agents.yaml          # manager + specialists
-   ├─ tasks.yaml           # one milestone-execution pass
-   ├─ crew.py              # builds & runs the crew
-   ├─ server.py            # HTTP trigger for n8n
-   ├─ tools/notion_tools.py   # shared memory + approval gate
-   └─ tools/firefly_tool.py   # Adobe Firefly image generation
+Capture → Clarify → Route → Process → Human Gate → Execute → Log & Learn
 ```
 
-## What runs where (after `docker compose up -d`)
+- **Capture/Clarify/Route** — a goal enters, is clarified, and is routed to a lane specialist.
+- **Process** — the specialist drafts an action proposal (research-lane Process can ground the
+  draft in live web data first; that fetch is read-only and pre-gate).
+- **Human Gate** — the run **pauses**. Nothing irreversible runs until a human approves. Resume
+  is push-based (Postgres `LISTEN/NOTIFY` ~0.2s) with a poller as a fail-open backup.
+- **Execute → Log & Learn** — on approval the action runs, then a provenance record is written
+  back so future routing is informed by past outcomes.
+
+## Repository map
+
+| Path | What it is | Docs |
+|---|---|---|
+| [`v2/`](v2/) | **The v2 pipeline engine** — state machine, lane specialists, skills, MCP tools, tests | [README](v2/README.md) |
+| [`nomad-console/`](nomad-console/) | Operator dashboard (LCARS UI): telemetry, projects, agents, chat, voice | [README](nomad-console/README.md) |
+| [`crew/`](crew/) | v1 CrewAI agent team + the engineering crew that builds NOMAD itself | [README](crew/README.md) |
+| [`dispatcher/`](dispatcher/) | Builder handoff (headless Claude Code in a repo) + interactive terminal daemon | [README](dispatcher/README.md) |
+| [`mcp-local/`](mcp-local/) | Local MCP servers (local-LLM bridge, scraper, image gen) | [README](mcp-local/README.md) |
+| [`nomad-plugin/`](nomad-plugin/) | NOMAD packaged as a Claude Code plugin (agents + skills + MCP + hooks) | [README](nomad-plugin/README.md) |
+| [`nomad-voice/`](nomad-voice/) | On-device speech: Piper TTS + faster-whisper STT | [README](nomad-voice/README.md) |
+| [`nomad-scraper/`](nomad-scraper/) | LLM-driven web scrape/search (ScrapeGraphAI) | [README](nomad-scraper/README.md) |
+| [`claude-bridge/`](claude-bridge/) | OpenAI-compatible shim that answers via the local `claude` CLI | [README](claude-bridge/README.md) |
+| [`litellm/`](litellm/) | Model-gateway routing config (role aliases → real models) | [README](litellm/README.md) |
+| [`n8n/`](n8n/) | Automation + approval-gate workflow templates | [README](n8n/README.md) |
+| [`notion/`](notion/) | Optional Notion mission-control schema + setup (rollback/mirror data layer) | [README](notion/README.md) |
+
+Companion docs: **[CLAUDE.md](CLAUDE.md)** (context for AI coding agents) ·
+**[AGENTS.md](AGENTS.md)** (build/test/guardrail rules) ·
+**[NOMAD_Orchestrator_Architecture.md](NOMAD_Orchestrator_Architecture.md)** (full design).
+
+## The stack
+
+| Layer | Tech |
+|---|---|
+| Engine / services | Python 3.11 · FastAPI · uvicorn |
+| Orchestration | Docker Compose |
+| Data / control plane | Postgres + NocoDB (mission control: projects, goals, milestones, tasks, activity, approvals, knowledge) |
+| Memory | Qdrant (semantic recall) |
+| Model gateway | LiteLLM (role aliases: `deep` `balanced` `gpt` `longdoc` `fast` `private` `code`) |
+| Local models | Ollama (on the GPU) |
+| Automation / gates | n8n |
+| Chat UI | Open WebUI (chat · voice · mobile PWA) |
+
+> **Models are addressed by role alias, never by raw model name.** Swap the underlying model in
+> [`litellm/config.yaml`](litellm/config.yaml) only. Cloud aliases fall back to a local Ollama
+> model, so NOMAD never goes dark if a provider is throttled or offline.
+
+## Quick start
+
+```bash
+cp .env.example .env          # then fill in keys — see the comments in the file
+docker compose up -d          # bring up the whole stack
+
+# Or just the v2 engine (cockpit + API at 127.0.0.1:8099):
+docker compose up -d nomad-v2-engine
+```
+
+Key local endpoints once up:
 
 | Service | URL | Purpose |
 |---|---|---|
-| Open WebUI (chat/voice/mobile) | http://localhost:3000 | Talk to every model |
-| LiteLLM gateway | http://localhost:4000 | The router (all brains) |
-| n8n (automation + gates) | http://localhost:5678 | Integrations & approvals |
-| Crew API | http://localhost:8001 | Trigger the agent team |
-| Ollama | http://localhost:11434 | Local models |
+| v2 engine / cockpit | http://127.0.0.1:8099 | The mission pipeline + human gate |
+| Operator console (LCARS) | http://127.0.0.1:1701 | Telemetry, projects, chat, voice |
+| Open WebUI | http://localhost:3000 | Talk to every model |
+| LiteLLM gateway | http://localhost:4000 | The model router |
+| n8n | http://localhost:5678 | Integrations & approval gate |
+| NocoDB | http://localhost:8095 | Mission-control data |
 | Qdrant | http://localhost:6333 | Vector memory |
 
----
-
-## Setup, step by step
-
-### 0. Prerequisites
-- Docker Desktop with the **NVIDIA GPU** integration enabled (so Ollama sees your RTX 5090).
-- API keys ready: Anthropic, OpenAI, Gemini, Adobe (client id/secret), a Notion
-  integration token, a GitHub PAT.
-- `cp .env.example .env` and fill everything in. Invent a long `LITELLM_MASTER_KEY`.
-
-### 1. Local models
-```bash
-docker compose up -d ollama
-docker exec -it nomad-ollama ollama pull qwen3.6:8b
-docker exec -it nomad-ollama ollama pull qwen3.6:27b
-docker exec -it nomad-ollama ollama pull qwen2.5-coder:32b
-```
-> Verify the exact tags on https://ollama.com/library — names evolve. Update both
-> the pulls and `litellm/config.yaml` to match.
-
-### 2. The gateway + chat
-```bash
-docker compose up -d litellm openwebui
-```
-Open http://localhost:3000. You should see the role models (deep, fast, code…) in
-the dropdown. Try one of each to confirm routing works.
-
-### 3. Notion mission control
-```bash
-pip install notion-client python-dotenv
-python notion/setup_notion.py
-```
-Paste the printed database IDs into `.env`. (First create a Notion integration at
-notion.so/my-integrations and share your parent page with it.)
-
-### 4. Automation + gates (n8n)
-```bash
-docker compose up -d n8n
-```
-At http://localhost:5678, add credentials for Gmail, Google Calendar, Drive, Notion,
-and GitHub. Build the **approval-gate** workflow: a webhook the crew calls for a
-high-stakes action → a *Wait* node that pauses for your approval (email/Notion/
-mobile) → execute on approve.
-
-### 5. The agent crew
-```bash
-docker compose up -d crew
-curl -X POST http://localhost:8001/run-milestone \
-  -H "Content-Type: application/json" \
-  -d '{"goal":"Launch the landing page","criteria":"Live, mobile-friendly, passes SEO check","milestone":"Draft copy and hero image"}'
-```
-Watch tasks appear in Notion and actions land in the Activity Log.
-
-### 6. Mobile + remote
-Install Tailscale on the laptop and your phone. Open WebUI installs as a PWA from
-your laptop's Tailscale address — NOMAD in your pocket, securely.
-
----
+See each module's README for service-specific setup. v2 tests are plain Python scripts (no
+pytest harness) — see [`v2/README.md`](v2/README.md) and [`AGENTS.md`](AGENTS.md).
 
 ## How autonomy + approvals work
-- Agents act freely on anything reversible (Notion, research, drafts, GitHub
-  branches/PRs, internal calendar blocks).
-- For irreversible actions (external email, merge to main, publish, share, spend),
-  an agent calls `request_approval` → a **Pending** row in the Approvals DB → you
-  approve from Notion or your phone → n8n executes it. Nothing risky happens
-  without your tap.
-- Promote trusted action-types to "auto" later by relaxing the n8n gate.
+
+- Agents act freely on anything **reversible** (drafts, research, internal notes, uncommitted
+  code edits, mission-control updates).
+- For **irreversible/external** actions the run pauses at the **Human Gate**. The operator
+  approves/rejects (in the cockpit, in NocoDB, or via a signed email link from n8n) → only then
+  does Execute run. **Defense in depth:** a Claude Code harness hook (`.claude/hooks/guard.py`)
+  independently guards irreversible Execute actions even if the app-layer gate is bypassed.
+- Trusted action-types can be promoted toward auto later by relaxing the gate — deliberately, per
+  type.
 
 ## Security
-- Real secrets live only in `.env` (git-ignore it). Never commit keys.
-- Keep services on localhost / Tailscale; don't expose ports to the public internet.
 
-## Things to verify before production
-- Exact model strings in `litellm/config.yaml` against current provider docs.
-- Firefly endpoint paths/payloads in `crew/tools/firefly_tool.py` against the
-  current Firefly API version.
-- Ollama model tags against ollama.com/library.
+- Real secrets live only in `.env` (git-ignored). Never commit keys. The committed
+  `.env.example` and n8n workflow JSONs contain only placeholders.
+- Keep services on `localhost` / Tailscale; don't expose ports to the public internet. The
+  console binds to `127.0.0.1` and fails closed (requires Basic Auth) for any proxied/tunnelled
+  request.
+
+## Status & caveats
+
+NOMAD is a personal/operator project, not a turnkey product. Before relying on it, verify:
+
+- Exact model strings in [`litellm/config.yaml`](litellm/config.yaml) against current provider docs.
+- Ollama model tags against [ollama.com/library](https://ollama.com/library) (tags drift).
+- That you've wired credentials into the n8n approval-gate nodes (the JSONs ship as templates).
+
+## License
+
+[MIT](LICENSE) © 2026 Josias De Lima — ITNomadLab.
