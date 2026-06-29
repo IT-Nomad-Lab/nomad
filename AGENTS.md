@@ -38,7 +38,6 @@ python3 v2/test_engine.py          # gate pauses; only the approved path execute
 python3 v2/test_engine_states.py   # engine state-machine transitions
 python3 v2/test_2a.py              # multi-specialist routing + research-lane gate
 python3 v2/test_3c.py              # Phase 3 checks
-python3 v2/test_income_lab.py      # Income Lab data layer end-to-end (creates + cleans up its own rows)
 
 # Static checks safe for the dispatcher /verify (no mutation, no network):
 python3 -m py_compile v2/server.py v2/engine.py   # compile-check changed modules
