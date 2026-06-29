@@ -1,0 +1,17 @@
+[Unit]
+Description=NOMAD local image generation (ComfyUI on the RTX 5090)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# %h = the user's home. Adjust if you cloned ComfyUI elsewhere (COMFYUI_DIR in install_comfyui.sh).
+WorkingDirectory=%h/ComfyUI
+# --listen 0.0.0.0 so the v2 engine container can reach it via host.docker.internal:8188.
+# WSL2 is NAT'd (not on the LAN); ComfyUI has no auth, so keep this box's firewall closed.
+ExecStart=%h/ComfyUI/venv/bin/python %h/ComfyUI/main.py --listen 0.0.0.0 --port 8188
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -83,6 +83,7 @@ In practice:
 | [`nomad-plugin/`](nomad-plugin/) | NOMAD packaged as a Claude Code plugin (agents + skills + MCP + hooks) | [README](nomad-plugin/README.md) |
 | [`nomad-voice/`](nomad-voice/) | On-device speech: Piper TTS + faster-whisper STT | [README](nomad-voice/README.md) |
 | [`nomad-scraper/`](nomad-scraper/) | LLM-driven web scrape/search (ScrapeGraphAI) | [README](nomad-scraper/README.md) |
+| [`nomad-image/`](nomad-image/) | Local ComfyUI image-generation host service (RTX GPU) + install scripts | [README](nomad-image/README.md) |
 | [`claude-bridge/`](claude-bridge/) | OpenAI-compatible shim that answers via the local `claude` CLI | [README](claude-bridge/README.md) |
 | [`litellm/`](litellm/) | Model-gateway routing config (role aliases → real models) | [README](litellm/README.md) |
 | [`n8n/`](n8n/) | Automation + approval-gate workflow templates | [README](n8n/README.md) |
