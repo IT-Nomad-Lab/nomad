@@ -97,7 +97,7 @@ services:
       # ── image generation (gated): local ComfyUI first, then OpenAI, then Adobe Firefly ──
       - NOMAD_IMAGE_PROVIDER=comfyui,openai,firefly
       - COMFYUI_URL=http://host.docker.internal:8188                      # local ComfyUI on the host GPU
-      - COMFYUI_MODEL=sdxl                                                # sdxl (reliable) | flux (FLUX.1 schnell)
+      - COMFYUI_MODEL=flux2                                               # sdxl (reliable) | flux (FLUX.1 schnell) | flux2 (FLUX.2 dev, best quality, non-commercial) | qwen (best text, Apache-2.0)
       - OPENAI_IMAGE_MODEL=gpt-image-1                                    # OpenAI Images (uses OPENAI_API_KEY)
       - NOMAD_IMAGE_DIR=/app/generated_images
     volumes:

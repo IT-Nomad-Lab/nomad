@@ -53,9 +53,21 @@ DISPATCH_URL = os.environ.get("NOMAD_DISPATCH_URL", "http://host.docker.internal
 
 # ── ComfyUI (local) ────────────────────────────────────────────────────────────────
 COMFYUI_URL = os.environ.get("COMFYUI_URL", "http://host.docker.internal:8188").rstrip("/")
-COMFYUI_MODEL = os.environ.get("COMFYUI_MODEL", "sdxl").lower()   # sdxl | flux | qwen
+COMFYUI_MODEL = os.environ.get("COMFYUI_MODEL", "sdxl").lower()   # sdxl | flux | flux2 | qwen
 COMFYUI_SDXL_CKPT = os.environ.get("COMFYUI_SDXL_CKPT", "sd_xl_base_1.0.safetensors")
 COMFYUI_FLUX_CKPT = os.environ.get("COMFYUI_FLUX_CKPT", "flux1-schnell-fp8.safetensors")
+# FLUX.2 [dev] is split: DiT (diffusion_models) + Mistral-3 text encoder + VAE. Best quality +
+# prompt adherence of the local models (closest local step toward gpt-image-1). Guidance-distilled,
+# so real CFG stays 1.0 and prompt strength rides a FluxGuidance node. ⚠ non-commercial license
+# (FLUX [dev]) — use Qwen (Apache-2.0) for anything commercial. Node/type names can drift by ComfyUI
+# version, so the CLIP `type` and the latent node class are env-overridable.
+COMFYUI_FLUX2_UNET = os.environ.get("COMFYUI_FLUX2_UNET", "flux2_dev_fp8mixed.safetensors")
+COMFYUI_FLUX2_CLIP = os.environ.get("COMFYUI_FLUX2_CLIP", "mistral_3_small_flux2_bf16.safetensors")
+COMFYUI_FLUX2_VAE = os.environ.get("COMFYUI_FLUX2_VAE", "flux2-vae.safetensors")
+COMFYUI_FLUX2_CLIP_TYPE = os.environ.get("COMFYUI_FLUX2_CLIP_TYPE", "flux2")
+COMFYUI_FLUX2_LATENT = os.environ.get("COMFYUI_FLUX2_LATENT", "EmptyFlux2LatentImage")
+COMFYUI_FLUX2_STEPS = int(os.environ.get("COMFYUI_FLUX2_STEPS", "20"))
+COMFYUI_FLUX2_GUIDANCE = float(os.environ.get("COMFYUI_FLUX2_GUIDANCE", "4.0"))
 # Qwen-Image is split: DiT (diffusion_models) + Qwen2.5-VL text encoder + VAE. Best prompt
 # adherence + text rendering of the local models (closest to gpt-image-1), Apache-2.0.
 COMFYUI_QWEN_UNET = os.environ.get("COMFYUI_QWEN_UNET", "qwen_image_fp8_e4m3fn.safetensors")
@@ -106,6 +118,32 @@ def _comfy_graph(prompt: str) -> dict:
                              "latent_image": ["5", 0]}},
             "8": {"class_type": "VAEDecode", "inputs": {"samples": ["3", 0], "vae": ["39", 0]}},
             "9": {"class_type": "SaveImage", "inputs": {"filename_prefix": "nomad_qwen", "images": ["8", 0]}},
+        }
+    if COMFYUI_MODEL == "flux2":
+        # FLUX.2 [dev] (split: DiT + Mistral-3 text encoder + VAE). Guidance-distilled → real CFG
+        # off (cfg 1.0); prompt strength via FluxGuidance. ~20 steps, euler/simple. Node class
+        # names (CLIP type, latent) are env-overridable since ComfyUI versions can rename them.
+        return {
+            "37": {"class_type": "UNETLoader",
+                   "inputs": {"unet_name": COMFYUI_FLUX2_UNET, "weight_dtype": "default"}},
+            "38": {"class_type": "CLIPLoader",
+                   "inputs": {"clip_name": COMFYUI_FLUX2_CLIP, "type": COMFYUI_FLUX2_CLIP_TYPE,
+                              "device": "default"}},
+            "39": {"class_type": "VAELoader", "inputs": {"vae_name": COMFYUI_FLUX2_VAE}},
+            "5": {"class_type": COMFYUI_FLUX2_LATENT,
+                  "inputs": {"width": COMFYUI_WIDTH, "height": COMFYUI_HEIGHT, "batch_size": 1}},
+            "6": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["38", 0]}},
+            "10": {"class_type": "FluxGuidance",
+                   "inputs": {"conditioning": ["6", 0], "guidance": COMFYUI_FLUX2_GUIDANCE}},
+            "7": {"class_type": "CLIPTextEncode", "inputs": {"text": "", "clip": ["38", 0]}},
+            "3": {"class_type": "KSampler",
+                  "inputs": {"seed": seed, "steps": COMFYUI_FLUX2_STEPS, "cfg": 1.0,
+                             "sampler_name": "euler", "scheduler": "simple", "denoise": 1.0,
+                             "model": ["37", 0], "positive": ["10", 0], "negative": ["7", 0],
+                             "latent_image": ["5", 0]}},
+            "8": {"class_type": "VAEDecode", "inputs": {"samples": ["3", 0], "vae": ["39", 0]}},
+            "9": {"class_type": "SaveImage",
+                  "inputs": {"filename_prefix": "nomad_flux2", "images": ["8", 0]}},
         }
     if COMFYUI_MODEL == "flux":
         # FLUX.1 schnell (fp8 all-in-one checkpoint): distilled, ~4 steps, guidance off (cfg 1).
