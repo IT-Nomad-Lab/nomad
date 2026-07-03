@@ -41,7 +41,7 @@ Set `COMFYUI_MODEL` in `.env` / the engine service env:
 | `flux2` | **FLUX.2 [dev]** | **best quality + prompt adherence** (closest local to gpt-image-1) | ⚠ **non-commercial** |
 | `qwen` | Qwen-Image | best in-image **text**; commercial-safe | Apache-2.0 |
 
-> **Commercial use (e.g. Income Lab / Etsy assets):** prefer `qwen` (Apache-2.0). FLUX `[dev]` models
+> **Commercial use (selling generated assets):** prefer `qwen` (Apache-2.0). FLUX `[dev]` models
 > are non-commercial — great for quality, but don't sell their output without a commercial license.
 
 Model filenames + params are env-overridable: `COMFYUI_SDXL_CKPT`, `COMFYUI_FLUX_CKPT`, the

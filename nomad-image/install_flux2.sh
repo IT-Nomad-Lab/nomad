@@ -2,8 +2,8 @@
 # NOMAD — add FLUX.2 [dev] to ComfyUI (best local quality + prompt adherence; closest local
 # step toward gpt-image-1). Split components: DiT + Mistral-3 text encoder + VAE (fp8-mixed,
 # ComfyUI-native, no custom nodes). Fits a 24GB card in mixed precision; comfortable on 32GB.
-# ⚠ LICENSE: FLUX [dev] is a NON-COMMERCIAL community license. For assets you intend to SELL
-#   (e.g. Income Lab / Etsy), use Qwen-Image (Apache-2.0) instead — install_qwen.sh.
+# ⚠ LICENSE: FLUX [dev] is a NON-COMMERCIAL community license. For assets you intend to SELL,
+#   use Qwen-Image (Apache-2.0) instead — install_qwen.sh.
 set -euo pipefail
 COMFY_DIR="${COMFYUI_DIR:-$HOME/ComfyUI}"
 BASE="https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files"
