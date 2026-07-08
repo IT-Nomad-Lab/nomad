@@ -16,7 +16,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN python -m playwright install chromium
 
 COPY server.py .
-ENV SCRAPER_MODEL=gpt \
+ENV SCRAPER_MODEL=fast \
+    SEARXNG_URL=http://searxng:8080 \
     LITELLM_BASE_URL=http://litellm:4000
 EXPOSE 8210
 CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8210"]

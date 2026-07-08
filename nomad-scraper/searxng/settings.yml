@@ -1,0 +1,16 @@
+# NOMAD SearXNG — self-hosted metasearch backing nomad-scraper (/search). No API keys.
+# Only overrides on top of SearXNG's defaults; the JSON format is what nomad-scraper calls.
+use_default_settings: true
+
+server:
+  # Internal, localhost-only service. Fine to leave as-is for local use; change for any exposure.
+  secret_key: "nomad-local-searxng-key-change-for-production"
+  limiter: false          # no bot-limiter — nomad-scraper is the only (trusted, rate-limited) caller
+  image_proxy: false
+
+search:
+  formats:                # JSON is OFF by default — nomad-scraper needs it
+    - html
+    - json
+  autocomplete: ""
+  default_lang: "en"

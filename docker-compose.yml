@@ -93,7 +93,7 @@ services:
       - NOMAD_TERM_URL=ws://host.docker.internal:8091                     # interactive project terminal (PTY daemon)
       - QDRANT_URL=http://qdrant:6333                                     # cockpit chat memory (unified w/ console)
       - OLLAMA_URL=http://host.docker.internal:11434                      # embeddings (nomic-embed-text)
-      - NOMAD_SCRAPER_URL=http://nomad-scraper:8210                       # research lane → web scraping (ScrapeGraphAI)
+      - NOMAD_SCRAPER_URL=http://nomad-scraper:8210                       # research lane → web scrape/search (fast static + SearXNG; browser+LLM fallback)
       - NOMAD_AUDIO_URL=http://host.docker.internal:8220                  # local music generation (ACE-Step, host-native GPU service)
       - NOMAD_KROKI_URL=http://kroki:8000                                 # render diagrams/charts from text (Kroki: mermaid/graphviz/d2/vega-lite)
       # ── image generation (gated): local ComfyUI first, then OpenAI, then Adobe Firefly ──
@@ -173,11 +173,13 @@ services:
       - "127.0.0.1:8210:8210"   # host-only; engine reaches it on the compose network
     env_file: .env              # LITELLM_MASTER_KEY (+ optional OPENAI/GEMINI keys via aliases)
     environment:
-      - LITELLM_BASE_URL=http://litellm:4000   # LLM via the gateway (no new keys)
-      - SCRAPER_MODEL=gpt                       # alias: gpt (reliable extraction) | fast (local/free)
-      - OLLAMA_URL=http://host.docker.internal:11434  # embeddings (nomic-embed-text)
+      - LITELLM_BASE_URL=http://litellm:4000   # LLM via the gateway (only used for distill/fallback)
+      - SCRAPER_MODEL=${SCRAPER_MODEL:-fast}    # LOCAL/free default; fast static path skips the LLM anyway. gpt for hard extraction
+      - SEARXNG_URL=http://searxng:8080         # self-hosted metasearch (no keys); ddgs fallback
+      - OLLAMA_URL=http://host.docker.internal:11434  # embeddings (heavy fallback only)
     depends_on:
       - litellm
+      - searxng
     restart: unless-stopped
 
   # ── LCARS command console (dashboard + NOMAD chat) ─────────────────
@@ -235,6 +237,20 @@ services:
     container_name: nomad-kroki-mermaid
     expose:
       - "8002"
+    restart: unless-stopped
+
+  # ── SearXNG: self-hosted metasearch backing nomad-scraper /search (no API keys) ──
+  searxng:
+    image: searxng/searxng:latest
+    container_name: nomad-searxng
+    ports:
+      - "127.0.0.1:8211:8080"          # host-only (debug); scraper reaches it as searxng:8080
+    volumes:
+      # mount ONLY our settings file (read-only) — mounting the whole dir :rw lets SearXNG
+      # root-own the tracked repo folder. uwsgi.ini etc. stay in the image.
+      - ./nomad-scraper/searxng/settings.yml:/etc/searxng/settings.yml:ro
+    environment:
+      - SEARXNG_BASE_URL=http://searxng:8080/
     restart: unless-stopped
 
 volumes:

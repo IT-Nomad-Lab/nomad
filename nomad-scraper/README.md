@@ -1,36 +1,50 @@
-# nomad-scraper — LLM-driven web scrape & search
+# nomad-scraper — fast web scrape & search
 
-LLM-driven web scraping behind a small HTTP API. Give it a URL (or a search query) plus a
-natural-language prompt, and it returns **structured data**. It runs
-[ScrapeGraphAI](https://github.com/ScrapeGraphAI/Scrapegraph-ai) pointed at NOMAD's existing
-**LiteLLM gateway** — so no new API keys, and the model is swappable by alias — with embeddings
-on the local Ollama.
+Grounds NOMAD's research lane in live web data. Optimized so the **common case is fast and free** —
+it does *not* launch a browser or an LLM by default.
 
-The heavy deps (LangChain, Playwright/Chromium) live here so the engine stays slim. The engine's
-**research lane** calls this over HTTP during Process to ground a brief in live web data; that
-fetch is read-only/reversible and happens **before** the human gate (only the resulting brief is
-gated). Callers fail open — if the scraper is down/slow, they fall back to ungrounded reasoning.
+## How it works (3 tiers)
+
+1. **Fast static path** — `httpx` fetch (real UA, retries, per-domain rate-limit) → **trafilatura**
+   extracts the clean article text (~1 s, no browser, no LLM). This is what grounding a brief needs.
+2. **Distill** *(opt-in)* — when a `schema` or `distill:true` is requested, the **local `fast`
+   model** (via LiteLLM, free) runs over the *clean* text (few tokens) to answer / extract structured data.
+3. **Heavy fallback** — if the static fetch yields nothing (JS-heavy/blocked page), fall back to
+   **ScrapeGraphAI** (headless Chromium + LLM) — the old behavior, now the exception.
+
+Plus a **TTL result cache**, **async** handlers, **parallel** deepening in `/search`, and a
+self-hosted **SearXNG** search backend (no API keys) with a `ddgs` (DuckDuckGo) fallback.
 
 | Endpoint | Body | Returns |
 |---|---|---|
-| `GET /health` | — | `{ok, model}` |
-| `POST /scrape` | `{url, prompt}` | `{ok, url, result}` — one page (SmartScraperGraph) |
-| `POST /search` | `{query, prompt, max?}` | `{ok, query, result, sources}` — search + scrape |
+| `GET /health` | — | `{ok, model, search, cache}` |
+| `POST /scrape` | `{url, prompt?, schema?, distill?, no_cache?}` | `{ok, url, mode, title, result}` |
+| `POST /search` | `{query, prompt?, max?, deepen?, schema?}` | `{ok, query, result:{search_results, pages}, sources}` |
+
+`mode` tells you which tier ran: `static` · `static+llm` · `browser+llm`. Pass `schema` (a JSON
+schema) for structured extraction; `distill:true` to summarize/answer via the local model.
 
 ## Run it
 
 ```bash
-docker compose up -d nomad-scraper     # host-only :8210
+docker compose up -d searxng nomad-scraper     # scraper host-only :8210, SearXNG :8211 (debug)
 ```
 
 ## Key environment variables
 
 | Var | Default | Meaning |
 |---|---|---|
-| `LITELLM_BASE_URL` / `LITELLM_MASTER_KEY` | gateway | Model gateway. |
-| `SCRAPER_MODEL` | `gpt` | LiteLLM alias for scraping (`gpt` reliable / `fast` local). |
-| `OLLAMA_URL` / `NOMAD_EMBED_MODEL` | Ollama / `nomic-embed-text` | Embeddings. |
-| `SCRAPER_MAX_RESULTS` | `3` | Max search results to scrape. |
+| `SCRAPER_MODEL` | `fast` | LiteLLM alias when an LLM is needed (`fast` local/free · `gpt` for hard cases). |
+| `SEARXNG_URL` | `http://searxng:8080` | Self-hosted metasearch; `ddgs` used if it's down. |
+| `SCRAPER_MAX_RESULTS` / `SCRAPER_DEEPEN` | `5` / `3` | Search results returned / how many to fetch full text for (parallel). |
+| `SCRAPER_CACHE_TTL` | `3600` | Result cache TTL (seconds). |
+| `SCRAPER_DOMAIN_INTERVAL` | `1.0` | Min seconds between hits to the same host (politeness). |
+| `LITELLM_BASE_URL` / `LITELLM_MASTER_KEY` | gateway | Model gateway (distill + heavy fallback only). |
+| `OLLAMA_URL` / `NOMAD_EMBED_MODEL` | Ollama / `nomic-embed-text` | Embeddings (heavy fallback only). |
 
-> Compat notes baked in: a `ChatOllama` shim (langchain moved it) and `ddgs` (duckduckgo
-> renamed); `/search` is rebuilt on `ddgs` + `SmartScraperGraph`.
+## Notes
+
+- **SearXNG** needs the JSON format enabled — configured in `searxng/settings.yml`
+  (`search.formats: [html, json]`, limiter off for the trusted local caller).
+- Compat shim kept for the fallback: `ChatOllama` moved in langchain 1.x; `ddgs` is the renamed
+  duckduckgo search.
