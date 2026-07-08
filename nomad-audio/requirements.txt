@@ -1,0 +1,6 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+# torchaudio.save() delegates to torchcodec unless soundfile is present; torchcodec has no build for
+# FFmpeg 8, so we install soundfile (libsndfile) to save wavs directly and bypass torchcodec.
+soundfile>=0.12
+# torch (CUDA) + acestep are installed by install.sh (they need the cu128 wheel index / git source)

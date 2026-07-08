@@ -94,6 +94,8 @@ services:
       - QDRANT_URL=http://qdrant:6333                                     # cockpit chat memory (unified w/ console)
       - OLLAMA_URL=http://host.docker.internal:11434                      # embeddings (nomic-embed-text)
       - NOMAD_SCRAPER_URL=http://nomad-scraper:8210                       # research lane → web scraping (ScrapeGraphAI)
+      - NOMAD_AUDIO_URL=http://host.docker.internal:8220                  # local music generation (ACE-Step, host-native GPU service)
+      - NOMAD_KROKI_URL=http://kroki:8000                                 # render diagrams/charts from text (Kroki: mermaid/graphviz/d2/vega-lite)
       # ── image generation (gated): local ComfyUI first, then OpenAI, then Adobe Firefly ──
       - NOMAD_IMAGE_PROVIDER=comfyui,openai,firefly
       - COMFYUI_URL=http://host.docker.internal:8188                      # local ComfyUI on the host GPU
@@ -191,6 +193,7 @@ services:
       - QDRANT_URL=http://qdrant:6333          # long-term conversational memory
       - OLLAMA_URL=http://host.docker.internal:11434  # embeddings (nomic-embed-text)
       - NOMAD_VOICE_URL=http://nomad-voice:8200  # local Piper TTS + Whisper STT
+      - NOMAD_AUDIO_URL=http://host.docker.internal:8220  # local music generation (ACE-Step)
       - NOMAD_TERM_URL=ws://host.docker.internal:8091  # interactive project terminal (native PTY daemon)
       - NOMAD_SOURCE=nocodb                       # CUTOVER 2026-06-03: NocoDB is authoritative (flip back to 'notion' to roll back)
       - NC_BASE_URL=http://nocodb:8080            # mission-control reads when NOMAD_SOURCE=nocodb
@@ -208,6 +211,29 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
+    restart: unless-stopped
+
+  # ── Kroki: render diagrams + charts from text (deterministic, auto-layout) ──
+  # One engine for Mermaid/Graphviz/D2/PlantUML (diagrams) + Vega-Lite (charts). No image model:
+  # agents emit the spec, Kroki lays it out perfectly (no misplaced arrows / text overflow).
+  kroki:
+    image: yuzutech/kroki
+    container_name: nomad-kroki
+    depends_on:
+      - kroki-mermaid
+    environment:
+      - KROKI_MERMAID_HOST=kroki-mermaid
+    ports:
+      - "127.0.0.1:8231:8000"          # host-only; the render tool posts here
+    tmpfs:
+      - /tmp:exec
+    restart: unless-stopped
+
+  kroki-mermaid:
+    image: yuzutech/kroki-mermaid
+    container_name: nomad-kroki-mermaid
+    expose:
+      - "8002"
     restart: unless-stopped
 
 volumes:

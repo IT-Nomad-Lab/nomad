@@ -1,0 +1,18 @@
+[Unit]
+Description=NOMAD local audio generation (ACE-Step on the RTX 5090)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# %h = the user's home. Assumes the repo at ~/nomad; adjust if cloned elsewhere.
+WorkingDirectory=%h/nomad/nomad-audio
+# --host 0.0.0.0 so the v2 engine container can reach it via host.docker.internal:8220.
+# WSL2 is NAT'd (not on the LAN); keep this box's firewall closed to inbound 8220.
+ExecStart=%h/nomad/nomad-audio/.venv/bin/python %h/nomad/nomad-audio/server.py
+Environment=NOMAD_AUDIO_PORT=8220
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

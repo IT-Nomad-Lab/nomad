@@ -34,3 +34,7 @@ dispatcher/.venv-term/
 
 # local MCP servers venv
 mcp-local/.venv/
+
+# nomad-audio service (host-native GPU): venv + generated output
+nomad-audio/.venv/
+nomad-audio/generated_audio/

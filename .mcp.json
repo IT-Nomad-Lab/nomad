@@ -17,6 +17,12 @@
       "args": [
         "mcp-local/nomad_image.py"
       ]
+    },
+    "nomad-diagram": {
+      "command": "mcp-local/.venv/bin/python",
+      "args": [
+        "mcp-local/nomad_diagram.py"
+      ]
     }
   }
 }

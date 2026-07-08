@@ -79,9 +79,10 @@ In practice:
 | [`nomad-console/`](nomad-console/) | Operator dashboard (LCARS UI): telemetry, projects, agents, chat, voice | [README](nomad-console/README.md) |
 | [`crew/`](crew/) | v1 CrewAI agent team + the engineering crew that builds NOMAD itself | [README](crew/README.md) |
 | [`dispatcher/`](dispatcher/) | Builder handoff (headless Claude Code in a repo) + interactive terminal daemon | [README](dispatcher/README.md) |
-| [`mcp-local/`](mcp-local/) | Local MCP servers (local-LLM bridge, scraper, image gen) | [README](mcp-local/README.md) |
+| [`mcp-local/`](mcp-local/) | Local MCP servers (local-LLM bridge, scraper, image gen, diagram/chart render) | [README](mcp-local/README.md) |
 | [`nomad-plugin/`](nomad-plugin/) | NOMAD packaged as a Claude Code plugin (agents + skills + MCP + hooks) | [README](nomad-plugin/README.md) |
 | [`nomad-voice/`](nomad-voice/) | On-device speech: Piper TTS + faster-whisper STT | [README](nomad-voice/README.md) |
+| [`nomad-audio/`](nomad-audio/) | Local music/sound generation (ACE-Step, host-native GPU service) | [README](nomad-audio/README.md) |
 | [`nomad-scraper/`](nomad-scraper/) | LLM-driven web scrape/search (ScrapeGraphAI) | [README](nomad-scraper/README.md) |
 | [`nomad-image/`](nomad-image/) | Local ComfyUI image-generation host service (RTX GPU) + install scripts | [README](nomad-image/README.md) |
 | [`claude-bridge/`](claude-bridge/) | OpenAI-compatible shim that answers via the local `claude` CLI | [README](claude-bridge/README.md) |
@@ -104,6 +105,8 @@ Companion docs: **[CLAUDE.md](CLAUDE.md)** (context for AI coding agents) ·
 | Model gateway | LiteLLM (role aliases: `deep` `balanced` `gpt` `longdoc` `fast` `private` `code`) |
 | Local models | Ollama (on the GPU) |
 | Automation / gates | n8n |
+| Diagrams / charts | Kroki — render from text (Mermaid · Graphviz · D2 · Vega-Lite); auto-layout, no image model |
+| Speech / audio | on-device: Piper TTS + faster-whisper STT (nomad-voice) · ACE-Step music (nomad-audio) |
 | Chat UI | Open WebUI (chat · voice · mobile PWA) |
 
 > **Models are addressed by role alias, never by raw model name.** Swap the underlying model in
@@ -131,6 +134,7 @@ Key local endpoints once up:
 | n8n | http://localhost:5678 | Integrations & approval gate |
 | NocoDB | http://localhost:8095 | Mission-control data |
 | Qdrant | http://localhost:6333 | Vector memory |
+| Kroki | http://127.0.0.1:8231 | Render diagrams/charts from text |
 
 See each module's README for service-specific setup. v2 tests are plain Python scripts (no
 pytest harness) — see [`v2/README.md`](v2/README.md) and [`AGENTS.md`](AGENTS.md).

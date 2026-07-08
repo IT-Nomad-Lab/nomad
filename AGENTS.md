@@ -51,4 +51,8 @@ git diff                                          # confirm edits are additive/s
   (deep/balanced/gpt/fast/private/code), never raw model names.
 - Irreversible/external actions (send email, merge to main, publish, share, spend, delete)
   must pass the human approval gate — do not bypass it.
+- **Diagrams & charts: use `render_diagram` (the `nomad-diagram` MCP tool → Kroki), never
+  matplotlib or an image model.** Write the spec — Mermaid/Graphviz/D2 for box-and-arrow diagrams,
+  Vega-Lite for data charts — and let the layout engine place it (arrows routed, text never
+  overflows). Image models (`generate_image`) are for *artistic* visuals only, not graphs.
 - v2 builds **alongside** v1; v1 (this repo's CLAUDE.md scope) is the rollback target — don't break it.

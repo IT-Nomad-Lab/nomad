@@ -15,8 +15,18 @@ tools — keeping cheap/private/bulk work on your hardware while Claude conducts
 - `scrape(url, prompt)` — scrape one page.
 - `web_search(query, prompt)` — search + scrape top results.
 
-Both auto-detect their endpoint (Ollama on the Windows host; the scraper container on loopback or
-the host gateway), so they work whether Claude Code runs in WSL or natively.
+**`nomad-diagram`** (`nomad_diagram.py`) — render diagrams + charts from a TEXT spec (the Kroki
+service), saved into the current project. **No image model** — a layout engine places everything,
+so arrows are routed and text never overflows (the fix for matplotlib diagrams / diffusion "graphs"):
+- `render_diagram(source, diagram_type, output_format, subdir, filename)`.
+- `diagram_type`: `mermaid` | `graphviz` | `d2` | `plantuml` (box/arrow diagrams) | `vegalite`
+  (data charts), + other Kroki types. `output_format`: `svg` (default) | `png` (mermaid → svg).
+- Claude writes the spec (Mermaid/DOT/Vega-Lite); Kroki renders it deterministically.
+
+These auto-detect their endpoint (Ollama on the Windows host; the scraper/Kroki containers on
+loopback or the host gateway), so they work whether Claude Code runs in WSL or natively. The
+`nomad-diagram` tool needs the `kroki` + `kroki-mermaid` compose services up
+(`docker compose up -d kroki kroki-mermaid`).
 
 ## Setup
 Deps live in `.venv` (gitignored): `python3 -m venv .venv && .venv/bin/pip install mcp requests`.
