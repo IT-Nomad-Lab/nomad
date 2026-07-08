@@ -9,7 +9,10 @@ Type=simple
 WorkingDirectory=%h/ComfyUI
 # --listen 0.0.0.0 so the v2 engine container can reach it via host.docker.internal:8188.
 # WSL2 is NAT'd (not on the LAN); ComfyUI has no auth, so keep this box's firewall closed.
-ExecStart=%h/ComfyUI/venv/bin/python %h/ComfyUI/main.py --listen 0.0.0.0 --port 8188
+# --disable-pinned-memory: big models (FLUX.2, 33GB DiT) offload to CPU RAM; pinned (page-locked,
+#   non-swappable) memory can exceed WSL's RAM and hard-OOM ComfyUI. Pageable offload + swap is
+#   slower but survives. --cache-none trims cached weights too. Needed on a 24GB card / 47GB WSL.
+ExecStart=%h/ComfyUI/venv/bin/python %h/ComfyUI/main.py --listen 0.0.0.0 --port 8188 --disable-pinned-memory --cache-none
 Restart=on-failure
 RestartSec=5
 
