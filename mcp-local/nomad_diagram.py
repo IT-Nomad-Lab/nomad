@@ -23,8 +23,8 @@ _CANDIDATES = [c for c in (
 ) if c]
 _base = None
 
-# Kroki renders these to PNG too; others (notably mermaid) are SVG-only there.
-_PNG_OK = {"graphviz", "vegalite", "vega", "d2", "plantuml", "blockdiag", "bytefield", "nomnoml"}
+# Kroki renders these to PNG too; others (notably mermaid + d2) are SVG-only there → auto-fall-back.
+_PNG_OK = {"graphviz", "vegalite", "vega", "plantuml", "blockdiag", "bytefield", "nomnoml"}
 
 
 def _kroki():
