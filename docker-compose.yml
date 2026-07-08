@@ -100,6 +100,7 @@ services:
       - NOMAD_IMAGE_PROVIDER=comfyui,openai,firefly
       - COMFYUI_URL=http://host.docker.internal:8188                      # local ComfyUI on the host GPU
       - COMFYUI_MODEL=${COMFYUI_MODEL:-sdxl}                              # set in .env: sdxl (fast default) | flux (FLUX.1 schnell) | flux2 (best quality, slow, non-commercial) | qwen (best text, Apache-2.0)
+      - COMFYUI_FLUX2_CLIP=${COMFYUI_FLUX2_CLIP:-mistral_3_small_flux2_fp8.safetensors}  # fp8 (17GB) not bf16 (34GB) — bf16 OOM-kills ComfyUI on a 24GB card; fp4_mixed (~12GB) for tighter RAM
       - OPENAI_IMAGE_MODEL=gpt-image-1                                    # OpenAI Images (uses OPENAI_API_KEY)
       - NOMAD_IMAGE_DIR=/app/generated_images
     volumes:

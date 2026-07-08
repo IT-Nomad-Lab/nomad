@@ -62,7 +62,11 @@ COMFYUI_FLUX_CKPT = os.environ.get("COMFYUI_FLUX_CKPT", "flux1-schnell-fp8.safet
 # (FLUX [dev]) — use Qwen (Apache-2.0) for anything commercial. Node/type names can drift by ComfyUI
 # version, so the CLIP `type` and the latent node class are env-overridable.
 COMFYUI_FLUX2_UNET = os.environ.get("COMFYUI_FLUX2_UNET", "flux2_dev_fp8mixed.safetensors")
-COMFYUI_FLUX2_CLIP = os.environ.get("COMFYUI_FLUX2_CLIP", "mistral_3_small_flux2_bf16.safetensors")
+# Text encoder: default to the **fp8** Mistral-3 (~17GB) not bf16 (~34GB). On a 24GB card the DiT
+# already offloads ~13GB to CPU RAM; the bf16 encoder (34GB, CPU-resident) then blows past WSL's
+# RAM and the OOM-killer takes ComfyUI down. fp8 halves it (footprint ~48GB → ~30GB). For even
+# tighter RAM use mistral_3_small_flux2_fp4_mixed.safetensors (~12GB).
+COMFYUI_FLUX2_CLIP = os.environ.get("COMFYUI_FLUX2_CLIP", "mistral_3_small_flux2_fp8.safetensors")
 COMFYUI_FLUX2_VAE = os.environ.get("COMFYUI_FLUX2_VAE", "flux2-vae.safetensors")
 COMFYUI_FLUX2_CLIP_TYPE = os.environ.get("COMFYUI_FLUX2_CLIP_TYPE", "flux2")
 COMFYUI_FLUX2_LATENT = os.environ.get("COMFYUI_FLUX2_LATENT", "EmptyFlux2LatentImage")

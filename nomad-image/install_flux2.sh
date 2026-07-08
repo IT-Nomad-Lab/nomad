@@ -20,13 +20,17 @@ fetch(){ # fetch <url> <dest> <min-bytes>  (resumable; skips if already a sane s
 
 fetch "$BASE/diffusion_models/flux2_dev_fp8mixed.safetensors" \
       "$COMFY_DIR/models/diffusion_models/flux2_dev_fp8mixed.safetensors" 20000000000
-fetch "$BASE/text_encoders/mistral_3_small_flux2_bf16.safetensors" \
-      "$COMFY_DIR/models/text_encoders/mistral_3_small_flux2_bf16.safetensors" 3000000000
+# Text encoder: fetch the **fp8** build (~17GB), NOT bf16 (~34GB). On a 24GB card the DiT offloads
+# ~13GB to CPU RAM; a 34GB CPU-resident encoder on top blows WSL's RAM → the OOM-killer stops
+# ComfyUI. fp8 keeps the total weight footprint ~30GB. For tighter RAM set ENCODER=fp4_mixed (~12GB).
+ENCODER="${FLUX2_ENCODER:-fp8}"   # fp8 (default) | bf16 (needs ~64GB RAM) | fp4_mixed (smallest)
+fetch "$BASE/text_encoders/mistral_3_small_flux2_${ENCODER}.safetensors" \
+      "$COMFY_DIR/models/text_encoders/mistral_3_small_flux2_${ENCODER}.safetensors" 3000000000
 fetch "$BASE/vae/flux2-vae.safetensors" \
       "$COMFY_DIR/models/vae/flux2-vae.safetensors" 50000000
 
-log "Done. FLUX.2 [dev] components:"
+log "Done. FLUX.2 [dev] components (encoder=$ENCODER):"
 ls -lh "$COMFY_DIR/models/diffusion_models/flux2_dev_fp8mixed.safetensors" \
-       "$COMFY_DIR/models/text_encoders/mistral_3_small_flux2_bf16.safetensors" \
+       "$COMFY_DIR/models/text_encoders/mistral_3_small_flux2_${ENCODER}.safetensors" \
        "$COMFY_DIR/models/vae/flux2-vae.safetensors" 2>/dev/null || true
 log "Set COMFYUI_MODEL=flux2 to use it. Needs a recent ComfyUI (native FLUX.2 nodes)."
