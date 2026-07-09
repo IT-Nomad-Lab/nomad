@@ -66,7 +66,9 @@ manager if `/tts` or `/stt` error.
 | `NOMAD_STT_ENGINE` | `whisper` | Real-time STT engine: `whisper` (CPU, local) or `kyutai` (GPU sidecar [`nomad-stt`](../nomad-stt/) on :8212 — lower latency, more accurate). Same VAD seam either way. |
 | `NOMAD_STT_URL` | `ws://127.0.0.1:8212/stt` | The nomad-stt sidecar WebSocket (when engine=kyutai). |
 | `WHISPER_MODEL` / `WHISPER_DEVICE` | `base.en` / `cpu` | STT (whisper engine). |
-| `PIPER_VOICE` | `en_GB-alan-medium` | TTS voice ("Jarvis"), in `voices/`. |
+| `NOMAD_TTS_ENGINE` | `piper` | Voice engine: `piper` (fast, local, but robotic) or `kokoro` (kokoro-onnx — far more natural, still local/CPU). |
+| `NOMAD_KOKORO_VOICE` | `bm_george` | Kokoro voice. British male `bm_george`/`bm_lewis` (keeps "Jarvis"), British female `bf_emma`/`bf_isabella`, warm American female `af_heart`/`af_bella`, American male `am_michael`/`am_adam`. |
+| `PIPER_VOICE` | `en_GB-alan-medium` | TTS voice when engine=piper, in `voices/`. |
 | `WAKE_MODEL` / `WAKE_THRESHOLD` | `hey_jarvis` / `0.5` | Wake word. |
 
 ## Notes

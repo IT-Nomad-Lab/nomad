@@ -72,6 +72,10 @@ WHISPER_DEVICE = os.environ.get("WHISPER_DEVICE", "cpu")
 # latency + more accurate). Same SegmentedSTTService seam either way; barge-in comes from the VAD.
 STT_ENGINE = os.environ.get("NOMAD_STT_ENGINE", "whisper").lower()
 STT_URL = os.environ.get("NOMAD_STT_URL", "ws://127.0.0.1:8212/stt")
+# TTS engine: "piper" (fast, local, robotic) | "kokoro" (kokoro-onnx, far more natural, still local).
+# Kokoro British voices bm_*/bf_*; American am_*/af_*. bm_george = smooth British male (keeps "Jarvis").
+TTS_ENGINE = os.environ.get("NOMAD_TTS_ENGINE", "piper").lower()
+KOKORO_VOICE = os.environ.get("NOMAD_KOKORO_VOICE", "bm_george")
 WAKE_MODEL = os.environ.get("WAKE_MODEL", "hey_jarvis")
 WAKE_THRESHOLD = float(os.environ.get("WAKE_THRESHOLD", "0.5"))
 LITELLM_BASE = os.environ.get("LITELLM_BASE_URL", "http://127.0.0.1:4000").rstrip("/")
@@ -224,7 +228,14 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
     else:
         stt = WhisperSTTService(model=WHISPER_MODEL, device="cpu", compute_type="int8",
                                 language=Language.EN)
-    tts = PiperTTSService(voice_id=PIPER_VOICE, download_dir=VOICES, use_cuda=False)
+    if TTS_ENGINE == "kokoro":
+        # far more natural than Piper, still local (kokoro-onnx on CPU); model auto-downloaded
+        from pipecat.services.kokoro.tts import KokoroTTSService
+        lang = Language.EN_GB if KOKORO_VOICE[:1] in ("b",) else Language.EN
+        tts = KokoroTTSService(voice_id=KOKORO_VOICE,
+                               params=KokoroTTSService.InputParams(language=lang))
+    else:
+        tts = PiperTTSService(voice_id=PIPER_VOICE, download_dir=VOICES, use_cuda=False)
     if USE_BRAIN:
         # spoken turns flow through NOMAD's brain (memory + intent router + human gate)
         llm = NomadBrainLLMService(session_id=f"voice-{uuid.uuid4().hex[:8]}")
@@ -389,7 +400,8 @@ async def health():
     return {"status": "ok", "service": "nomad-voice", "realtime": True, "model": NOMAD_MODEL,
             "brain": BRAIN_URL if USE_BRAIN else None,
             "stt": ("kyutai@" + STT_URL) if STT_ENGINE == "kyutai" else WHISPER_MODEL,
-            "tts": PIPER_VOICE, "wake": WAKE_MODEL, "connections": len(pcs_map)}
+            "tts": ("kokoro:" + KOKORO_VOICE) if TTS_ENGINE == "kokoro" else ("piper:" + PIPER_VOICE),
+            "wake": WAKE_MODEL, "connections": len(pcs_map)}
 
 
 @asynccontextmanager

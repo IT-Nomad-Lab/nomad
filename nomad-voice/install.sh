@@ -17,6 +17,8 @@ python3 -m venv "$VENV"
 log "Installing Pipecat + extras + server + wake word"
 "$VENV/bin/pip" install "pipecat-ai[whisper,silero-vad,small-webrtc,webrtc,openai,piper]"
 "$VENV/bin/pip" install "uvicorn[standard]" fastapi openwakeword onnxruntime
+# kokoro-onnx: the smooth/natural TTS engine (NOMAD_TTS_ENGINE=kokoro); model auto-downloads on first use
+"$VENV/bin/pip" install kokoro-onnx
 
 log "Baking the Whisper STT model (base.en, CPU int8)"
 "$VENV/bin/python" -c "from faster_whisper import WhisperModel; WhisperModel('base.en', device='cpu', compute_type='int8')"
