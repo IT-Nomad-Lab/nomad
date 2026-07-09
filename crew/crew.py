@@ -26,6 +26,21 @@ HERE = os.path.dirname(__file__)
 LITELLM_BASE = os.environ.get("LITELLM_BASE_URL", "http://litellm:4000")
 LITELLM_KEY = os.environ.get("LITELLM_MASTER_KEY", "")
 
+
+def _prompt(name):
+    """Read a named block from the NOMAD prompt registry (prompts/<NAME>.md). Fail-open: an
+    unreadable name returns "" so a missing style never breaks agent construction."""
+    for base in (os.environ.get("NOMAD_PROMPTS_DIR"),
+                 os.path.join(HERE, "prompts"), os.path.join(HERE, "..", "prompts"), "/app/prompts"):
+        if not base:
+            continue
+        try:
+            with open(os.path.join(base, f"{name}.md"), encoding="utf-8") as f:
+                return f.read().strip()
+        except OSError:
+            continue
+    return ""
+
 # Which tools each agent may use.
 TOOLS = {
     "orchestrator": [create_task, update_task_status, log_activity, request_approval, save_knowledge],
@@ -56,10 +71,16 @@ def build_agents():
     specs = _load("agents.yaml")
     agents = {}
     for key, spec in specs.items():
+        backstory = spec["backstory"]
+        style = spec.get("style")
+        if style:                                   # append the named house-voice block
+            block = _prompt(style)
+            if block:
+                backstory = f"{backstory}\n\n=== WRITING STYLE ({style}) ===\n{block}"
         agents[key] = Agent(
             role=spec["role"],
             goal=spec["goal"],
-            backstory=spec["backstory"],
+            backstory=backstory,
             llm=_llm(spec["llm"]),
             tools=TOOLS.get(key, []),
             allow_delegation=spec.get("allow_delegation", False),

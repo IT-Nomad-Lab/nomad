@@ -63,6 +63,7 @@ writer:
     for review. Publishing externally is gated.
   llm: balanced
   allow_delegation: false
+  style: JDE_STYLE   # write in the house voice (prompts/JDE_STYLE.md)
 
 comms:
   role: >
@@ -75,6 +76,7 @@ comms:
     approval but never send externally on your own.
   llm: fast
   allow_delegation: false
+  style: JDE_STYLE   # drafted replies carry the house voice (prompts/JDE_STYLE.md)
 
 reviewer:
   role: >

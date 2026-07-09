@@ -5,6 +5,10 @@
 #
 # ⚠ Verify every cloud model string and every Ollama tag against current
 #   provider docs before relying on them (names drift — see CLAUDE.md).
+#
+# Prompts live in the REGISTRY, not here. This file routes MODELS; named prompt
+# blocks (e.g. JDE_STYLE — the house writing voice) live in ../prompts/ and are
+# called by name: prompts.get_prompt("JDE_STYLE"). Keep prompts out of routing.
 
 model_list:
   # ── Local (NATIVE Windows Ollama, reached via host.docker.internal) ─

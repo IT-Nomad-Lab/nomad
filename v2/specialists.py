@@ -8,7 +8,23 @@ import os
 
 import runtime
 
-SKILLS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "skills")
+HERE = os.path.dirname(os.path.abspath(__file__))
+SKILLS = os.path.join(HERE, "skills")
+
+
+def _prompt(name):
+    """Read a named block from the NOMAD prompt registry (prompts/<NAME>.md). Fail-open: an
+    unreadable name returns "" so a missing style never breaks a specialist."""
+    for base in (os.environ.get("NOMAD_PROMPTS_DIR"),
+                 os.path.join(HERE, "prompts"), os.path.join(HERE, "..", "prompts"), "/app/prompts"):
+        if not base:
+            continue
+        try:
+            with open(os.path.join(base, f"{name}.md"), encoding="utf-8") as f:
+                return f.read().strip()
+        except OSError:
+            continue
+    return ""
 
 
 def _subject(intent, prefix="NOMAD · "):
@@ -69,7 +85,7 @@ def _ads_choose(intent):
 #         enrich?(intent,target)->str  (gather live context before drafting),
 #         choose?(intent)->(action, args_fn)  (pick the action dynamically per run)}
 LANES = {
-    "comms":    {"skill": "comms.md", "model": "balanced", "action": "send_message",
+    "comms":    {"skill": "comms.md", "model": "balanced", "action": "send_message", "style": "JDE_STYLE",
                  "args": lambda i, t, c, r: {"to": t, "subject": _subject(i), "body": c, "run_id": r}},
     "research": {"skill": "research.md", "model": "balanced", "action": "save_brief",
                  "enrich": _research_enrich,
@@ -77,7 +93,7 @@ LANES = {
     "support":  {"skill": "support.md", "model": "balanced", "action": "send_message",
                  "enrich": _support_enrich,
                  "args": lambda i, t, c, r: {"to": t, "subject": _subject(i, "Re: "), "body": c, "run_id": r}},
-    "ads":      {"skill": "ads.md", "model": "balanced", "action": "save_content",
+    "ads":      {"skill": "ads.md", "model": "balanced", "action": "save_content", "style": "JDE_STYLE",
                  "choose": _ads_choose,
                  "args": lambda i, t, c, r: {"topic": t, "content": c, "run_id": r}},
     "dev":      {"skill": "dev.md", "model": "balanced", "action": "dispatch_build",
@@ -96,6 +112,11 @@ class Specialist:
         self.choose = cfg.get("choose")     # optional: pick the action dynamically per run
         with open(os.path.join(SKILLS, cfg["skill"]), encoding="utf-8") as f:
             self.skill = f.read()
+        style = cfg.get("style")                    # append the named house-voice block
+        if style:
+            block = _prompt(style)
+            if block:
+                self.skill = f"{self.skill}\n\n=== WRITING STYLE ({style}) ===\n{block}"
 
     def process(self, intent: str, target: str) -> str:
         """Draft the output via the lane's Skill (reversible — no side effect, no tool call). If the
