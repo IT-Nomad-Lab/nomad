@@ -68,6 +68,10 @@ PIPER_VOICE = os.environ.get("PIPER_VOICE", "en_GB-alan-medium")   # calm Britis
 PIPER_MODEL = os.environ.get("PIPER_MODEL", str(VOICES / f"{PIPER_VOICE}.onnx"))
 WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "base.en")
 WHISPER_DEVICE = os.environ.get("WHISPER_DEVICE", "cpu")
+# real-time STT engine: "whisper" (CPU, local, default) | "kyutai" (GPU sidecar nomad-stt, lower
+# latency + more accurate). Same SegmentedSTTService seam either way; barge-in comes from the VAD.
+STT_ENGINE = os.environ.get("NOMAD_STT_ENGINE", "whisper").lower()
+STT_URL = os.environ.get("NOMAD_STT_URL", "ws://127.0.0.1:8212/stt")
 WAKE_MODEL = os.environ.get("WAKE_MODEL", "hey_jarvis")
 WAKE_THRESHOLD = float(os.environ.get("WAKE_THRESHOLD", "0.5"))
 LITELLM_BASE = os.environ.get("LITELLM_BASE_URL", "http://127.0.0.1:4000").rstrip("/")
@@ -213,8 +217,13 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         webrtc_connection=webrtc_connection,
         params=TransportParams(audio_in_enabled=True, audio_out_enabled=True),
     )
-    stt = WhisperSTTService(model=WHISPER_MODEL, device="cpu", compute_type="int8",
-                            language=Language.EN)
+    if STT_ENGINE == "kyutai":
+        # low-latency GPU ear via the nomad-stt sidecar (Kyutai streaming STT)
+        from kyutai_stt import KyutaiSTTService
+        stt = KyutaiSTTService(url=STT_URL, language=Language.EN)
+    else:
+        stt = WhisperSTTService(model=WHISPER_MODEL, device="cpu", compute_type="int8",
+                                language=Language.EN)
     tts = PiperTTSService(voice_id=PIPER_VOICE, download_dir=VOICES, use_cuda=False)
     if USE_BRAIN:
         # spoken turns flow through NOMAD's brain (memory + intent router + human gate)
@@ -378,8 +387,9 @@ async def wake(websocket: WebSocket):
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "nomad-voice", "realtime": True, "model": NOMAD_MODEL,
-            "brain": BRAIN_URL if USE_BRAIN else None, "stt": WHISPER_MODEL, "tts": PIPER_VOICE,
-            "wake": WAKE_MODEL, "connections": len(pcs_map)}
+            "brain": BRAIN_URL if USE_BRAIN else None,
+            "stt": ("kyutai@" + STT_URL) if STT_ENGINE == "kyutai" else WHISPER_MODEL,
+            "tts": PIPER_VOICE, "wake": WAKE_MODEL, "connections": len(pcs_map)}
 
 
 @asynccontextmanager

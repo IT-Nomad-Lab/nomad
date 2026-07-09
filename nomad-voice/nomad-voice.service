@@ -12,6 +12,10 @@ EnvironmentFile=-%h/nomad/.env
 Environment=LITELLM_BASE_URL=http://127.0.0.1:4000
 Environment=NOMAD_VOICE_PORT=8200
 Environment=NOMAD_VOICE_MODEL=fast
+# STT engine: whisper (CPU, safe default) | kyutai (GPU sidecar nomad-stt on :8212, lower latency).
+# Flip with a drop-in override so a fresh install without the sidecar still works:
+#   systemctl --user edit nomad-voice   →   [Service]\nEnvironment=NOMAD_STT_ENGINE=kyutai
+Environment=NOMAD_STT_ENGINE=whisper
 ExecStart=%h/nomad/nomad-voice/.venv/bin/python %h/nomad/nomad-voice/server.py
 Restart=on-failure
 RestartSec=5

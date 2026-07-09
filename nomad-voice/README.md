@@ -63,7 +63,9 @@ manager if `/tts` or `/stt` error.
 | `NOMAD_BRAIN_URL` | `http://127.0.0.1:1701` | The console `/api/chat` endpoint the brain call hits. |
 | `NOMAD_VOICE_CORS` | `*` | Origins allowed to open the real-time client (localhost always allowed). |
 | `LITELLM_BASE_URL` / `LITELLM_MASTER_KEY` | `http://127.0.0.1:4000` / — | Model gateway (brain-off path). |
-| `WHISPER_MODEL` / `WHISPER_DEVICE` | `base.en` / `cpu` | STT. |
+| `NOMAD_STT_ENGINE` | `whisper` | Real-time STT engine: `whisper` (CPU, local) or `kyutai` (GPU sidecar [`nomad-stt`](../nomad-stt/) on :8212 — lower latency, more accurate). Same VAD seam either way. |
+| `NOMAD_STT_URL` | `ws://127.0.0.1:8212/stt` | The nomad-stt sidecar WebSocket (when engine=kyutai). |
+| `WHISPER_MODEL` / `WHISPER_DEVICE` | `base.en` / `cpu` | STT (whisper engine). |
 | `PIPER_VOICE` | `en_GB-alan-medium` | TTS voice ("Jarvis"), in `voices/`. |
 | `WAKE_MODEL` / `WAKE_THRESHOLD` | `hey_jarvis` / `0.5` | Wake word. |
 
