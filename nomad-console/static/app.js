@@ -493,6 +493,58 @@ if(hasMic){
   });
 } else { $('#wake').style.display='none'; }
 
+/* ── LIVE VOICE: real-time, interruptible conversation (barge-in) via nomad-voice/WebRTC ──
+   Audio streams both ways over a peer connection to the host-native voice service; Silero VAD
+   yields the instant you speak, Whisper transcribes, NOMAD's brain (memory + intent + gate) replies,
+   Piper speaks it. The reply step is the SAME brain as the text chat — so "run diagnostics",
+   "research X", "approve"/"reject" all work by voice. Signaling is cross-origin to :8200 (media is
+   peer-to-peer); the classic push-to-talk 🎤 and 👂 wake word stay as-is. */
+let rtPc=null, rtStream=null, rtBase=null;
+async function rtConfig(){
+  if(rtBase!==null) return rtBase;
+  const c = await getJSON('/api/voice-config'); rtBase = (c && c.rt_url) || 'http://localhost:8200';
+  return rtBase;
+}
+function rtStatus(t){ const b=$('#live'); if(b) b.title='live voice — '+t; }
+async function rtHangup(msg){
+  if(rtStream){ rtStream.getTracks().forEach(t=>{ try{t.stop();}catch(_){ } }); rtStream=null; }
+  if(rtPc){ try{ rtPc.close(); }catch(_){ } rtPc=null; }
+  const a=$('#rt-audio'); if(a) a.srcObject=null;
+  $('#live').classList.add('off');
+  if(msg) addMsg('nomad', msg, 'think');
+}
+async function rtConnect(){
+  const base = await rtConfig();
+  let stream; try{ stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}}); }
+  catch(e){ addMsg('nomad','⚠ microphone blocked: '+((e&&e.name)||e),'think'); $('#live').classList.add('off'); return; }
+  rtStream=stream;
+  const pc=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});
+  rtPc=pc; rtStatus('connecting…');
+  stream.getTracks().forEach(t=>pc.addTrack(t,stream));
+  pc.ontrack=e=>{ $('#rt-audio').srcObject=e.streams[0]; };
+  pc.onconnectionstatechange=()=>{ const c=pc.connectionState;
+    if(c==='connected'){ rtStatus('connected — talk (interrupt any time)'); addMsg('nomad','🎙️ Live voice connected — just talk. Interrupt any time; say “approve” to clear the gate. Click ▮▮ to end.','think'); }
+    else if(c==='failed'||c==='disconnected'||c==='closed'){ if(rtPc===pc) rtHangup(c==='failed'?'Live voice couldn’t establish audio (WSL2 networking?). Push-to-talk still works.':null); } };
+  const offer=await pc.createOffer({offerToReceiveAudio:true}); await pc.setLocalDescription(offer);
+  await Promise.race([                                   // wait for ICE, but don't hang forever on STUN
+    new Promise(r=>{ if(pc.iceGatheringState==='complete') return r();
+      const h=()=>{ if(pc.iceGatheringState==='complete'){ pc.removeEventListener('icegatheringstatechange',h); r(); } };
+      pc.addEventListener('icegatheringstatechange',h); }),
+    new Promise(r=>setTimeout(r,2000))]);
+  try{
+    const res=await fetch(base+'/api/offer',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({sdp:pc.localDescription.sdp,type:pc.localDescription.type})});
+    if(!res.ok){ rtHangup('⚠ voice service error '+res.status); return; }
+    await pc.setRemoteDescription(await res.json());
+  }catch(e){ rtHangup('⚠ voice service unreachable ('+base+'): '+((e&&e.message)||e)); }
+}
+$('#live').addEventListener('click', async ()=>{
+  if(rtPc || rtStream){ await rtHangup('— live voice ended —'); return; }   // toggle off
+  $('#live').classList.remove('off');
+  if(wakeOn){ wakeOn=false; $('#wake').classList.add('off'); stopOWW(); }    // free the mic for the live session
+  await rtConnect();
+});
+
 /* greeting + rehydrate this session's transcript from NOMAD's memory */
 const GREETING = 'NOMAD online. All stations linked. State your objective, Commander.\n\nTip: name a project and I read its docs. To dispatch the Builder into a repo:\n  /plan <project>: <task>   (read-only plan)\n  /build <project>: <task>  (makes uncommitted edits)';
 (async function rehydrate(){

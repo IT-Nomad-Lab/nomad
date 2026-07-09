@@ -44,6 +44,10 @@ PROJECT_ROOTS = os.environ.get("PROJECT_ROOTS", "/host").split(":")
 DOC_FILES = ["CLAUDE.md", "claude.md", "Claude.md", "AGENTS.md", "README.md", "README.MD"]
 DISPATCH_BASE = os.environ.get("NOMAD_DISPATCH_URL", "http://host.docker.internal:8090")
 VOICE_BASE = os.environ.get("NOMAD_VOICE_URL", "http://nomad-voice:8200")
+# Browser-reachable origin for the real-time WebRTC client embedded in the console. The console
+# proxies /tts /stt server-side (VOICE_BASE), but real-time media is peer-to-peer browser↔voice, so
+# the browser signals directly to the host-native voice service. Host-only → localhost by default.
+VOICE_RT_URL = os.environ.get("NOMAD_VOICE_RT_URL", "http://localhost:8200").rstrip("/")
 TERM_BASE = os.environ.get("NOMAD_TERM_URL", "ws://host.docker.internal:8091")  # interactive project terminal (PTY)
 
 
@@ -835,7 +839,7 @@ def _project_row(name, status="Planning"):
         _notion.pages.create(parent={"database_id": db}, properties={
             "Name": {"title": [{"text": {"content": name}}]},
             "Status": {"select": {"name": status}},
-            "Owner": {"rich_text": [{"text": {"content": "operator"}}]},
+            "Owner": {"rich_text": [{"text": {"content": "Josias"}}]},
         })
         return True
     except Exception:
@@ -1016,7 +1020,8 @@ def api_voice_config():
     """Front-end voice config. The wake word now runs on **openWakeWord** in nomad-voice
     (local, free, no account) — the browser streams mic audio to /ws/wake and the UI falls back
     to the local Whisper listen-loop only if that can't start. (Picovoice/Porcupine retired.)"""
-    return {"wake": "openwakeword", "label": os.environ.get("WAKE_LABEL", "Hey Jarvis")}
+    return {"wake": "openwakeword", "label": os.environ.get("WAKE_LABEL", "Hey Jarvis"),
+            "rt_url": VOICE_RT_URL}
 
 
 @app.post("/api/tts")

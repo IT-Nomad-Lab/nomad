@@ -13,6 +13,10 @@ human watches and drives the system without living in a terminal.
 - **NOMAD chat** — text + voice, with an **intent router** (`intents.py`) that turns natural
   language into ACTIONS rather than just replies (run diagnostics, research a topic, start a
   project, capture a pipeline goal, approve/reject the gate).
+- **Voice** — push-to-talk 🎤 + "Hey Jarvis" wake word 👂 + spoken replies 🔊 (all proxied to
+  `nomad-voice`), plus a **live-voice** button ▮▮ that opens a **real-time, interruptible**
+  conversation (WebRTC → `nomad-voice`). The real-time reply step runs through this same
+  `/api/chat` brain, so voice gets the intent router, memory, and human gate too.
 - **Conversational memory** (`memory.py`) — every turn is embedded (`nomic-embed-text` on Ollama)
   and stored in Qdrant; relevant past turns are recalled into context. Fail-open: chat still
   works if memory is down.

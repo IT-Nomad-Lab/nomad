@@ -1,8 +1,13 @@
 """NOMAD Voice — the single local voice service: real-time conversation + classic TTS/STT/wake.
 
 REAL-TIME (ChatGPT-style, the headline): audio streams both ways over WebRTC (browser echo
-cancellation), Silero VAD yields on barge-in, faster-whisper transcribes, a LiteLLM model replies
-(streamed), Piper speaks it (streamed).  →  open  http://127.0.0.1:8200/
+cancellation), Silero VAD yields on barge-in, faster-whisper transcribes, NOMAD's brain replies,
+Piper speaks it (streamed).  →  open  http://127.0.0.1:8200/
+
+The reply step routes each turn through NOMAD's brain (the console's /api/chat) — so the SPOKEN
+conversation inherits memory recall, the intent router (diagnostics / research / gated capture /
+"approve"/"reject" the gate), and project-doc context, exactly like the text console. Set
+NOMAD_VOICE_BRAIN=0 to bypass the brain and talk straight to a LiteLLM model (no memory/tools/gate).
 
 CLASSIC endpoints (used by the LCARS console's push-to-talk / spoken replies / wake word):
   POST /tts  {text}              -> audio/wav    (Piper)
@@ -15,18 +20,29 @@ host.docker.internal:8200. Phase 2 swaps the real-time STT->LLM->TTS chain for M
 full-duplex) inside the same pipeline.
 """
 import os
+import re
 import subprocess
 import sys
 import tempfile
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import httpx
 import uvicorn
 from fastapi import BackgroundTasks, FastAPI, File, Request, UploadFile, WebSocket
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMRunFrame
+from pipecat.frames.frames import (
+    Frame,
+    LLMContextFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    LLMRunFrame,
+    LLMTextFrame,
+)
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -34,6 +50,8 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
+from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.llm_service import LLMService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.piper.tts import PiperTTSService
 from pipecat.services.whisper.stt import WhisperSTTService
@@ -60,12 +78,90 @@ PORT = int(os.environ.get("NOMAD_VOICE_PORT", "8200"))
 SYSTEM = os.environ.get("NOMAD_VOICE_SYSTEM",
     "You are NOMAD, a calm, capable voice assistant. This is a spoken conversation, so keep replies "
     "short and natural — no lists, markdown, or emoji. Answer directly. It's fine to be interrupted.")
+# Route replies through NOMAD's brain (console /api/chat: memory + intent router + human gate).
+# host-native voice reaches the host-bound console at 127.0.0.1:1701. Set NOMAD_VOICE_BRAIN=0 to
+# bypass and talk straight to a LiteLLM model.
+USE_BRAIN = os.environ.get("NOMAD_VOICE_BRAIN", "1").lower() not in ("0", "false", "no", "off")
+BRAIN_URL = os.environ.get("NOMAD_BRAIN_URL", "http://127.0.0.1:1701").rstrip("/")
+# who may open the real-time client cross-origin (the LCARS console embeds it). "*" = any localhost origin.
+CORS_ORIGINS = [o.strip() for o in os.environ.get("NOMAD_VOICE_CORS", "*").split(",") if o.strip()]
 
 ice_servers = [IceServer(urls="stun:stun.l.google.com:19302")]
 pcs_map: dict[str, SmallWebRTCConnection] = {}
 _whisper = None
 
 app = FastAPI(title="nomad-voice")
+# the LCARS console (a different origin, :1701) embeds the real-time client and POSTs the WebRTC
+# offer here → allow it. Host-only service, so a permissive CORS policy is acceptable.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ORIGINS, allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
+    allow_methods=["*"], allow_headers=["*"],
+)
+
+
+# ── markdown → speakable text (the brain's canned action replies use **bold**, `code`, ✓/✗, emoji;
+#    Piper would read "asterisk asterisk" / the emoji names). Keep it light; mirror the console UI. ──
+_EMOJI = re.compile("[\U0001F000-\U0001FAFF\U00002600-\U000027BF\U00002B00-\U00002BFF\U0001F1E6-\U0001F1FF]")
+
+
+def despeak(t: str) -> str:
+    t = re.sub(r"`([^`\n]+)`", r"\1", t)
+    t = re.sub(r"\*\*([^*\n]+)\*\*", r"\1", t)
+    t = re.sub(r"\*([^*\n]+)\*", r"\1", t)
+    t = re.sub(r"^\s{0,3}#{1,6}\s+", "", t, flags=re.M)
+    t = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", t)
+    t = re.sub(r"^\s*[-*]\s+", "", t, flags=re.M)
+    t = _EMOJI.sub("", t)
+    t = re.sub(r"[*_`#>]", "", t)
+    return re.sub(r"[ \t]{2,}", " ", t).strip()
+
+
+class NomadBrainLLMService(LLMService):
+    """Pipecat LLM step that answers each turn through NOMAD's brain (the console's /api/chat)
+    instead of a raw model — so the spoken conversation gets memory recall, the intent router
+    (diagnostics / research / gated capture / "approve"/"reject" the human gate) and project
+    context. Mirrors BaseOpenAILLMService's frame contract: FullResponseStart → LLMTextFrame(s) →
+    FullResponseEnd. Fail-soft: if the brain is unreachable, it speaks a short apology."""
+
+    def __init__(self, *, brain_url=BRAIN_URL, model=NOMAD_MODEL, session_id=None, **kwargs):
+        super().__init__(**kwargs)
+        self._brain_url = brain_url
+        self._model = model
+        self._session_id = session_id or f"voice-{uuid.uuid4().hex[:8]}"
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        if isinstance(frame, LLMContextFrame):
+            await self.push_frame(LLMFullResponseStartFrame())
+            await self.start_processing_metrics()
+            try:
+                reply = await self._ask_brain(frame.context)
+            except Exception:  # noqa: BLE001 — voice must never hard-crash on a brain hiccup
+                reply = "Sorry, I couldn't reach my brain just now. Try again in a moment."
+            finally:
+                await self.stop_processing_metrics()
+            if reply:
+                await self.push_frame(LLMTextFrame(reply))
+            await self.push_frame(LLMFullResponseEndFrame())
+        else:
+            await self.push_frame(frame, direction)
+
+    async def _ask_brain(self, context: LLMContext) -> str:
+        msgs = [{"role": "system", "content": SYSTEM}]   # steer brevity for spoken replies
+        for m in context.get_messages():
+            role = m.get("role", "user")
+            role = "system" if role == "developer" else role
+            content = m.get("content", "")
+            if isinstance(content, list):   # multimodal parts → join the text bits
+                content = " ".join(p.get("text", "") for p in content if isinstance(p, dict))
+            if content:
+                msgs.append({"role": role, "content": content})
+        async with httpx.AsyncClient(timeout=180) as c:
+            r = await c.post(f"{self._brain_url}/api/chat", json={
+                "messages": msgs, "model": self._model, "session_id": self._session_id})
+            reply = (r.json() or {}).get("reply", "")
+        return despeak(reply or "")
 
 CLIENT_HTML = """<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>NOMAD Voice</title>
@@ -120,10 +216,15 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
     stt = WhisperSTTService(model=WHISPER_MODEL, device="cpu", compute_type="int8",
                             language=Language.EN)
     tts = PiperTTSService(voice_id=PIPER_VOICE, download_dir=VOICES, use_cuda=False)
-    llm = OpenAILLMService(
-        model=NOMAD_MODEL, api_key=LITELLM_KEY, base_url=f"{LITELLM_BASE}/v1",
-        settings=OpenAILLMService.Settings(system_instruction=SYSTEM, temperature=0.7),
-    )
+    if USE_BRAIN:
+        # spoken turns flow through NOMAD's brain (memory + intent router + human gate)
+        llm = NomadBrainLLMService(session_id=f"voice-{uuid.uuid4().hex[:8]}")
+    else:
+        # bypass: talk straight to a LiteLLM model (no memory/tools/gate)
+        llm = OpenAILLMService(
+            model=NOMAD_MODEL, api_key=LITELLM_KEY, base_url=f"{LITELLM_BASE}/v1",
+            settings=OpenAILLMService.Settings(system_instruction=SYSTEM, temperature=0.7),
+        )
     context = LLMContext()
     user_agg, assistant_agg = LLMContextAggregatorPair(
         context, user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()))
@@ -277,7 +378,8 @@ async def wake(websocket: WebSocket):
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "nomad-voice", "realtime": True, "model": NOMAD_MODEL,
-            "stt": WHISPER_MODEL, "tts": PIPER_VOICE, "wake": WAKE_MODEL, "connections": len(pcs_map)}
+            "brain": BRAIN_URL if USE_BRAIN else None, "stt": WHISPER_MODEL, "tts": PIPER_VOICE,
+            "wake": WAKE_MODEL, "connections": len(pcs_map)}
 
 
 @asynccontextmanager

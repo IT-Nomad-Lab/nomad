@@ -188,7 +188,8 @@ services:
       - PROJECT_ROOTS=/host
       - QDRANT_URL=http://qdrant:6333          # long-term conversational memory
       - OLLAMA_URL=http://host.docker.internal:11434  # embeddings (nomic-embed-text)
-      - NOMAD_VOICE_URL=http://host.docker.internal:8200  # local Piper TTS + Whisper STT
+      - NOMAD_VOICE_URL=http://host.docker.internal:8200  # local Piper TTS + Whisper STT (server-side proxy)
+      - NOMAD_VOICE_RT_URL=http://localhost:8200  # browser-reachable origin for the embedded real-time voice (WebRTC media is P2P browser↔voice)
       - NOMAD_AUDIO_URL=http://host.docker.internal:8220  # local music generation (ACE-Step)
       - NOMAD_TERM_URL=ws://host.docker.internal:8091  # interactive project terminal (native PTY daemon)
       - NOMAD_SOURCE=nocodb                       # CUTOVER 2026-06-03: NocoDB is authoritative (flip back to 'notion' to roll back)

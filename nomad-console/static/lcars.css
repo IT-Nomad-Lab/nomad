@@ -120,6 +120,7 @@ body{
 #chatbar #mic.rec{background:var(--red);color:#fff;animation:blink .8s steps(2) infinite}
 #chatbar #wake:not(.off){background:#33dd88;color:#04210f}
 #chatbar #wake.convo{background:#56b6ff;color:#04210f;animation:blink .9s steps(2,start) infinite}
+#chatbar #live:not(.off){background:#ff3b6b;color:#fff;animation:blink 1s steps(2,start) infinite}  /* live call active */
 #chatform{display:flex;gap:8px;padding:4px 12px 12px}
 #chatform input{flex:1;background:#000;color:var(--amber);border:2px solid var(--orange);border-radius:18px;
   padding:9px 16px;font-family:var(--mono);font-size:14px;outline:none}
