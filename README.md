@@ -83,6 +83,7 @@ In practice:
 | [`mcp-local/`](mcp-local/) | Local MCP servers (local-LLM bridge, scraper, image gen, diagram/chart render) | [README](mcp-local/README.md) |
 | [`nomad-plugin/`](nomad-plugin/) | NOMAD packaged as a Claude Code plugin (agents + skills + MCP + hooks) | [README](nomad-plugin/README.md) |
 | [`nomad-voice/`](nomad-voice/) | The voice service: real-time interruptible conversation (Pipecat/WebRTC) + classic TTS/STT/wake | [README](nomad-voice/README.md) |
+| [`nomad-stt/`](nomad-stt/) | Kyutai streaming STT on the GPU (low-latency ear) — the Phase 2 upgrade path for the voice pipeline | [README](nomad-stt/README.md) |
 | [`nomad-audio/`](nomad-audio/) | Local music/sound generation (ACE-Step, host-native GPU service) | [README](nomad-audio/README.md) |
 | [`nomad-scraper/`](nomad-scraper/) | LLM-driven web scrape/search (ScrapeGraphAI) | [README](nomad-scraper/README.md) |
 | [`nomad-image/`](nomad-image/) | Local ComfyUI image-generation host service (RTX GPU) + install scripts | [README](nomad-image/README.md) |

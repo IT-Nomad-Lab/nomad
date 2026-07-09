@@ -42,3 +42,6 @@ nomad-audio/generated_audio/
 # nomad-voice service (host-native): venv + downloaded Piper voice
 nomad-voice/.venv/
 nomad-voice/voices/
+
+# nomad-stt sidecar (Kyutai STT on GPU): venv only; models live in HF cache
+nomad-stt/.venv/

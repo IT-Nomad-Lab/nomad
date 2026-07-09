@@ -1,0 +1,17 @@
+[Unit]
+Description=NOMAD STT — Kyutai streaming speech-to-text on the GPU
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/nomad/nomad-stt
+EnvironmentFile=-%h/nomad/.env
+Environment=KYUTAI_STT_REPO=kyutai/stt-1b-en_fr
+Environment=KYUTAI_DEVICE=cuda
+Environment=NOMAD_STT_PORT=8212
+ExecStart=%h/nomad/nomad-stt/.venv/bin/python %h/nomad/nomad-stt/server.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,8 @@
+# torch is installed SEPARATELY from the CUDA 12.8 index (Blackwell sm_120) — see install.sh:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu128
+moshi>=0.2.6
+fastapi
+uvicorn
+websockets
+numpy
+sphn
