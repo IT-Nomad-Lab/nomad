@@ -1,0 +1,20 @@
+[Unit]
+Description=NOMAD Voice — real-time interruptible voice + classic TTS/STT/wake (local)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/nomad/nomad-voice
+# Load LITELLM_MASTER_KEY (+ keys) from the platform .env. '-' = optional.
+EnvironmentFile=-%h/nomad/.env
+# Host-native: reach the LiteLLM container via its published loopback port.
+Environment=LITELLM_BASE_URL=http://127.0.0.1:4000
+Environment=NOMAD_VOICE_PORT=8200
+Environment=NOMAD_VOICE_MODEL=fast
+ExecStart=%h/nomad/nomad-voice/.venv/bin/python %h/nomad/nomad-voice/server.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

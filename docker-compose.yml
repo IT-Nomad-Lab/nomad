@@ -88,7 +88,7 @@ services:
       - LITELLM_BASE_URL=http://litellm:4000
       - N8N_V2_SEND_URL=http://host.docker.internal:5678/webhook/v2-send  # standalone n8n
       - NOMAD_DISPATCH_URL=http://host.docker.internal:8090               # dev lane → Builder (native dispatcher)
-      - NOMAD_VOICE_URL=http://nomad-voice:8200                           # 3D: local Piper/Whisper
+      - NOMAD_VOICE_URL=http://host.docker.internal:8200                           # 3D: local Piper/Whisper
       - NOMAD_CONSOLE_URL=http://nomad-console:8000                       # cockpit telemetry strip (CPU/MEM/GPU)
       - NOMAD_TERM_URL=ws://host.docker.internal:8091                     # interactive project terminal (PTY daemon)
       - QDRANT_URL=http://qdrant:6333                                     # cockpit chat memory (unified w/ console)
@@ -109,7 +109,6 @@ services:
     depends_on:
       - nocodb
       - litellm
-      - nomad-voice
       - postgres
       - qdrant
       - nomad-scraper
@@ -154,16 +153,10 @@ services:
       - litellm
     restart: unless-stopped
 
-  # ── Local speech: Piper TTS + faster-whisper STT (on-device voice) ─
-  nomad-voice:
-    build: ./nomad-voice
-    container_name: nomad-voice
-    ports:
-      - "127.0.0.1:8200:8200"   # host-only; console reaches it on the compose network
-    environment:
-      - WHISPER_MODEL=base.en
-      - WHISPER_DEVICE=cpu       # set to 'cuda' to try the GPU (needs Blackwell CTranslate2 compat)
-    restart: unless-stopped
+  # ── Local voice (nomad-voice): real-time interruptible conversation + TTS/STT/wake ─
+  # Runs HOST-NATIVE (the real-time WebRTC needs direct networking) via systemd —
+  # nomad-voice/install_service.sh, on 127.0.0.1:8200. NOT a compose service; the engine/console
+  # reach it at host.docker.internal:8200 (see NOMAD_VOICE_URL above).
 
   # ── Web scraping: ScrapeGraphAI behind HTTP (LLM-driven scrape/search) ─
   nomad-scraper:
@@ -195,7 +188,7 @@ services:
       - PROJECT_ROOTS=/host
       - QDRANT_URL=http://qdrant:6333          # long-term conversational memory
       - OLLAMA_URL=http://host.docker.internal:11434  # embeddings (nomic-embed-text)
-      - NOMAD_VOICE_URL=http://nomad-voice:8200  # local Piper TTS + Whisper STT
+      - NOMAD_VOICE_URL=http://host.docker.internal:8200  # local Piper TTS + Whisper STT
       - NOMAD_AUDIO_URL=http://host.docker.internal:8220  # local music generation (ACE-Step)
       - NOMAD_TERM_URL=ws://host.docker.internal:8091  # interactive project terminal (native PTY daemon)
       - NOMAD_SOURCE=nocodb                       # CUTOVER 2026-06-03: NocoDB is authoritative (flip back to 'notion' to roll back)
@@ -206,7 +199,6 @@ services:
     depends_on:
       - litellm
       - qdrant
-      - nomad-voice
     deploy:                    # GPU so nvidia-smi telemetry works
       resources:
         reservations:

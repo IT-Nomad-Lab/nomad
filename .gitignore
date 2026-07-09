@@ -38,3 +38,7 @@ mcp-local/.venv/
 # nomad-audio service (host-native GPU): venv + generated output
 nomad-audio/.venv/
 nomad-audio/generated_audio/
+
+# nomad-voice service (host-native): venv + downloaded Piper voice
+nomad-voice/.venv/
+nomad-voice/voices/
