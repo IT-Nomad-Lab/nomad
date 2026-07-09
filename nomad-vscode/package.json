@@ -1,0 +1,102 @@
+{
+  "name": "nomad",
+  "displayName": "NOMAD",
+  "description": "NOMAD in your editor: per-project status (git · tasks · approvals · platform health), dispatch the Builder, and talk to NOMAD — without leaving VS Code.",
+  "version": "0.1.0",
+  "publisher": "itnomadlab",
+  "license": "MIT",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Other", "SCM Providers"],
+  "keywords": ["nomad", "orchestrator", "dashboard", "agents"],
+  "repository": { "type": "git", "url": "https://github.com/IT-Nomad-Lab/nomad" },
+  "activationEvents": ["onStartupFinished"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        { "id": "nomad", "title": "NOMAD", "icon": "media/nomad.svg" }
+      ]
+    },
+    "views": {
+      "nomad": [
+        { "id": "nomad.project", "name": "This Project" },
+        { "id": "nomad.approvals", "name": "Approval Queue" },
+        { "id": "nomad.platform", "name": "Platform" }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "nomad.project",
+        "contents": "No NOMAD project detected in this workspace.\nAdd a [Nomad.md](https://github.com/IT-Nomad-Lab/nomad) marker to the repo root to join the platform, or open a project folder.\n[Open the console](command:nomad.openConsole)"
+      }
+    ],
+    "commands": [
+      { "command": "nomad.refresh", "title": "NOMAD: Refresh", "icon": "$(refresh)" },
+      { "command": "nomad.ask", "title": "NOMAD: Ask NOMAD…", "icon": "$(comment-discussion)" },
+      { "command": "nomad.dispatchBuild", "title": "NOMAD: Dispatch Builder into this repo…", "icon": "$(tools)" },
+      { "command": "nomad.dispatchPlan", "title": "NOMAD: Plan a task (read-only)…" },
+      { "command": "nomad.planProject", "title": "NOMAD: Plan this project (decompose into tasks)" },
+      { "command": "nomad.runNextTask", "title": "NOMAD: Run next task through the pipeline", "icon": "$(play)" },
+      { "command": "nomad.approve", "title": "Approve", "icon": "$(check)" },
+      { "command": "nomad.reject", "title": "Reject", "icon": "$(x)" },
+      { "command": "nomad.taskRun", "title": "Run task", "icon": "$(play)" },
+      { "command": "nomad.taskRetry", "title": "Retry task", "icon": "$(debug-restart)" },
+      { "command": "nomad.taskSkip", "title": "Skip task", "icon": "$(debug-step-over)" },
+      { "command": "nomad.openConsole", "title": "NOMAD: Open Command Console", "icon": "$(dashboard)" },
+      { "command": "nomad.openVoice", "title": "NOMAD: Open Live Voice" },
+      { "command": "nomad.actions", "title": "NOMAD: Actions…" }
+    ],
+    "menus": {
+      "view/title": [
+        { "command": "nomad.ask", "when": "view == nomad.project", "group": "navigation@1" },
+        { "command": "nomad.runNextTask", "when": "view == nomad.project", "group": "navigation@2" },
+        { "command": "nomad.refresh", "when": "view == nomad.project", "group": "navigation@3" },
+        { "command": "nomad.refresh", "when": "view == nomad.approvals", "group": "navigation@1" },
+        { "command": "nomad.refresh", "when": "view == nomad.platform", "group": "navigation@1" }
+      ],
+      "view/item/context": [
+        { "command": "nomad.approve", "when": "view == nomad.approvals && viewItem == approval", "group": "inline@1" },
+        { "command": "nomad.reject", "when": "view == nomad.approvals && viewItem == approval", "group": "inline@2" },
+        { "command": "nomad.taskRun", "when": "view == nomad.project && viewItem == task-backlog", "group": "inline@1" },
+        { "command": "nomad.taskRetry", "when": "view == nomad.project && viewItem == task-blocked", "group": "inline@1" },
+        { "command": "nomad.taskSkip", "when": "view == nomad.project && viewItem == task-blocked", "group": "inline@2" }
+      ]
+    },
+    "configuration": {
+      "title": "NOMAD",
+      "properties": {
+        "nomad.consoleUrl": {
+          "type": "string",
+          "default": "http://localhost:1701",
+          "description": "Base URL of the NOMAD command console (chat, approvals, services, dispatch)."
+        },
+        "nomad.engineUrl": {
+          "type": "string",
+          "default": "http://localhost:8099",
+          "description": "Base URL of the NOMAD v2 pipeline engine (projects, tasks, gate)."
+        },
+        "nomad.refreshSeconds": {
+          "type": "number",
+          "default": 30,
+          "minimum": 0,
+          "description": "Auto-refresh interval in seconds (0 disables auto-refresh)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run bundle",
+    "bundle": "node esbuild.js --production",
+    "build": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "typecheck": "tsc --noEmit",
+    "package": "vsce package --no-dependencies -o nomad.vsix"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.0.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.5.0"
+  }
+}

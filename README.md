@@ -77,6 +77,7 @@ In practice:
 |---|---|---|
 | [`v2/`](v2/) | **The v2 pipeline engine** — state machine, lane specialists, skills, MCP tools, tests | [README](v2/README.md) |
 | [`nomad-console/`](nomad-console/) | Operator dashboard (LCARS UI): telemetry, projects, agents, chat, voice | [README](nomad-console/README.md) |
+| [`nomad-vscode/`](nomad-vscode/) | VS Code extension: per-project status (git · tasks · approvals · health) + dispatch + chat, in the editor | [README](nomad-vscode/README.md) |
 | [`crew/`](crew/) | v1 CrewAI agent team + the engineering crew that builds NOMAD itself | [README](crew/README.md) |
 | [`dispatcher/`](dispatcher/) | Builder handoff (headless Claude Code in a repo) + interactive terminal daemon | [README](dispatcher/README.md) |
 | [`mcp-local/`](mcp-local/) | Local MCP servers (local-LLM bridge, scraper, image gen, diagram/chart render) | [README](mcp-local/README.md) |
