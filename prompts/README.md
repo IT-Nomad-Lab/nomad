@@ -6,6 +6,8 @@ agent calls it by name instead of copy-pasting the text into six different syste
 | Name | What it is |
 |---|---|
 | `JDE_STYLE` | The house writing voice (Josias De Lima's style). Applied to any agent that writes prose for a human. |
+| `CRITIC_MODE` | Confidence, named assumptions, failure conditions — for any agent that plans, routes, reviews, or recommends. |
+| `DESIGN_TASTE` | UI/interaction taste rules — for any agent that builds or reviews a screen. Load before calling a UI change done. |
 
 ## Use it
 
@@ -29,3 +31,12 @@ Drop a markdown file here. No code change. `available()` lists what's registered
   Skill (ads and comms today).
 - **LiteLLM** — `litellm/config.yaml` points here; the gateway routes models, the registry owns
   prompts. Keep prompts out of the routing config.
+- **nomad-detect** — the block's "Detection pass" section is ENFORCED, not just advised. Lanes with
+  a `style` key run their draft through the detector (`v2/detector.py` → `nomad-detect:8214`),
+  rewrite once against their own findings, and carry the report into the human gate. Check any
+  draft by hand with `nomad-detect/check.py`, or from inside Claude Code with the `detect_ai` MCP
+  tool.
+- **frontend-ux / dev crew's frontend_engineer + qa_engineer** — `DESIGN_TASTE` is referenced in
+  `.claude/agents/frontend-ux.md` and `crew/dev_team.yaml`. Pair it with the Playwright UI check
+  (`dispatcher/ui_check.sh`, callable via the crew's `run_check` tool or the dispatcher's
+  `POST /verify`) so a UI change is judged on the rendered screen, not just the diff.

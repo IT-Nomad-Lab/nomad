@@ -1,0 +1,45 @@
+For thirty years we built data platforms for people. People log in during the day. People run the heavy reports at month end. People sleep, take weekends, and generate a roughly predictable number of requests per hour. Every capacity plan, every alert threshold, every batch window, every cost model has that assumption built into it.
+
+That assumption is quietly dying.
+
+On Databricks' Lakebase service, AI agents now create 80% of all databases and 97% of database branches. Two years ago that figure was around 0.1% [1]. On GitHub, agentic coding grew roughly 1400% in 2026, commits run at about 275 million a week, and the company's own COO talks openly about a near future where 80% of pull requests come from agents [2]. The thing using your platform is no longer a person. It is increasingly a piece of software that does not sleep.
+
+This is not a piece about whether AI is good or bad. It is about a structural shift most data teams have not priced in yet.
+
+## The consumer changed
+
+Start with what the machines consume. Agents query, branch, and write at a rate no human team could match, and they do it around the clock. Then add what they produce. Every agent leaves a trail: reasoning traces, memory writes, intermediate generations. Databricks says it now processes more than a quadrillion tokens a year from agents, with over 100,000 built on its platform alone [3]. Some have started calling the exhaust "dark data," the unread output of systems talking to systems.
+
+And they are multiplying. Databricks reports multi-agent workflows grew 327% in under four months, drawn from more than twenty thousand customers including over sixty percent of the Fortune 500 [1]. The pattern is not one agent doing one task on a schedule you set. It is fleets of them, calling each other, each one a producer and a consumer at the same time, on a clock you do not control.
+
+A fair objection: these are vendor numbers, and Lakebase runs an unusually agent-heavy population. They are not the whole enterprise. True. But the direction does not depend on the decimal. Whether agents are 80% of your load or 8% today, the line is moving one way, and it is moving fast.
+
+## What breaks is the human assumption
+
+Here is the part that matters for anyone who actually runs a platform. The technology underneath did not suddenly fail. What fails is the set of assumptions we wrapped around it.
+
+Capacity. Human traffic breathes. It peaks midday and drops at night, and you size for the peak with room to spare. Agent traffic does not breathe. It runs flat and high, all day, every day, including the weekend you planned to deploy. GitHub is the visible example. Its public availability fell to around 90%, what one observer called "zero nines," and the failures were novel permission problems that only appear at machine scale. Microsoft ended up routing GitHub load through AWS to keep it standing [2][4]. Treat the exact uptime number as a point-in-time reading, not an audited figure. The direction is what matters.
+
+I have lived the small version of this. Ingestion lagging, memory errors climbing, data arriving bigger and faster than the pipeline was ever sized for. Monitoring caught it before the business did, and the cheap levers came first: prioritize what has to flow now, apply backpressure, adjust retention. You scale the hardware last, not first. The difference in the agentic world is that the spike is no longer an event. It is the baseline.
+
+Trust. Agents now author a large share of the work, but the trust mechanism is still a human reading it and agreeing. On GitHub, the overwhelming majority of agent-assisted pull requests are still merged by human maintainers [2]. That worked when humans wrote the code too. It does not scale to a world where the machine produces faster than any human can review. The review queue becomes the bottleneck, and the bottleneck becomes the risk. Scale the reviewers and you have not solved it, you have moved the cost. Skip the review and you are shipping work nobody understood.
+
+Cost. This is the genuinely new one. The FinOps Foundation now treats token-based pricing as its own discipline, partly because you cannot easily tell which part of an application consumed the model output you are paying for [5]. The bill does not arrive as a tidy monthly number. It arrives per token, per call, from systems that call each other thousands of times without asking. People have started using the word "tokenmaxxing" for spend that runs away before anyone notices.
+
+## The platforms are already rebuilding
+
+Watch what the vendors are building, because it tells you where the problem is. At its 2026 Data and AI Summit, Databricks extended governance from the data to the action. Its Unity AI Gateway puts a control point on what agents do, not just what they can read: SQL-defined policies that allow, deny, or require approval for each individual tool call, so a coding agent has to ask before it pushes to GitHub or writes to a sensitive folder [6]. It logs every request and response between models and tools as queryable system tables. It enforces hard budget caps that automatically stop requests when spend crosses a line [6].
+
+Underneath, the platform is being re-architected for machine-speed, always-on load. Lakehouse//RT targets real-time serving with response times as low as ten milliseconds, and a new architecture aims to remove the hidden pipelines and replicas that add latency and governance gaps [7].
+
+One honest note: most of these capabilities are in beta or preview, with vendor benchmarks rather than independent ones. Do not buy the slide. But do read the signal. The control point of the future is the agent's action, the unit of cost is the token, and the load never stops. That is true regardless of which vendor you run.
+
+## The honest part, and what to do now
+
+If you stopped here you would think every enterprise is already drowning in agents. They are not. Gartner predicts more than 40% of agentic AI projects will be cancelled by the end of 2027, on escalating cost, unclear value, and weak risk controls [8]. Most of the eye-watering scale figures come from the platforms with the most to gain from the story. Adoption is not the same as value, and a quadrillion tokens of activity is not a quadrillion tokens of return.
+
+So the move is not panic, and it is not dismissal. It is the same discipline that always separated the teams who cope from the teams who scramble.
+
+Plan capacity for load that does not sleep, and keep the cheap levers ready before you reach for the budget. Treat agent access as something you govern at the action, not just at the table. Make lineage and observability good enough that when an agent builds a dependency and it breaks, a human can still trace it to the source. Put a cost ceiling on automated spend before the bill teaches you to. None of these are new ideas. They are the fundamentals, pointed at a consumer that is no longer human.
+
+The platform did not change underneath you. The user did. The data engineering that survives the next few years is the kind that notices the difference and builds for it.

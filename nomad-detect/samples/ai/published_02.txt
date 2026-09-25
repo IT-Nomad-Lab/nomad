@@ -1,0 +1,15 @@
+61% of enterprise AI projects were approved on projected ROI that nobody ever measured after launch. But this is not an AI problem. It is an IT industry problem.
+
+That number comes from a recent analysis tracking thousands of enterprise AI deployments. It is not an anomaly.
+
+Every January, companies publish roadmaps, approve budgets, and commit to outcomes. By March, and sometimes even sooner, the market has shifted. By June the team is chasing a new priority. The original promises are quietly shelved. Nobody calls it failure. Nobody calls it anything.
+
+I've seen this specifically in R&D. A team spends months building an AI feature. Before it is validated, a new trend appears. The feature gets abandoned. The cycle repeats. The business case from January is never revisited.
+
+Technology moves fast. Markets move faster. That is real. But speed is not the reason nobody checks the numbers. The reason is governance. Or the absence of it.
+
+Governance is not bureaucracy. It is the mechanism that forces you to answer one simple question: did we deliver what we said we would?
+
+Without it, every broken promise becomes a strategy pivot.
+
+How does your company hold itself accountable to the plans it approves at the start of the year?

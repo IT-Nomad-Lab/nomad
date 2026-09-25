@@ -1,0 +1,30 @@
+[Unit]
+Description=NOMAD watchdog (one pass: probe every service, post changes to Zulip)
+After=default.target
+
+[Service]
+# Type=oneshot ON PURPOSE. A long-lived watchdog that wedges reports `active` while watching
+# nothing, which is the exact failure this service exists to catch — it would be the fourth
+# instance of it. A oneshot either finishes or is killed by TimeoutStartSec and lands in `failed`,
+# and the timer's LAST/NEXT in `systemctl --user list-timers` shows whether it is still firing.
+Type=oneshot
+WorkingDirectory=/home/jdelimam/nomad/nomad-watch
+Environment=HOME=/home/jdelimam
+Environment=PYTHONUNBUFFERED=1
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=NOMAD_ZULIPRC=/home/jdelimam/.config/nomad/zulip-bot.zuliprc
+Environment=NOMAD_WATCH_CHANNEL=alerts
+Environment=NOMAD_WATCH_TOPIC=watchdog
+# Failing passes before a target is called down. At the timer's 5-minute period that is ~10
+# minutes to notice, in exchange for not paging on a single restart.
+Environment=NOMAD_WATCH_CONFIRM=2
+# The daily all-clear, so a quiet #alerts means healthy rather than dead. -1 turns it off.
+Environment=NOMAD_WATCH_DIGEST_HOUR=8
+# Shares the relay's venv: same two dependencies (zulip, requests), one thing to keep patched.
+ExecStart=/home/jdelimam/nomad/nomad-relay/.venv/bin/python watch.py
+TimeoutStartSec=120
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

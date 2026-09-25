@@ -1,0 +1,15 @@
+A recruiter came to me for help recently. Two mid-to-senior data engineers, a specific stack. "It's very hard right now," they said. "I can't find them."
+
+Meanwhile, half the industry just froze junior hiring to cut costs.
+
+I have had this conversation with colleagues across different fields all year. The theory was clean: AI does the junior work, so stop hiring juniors. Many are now having a cold shower over what the AI API bills actually cost.
+
+But the bill is not the real problem.
+
+Freeze junior hiring today and you build a gap you will feel in five years. Seniors are not minted. They are juniors who spent years making mistakes on real systems until they could be trusted with the hard ones. Stanford's 2026 AI Index already shows developer employment for ages 22 to 25 down close to 20% from its 2022 peak.
+
+A junior is an investment that pays over time. Train someone on your products and they start to own them. Mentoring also forces your seniors back to basics, which keeps them sharp on the platform.
+
+The purpose of a company is to make money and grow. I get it. But surviving this quarter and surviving in five years are different problems.
+
+You are not cutting cost. You are deferring a hiring crisis to whoever has your job next.

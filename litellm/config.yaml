@@ -19,10 +19,15 @@ model_list:
       model: ollama/llama3.1:8b
       api_base: http://host.docker.internal:11434
 
+  # 2026-09-15: was deepseek-r1:32b. qwen3.6 scored the same (7/8) on the
+  # ~/colibri-bench quality set at ~20x the speed, and fits the 5090 at 8k ctx.
+  # Needs ~22 GB VRAM: it evicts ComfyUI / nomad-detect when it loads.
   - model_name: private         # local reasoning, privacy-sensitive, offline
     litellm_params:
-      model: ollama/deepseek-r1:32b
+      model: ollama_chat/qwen3.6:35b-a3b
       api_base: http://host.docker.internal:11434
+      num_ctx: 8192
+      think: false
 
   - model_name: code            # local coding / refactors / FIM
     litellm_params:
@@ -44,6 +49,12 @@ model_list:
       api_base: http://host.docker.internal:8088/v1
       api_key: "sk-bridge-noauth"
 
+  - model_name: codex           # backup agentic brain → OpenAI Codex CLI on the ChatGPT
+    litellm_params:                #   subscription, via the native codex-bridge. A SECOND
+      model: openai/codex          #   vendor, so a Claude 5-hour throttle no longer drops
+      api_base: http://host.docker.internal:8089/v1   # the whole stack to llama3.1:8b.
+      api_key: "sk-bridge-noauth"             # bridge ignores auth (local only)
+
   - model_name: gpt             # alt reasoning, strong function-calling, vision
     litellm_params:
       model: openai/gpt-4o                    # verify tag
@@ -54,6 +65,62 @@ model_list:
       model: gemini/gemini-2.5-flash          # free-tier OK + 1M context
       api_key: os.environ/GEMINI_API_KEY      # (switch to gemini-2.5-pro once billing is on)
 
+  # ── NVIDIA NIM (free tier) — ACTIVE AS A HAND-CALLED BENCH TOOL ONLY ──────────────
+  # ⛔ DO NOT PUT THESE IN A FALLBACK CHAIN. They are defined so a human or an eval script
+  #    can ask for them BY NAME. Nothing routes here automatically, and that is the whole
+  #    basis on which this is permitted to exist. Operator decision, 2026-09-22 (ADR-010
+  #    option 2). Read docs/adr/ADR-010-nvidia-nim-free-tier.md before touching this block.
+  # Short version of what the checks found:
+  #
+  #   ⛔ The NVIDIA API Trial ToS §1.2/§1.4 allow "internal testing and evaluation purposes,
+  #      NOT in production". A LiteLLM fallback chain in a running orchestrator IS production
+  #      use, so wiring these into the chains is REJECTED on the terms, not on quality. The
+  #      two commented `fallbacks` lines below stay commented, permanently. Hand-calling
+  #      `nim` for evaluation is what §1.4 does allow, and that is the ONLY sanctioned use.
+  #   ⛔ ToS §3.3(iv) lets NVIDIA train on inputs AND outputs, with no opt-out. §4.3 forbids
+  #      uploading personal data outright. So: NEVER route client work, personal mail, the
+  #      nomad-detect corpus, or the comms/support lanes here. Synthetic/public data only.
+  #   ⚠ Rate limits exist, vary per model, and NVIDIA does not publish them. The "40 RPM" figure
+  #      on third-party blogs has no primary source. Your real limit shows in build.nvidia.com.
+  #   ⚠ A wrong ID fails at CALL time, not at startup, so it fails inside a real run.
+  #
+  # ⚠⚠ NEITHER the docs site NOR `GET /v1/models` tells you what this account can call. The
+  #     listing returns 82 models; many of them 404 "Not found for account" when actually
+  #     called. The original placeholder `meta/llama-3.3-70b-instruct` is 410 Gone (EOL
+  #     2026-08-26). ALWAYS re-probe with a real chat completion before relying on an id.
+  #
+  # The two ids below were verified callable and CORRECT on our key on 2026-09-22. That is a
+  # snapshot, not a guarantee: models here get retired without notice.
+  #
+  # IF activating as a hand-called bench tool only (ADR-010 option 2), uncomment the blocks,
+  # leave the fallbacks commented, then:
+  #   docker compose up -d --force-recreate litellm   (NEVER `restart`: the bind-mount gotcha
+  #   in CLAUDE.md drops the config file).
+  #
+  - model_name: nim             # ⚠ EVAL ONLY. No lane routes here, no fallback names it.
+    litellm_params:
+      model: openai/nvidia/nemotron-3-super-120b-a12b   # verified callable 2026-09-22, 4.0s
+      api_base: https://integrate.api.nvidia.com/v1
+      api_key: os.environ/NVIDIA_API_KEY
+    # ⚠ Most models here are reasoning models and reasoning tokens count against max_tokens.
+    #   A generous ceiling is NOT enough: measured at max_tokens=400, z-ai/glm-5.3-flash
+    #   returned an EMPTY string and nemotron-3.5-lightning returned 1893 chars of raw
+    #   scratchpad as its answer. Neither is flagged in the payload; both look like HTTP 200.
+    #   ALWAYS treat empty content as a failure, never as an answer.
+    # Alternates, also clean at 400 tokens: deepseek-ai/deepseek-v4.1-flash (10.4s),
+    #   openai/gpt-oss-20b (15.6s). Do NOT substitute an unprobed id: kimi-k3 and glm-5.3
+    #   time out entirely, and several listed ids 404 for this account.
+
+  - model_name: nim-vision      # ⚠ EVAL ONLY. 11B is the ONLY vision model callable on our key:
+    litellm_params:             #   90b-vision timed out at 120s and 300s; vila/neva/phi-3-vision
+      model: openai/meta/llama-3.2-11b-vision-instruct   #   /fuyu all 404 for this account.
+      api_base: https://integrate.api.nvidia.com/v1
+      api_key: os.environ/NVIDIA_API_KEY
+    # ⚠ Any vision call MUST set disable_fallbacks and check the served model name, or a
+    #   text-only fallback returns a confident description of frames it never saw. See the
+    #   same guard in nomad-social/analyze.py. Prove it with an image containing an
+    #   unguessable token, the way ADR-010 did; a plausible answer is not evidence.
+
 # NOTE: the "image" role (Adobe Firefly) is NOT an LLM and is NOT routed here.
 # It is a media engine called from n8n / crew/tools/firefly_tool.py.
 
@@ -63,14 +130,22 @@ router_settings:
   timeout: 120
   # Every cloud/subscription alias ends with `fast` (local, always-on Ollama) as the
   # last resort, so NOMAD keeps answering even if the subscription throttles AND cloud
-  # is down. deep→balanced first (cheaper bridge model) then real cloud, then local.
+  # is down. deep→balanced first (cheaper bridge model), then `codex` — a DIFFERENT
+  # vendor's subscription, so one throttled account doesn't take the others with it —
+  # then metered cloud, then local. `code` tries codex first: it is a coding agent.
   fallbacks:
-    - deep: ["balanced", "gpt", "fast"]
-    - balanced: ["gpt", "fast"]
-    - gpt: ["balanced", "fast"]
-    - longdoc: ["gpt", "fast"]
+    - deep: ["balanced", "codex", "gpt", "fast"]
+    - balanced: ["codex", "gpt", "fast"]
+    - codex: ["gpt", "balanced", "fast"]
+    - gpt: ["balanced", "codex", "fast"]
+    - longdoc: ["gpt", "codex", "fast"]
     - fast: ["private"]
-    - code: ["gpt", "fast"]
+    - code: ["codex", "gpt", "fast"]
+    # T0.1: these two lines stay COMMENTED PERMANENTLY. Routing a lane to `nim` makes it
+    # production use, which the NVIDIA trial terms forbid (§1.2/§1.4). Kept only so nobody
+    # re-derives the idea and wires it. See docs/adr/ADR-010-nvidia-nim-free-tier.md.
+    # - longdoc: ["nim-vision", "gpt", "codex", "fast"]     # ⛔ DO NOT ENABLE
+    # - nim: ["gpt", "codex", "fast"]                        # ⛔ DO NOT ENABLE
 
 litellm_settings:
   drop_params: true

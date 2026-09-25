@@ -1,0 +1,26 @@
+[Unit]
+Description=NOMAD Builder dispatcher (headless Claude Code in a project repo)
+After=default.target
+# The dispatcher exits rather than serve without its shared token. Restart=always would then
+# spin forever while systemctl reported "activating"; these limits land it in `failed` instead,
+# which is the only state anyone looks at.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory=/home/jdelimam/nomad/dispatcher
+Environment=HOME=/home/jdelimam
+Environment=PATH=/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin
+Environment=ANTHROPIC_API_KEY=
+# Projects are any child of a root carrying a Nomad.md marker. Repos that live outside this
+# tree (the Tauri shell, on the Windows filesystem) are reached by symlinking them in here —
+# adding /mnt/c/... as a second root would surface a second RuneMatch checkout under the same
+# name, and the dispatcher would then refuse both rather than guess.
+Environment=PROJECT_ROOTS=/home/jdelimam
+ExecStart=/usr/bin/python3 /home/jdelimam/nomad/dispatcher/dispatch.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

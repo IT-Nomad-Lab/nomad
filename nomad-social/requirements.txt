@@ -1,0 +1,7 @@
+fastapi>=0.110
+uvicorn>=0.29
+httpx>=0.27
+pydantic>=2
+instaloader>=4.15
+yt-dlp>=2026.8.19   # Instagram changes often: `pip install -U yt-dlp instaloader` when fetches break
+faster-whisper>=1.1

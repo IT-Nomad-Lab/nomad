@@ -17,7 +17,7 @@ nomad-plugin/
 
 ## Install
 ```
-/plugin marketplace add /path/to/nomad        # this repo as a local marketplace
+/plugin marketplace add /home/jdelimam/nomad        # this repo as a local marketplace
 /plugin install nomad
 ```
 (or copy `nomad-plugin/` into a marketplace you control). Restart Claude Code to load it.

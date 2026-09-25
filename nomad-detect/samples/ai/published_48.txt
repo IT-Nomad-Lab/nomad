@@ -1,0 +1,63 @@
+Every governance program I have seen started with a policy document and a catalog license. Every governance failure I have seen started somewhere neither of them could see.
+
+That is not a criticism of policies or catalogs. Both are necessary. It is a statement about where the damage actually comes from. The wrong number that reaches a board deck, the personal data that turns up in a place it was never supposed to be, the migration batch that refuses to move: in my experience none of these came out of the governed part of the estate. They came out of the part nobody had looked at.
+
+I spent the first half of August moving apartments, and I could not stop seeing data migrations in every box. The parallel that stuck with me hardest was the first one: you do not know what you own until you have to put it all in boxes. Every migration I have been part of opened the same way. Discovery finds more pipelines, more tables, more dependencies than anyone had on paper. Not because people were careless. Because the estate you know is the estate you touched recently, and the rest is dark.
+
+Governance readiness is usually measured by what you have written down. I think it should be measured by how much of your estate you have actually seen.
+
+**The catalog covers the cataloged path**
+
+A data catalog is a map of what someone already knew to look for. That is its nature, not a flaw. Every lineage tool, every schema registry, every discovery query works the same way. You point it at the systems you know about and it documents them well. What it cannot do is document the systems nobody pointed it at.
+
+I learned this the expensive way in the middle of a migration. Pipeline after pipeline moved cleanly, batch after batch, until one batch simply refused to work. Nothing we knew about the platform explained it. The cause turned out to be a transformation tool older than anyone on the team, running silently inside the legacy platform, covering a set of edge cases nobody had documented. The migration script did not detect it. The data catalog did not map it. The queries we had used to plan the whole migration did not record it. We found it by reading pipeline configurations line by line until the system confessed.
+
+Read that list again, because it is the whole point. Three independent instruments, all trusted, all correct about the estate they could see. All blind to the same corner. Governance tooling does not fail loudly. It fails by omission, and omissions do not show up on the dashboard.
+
+There is a security version of the same problem, and it has numbers. IBM's 2024 Cost of a Data Breach report, built on Ponemon research across 604 organizations, found that more than one-third of breaches involved shadow data, meaning data stored in unmanaged sources. Not data with a weak policy. Data with no policy, because nobody knew it was there to govern.
+
+**Trusted means old enough to forget**
+
+There is a second blind spot, and it is more dangerous than the first because it hides in plain sight. It is the component everyone trusts.
+
+Last week The Register reported that a 16-year-old bug in SQLite, the most deployed database on earth, caused Tailscale's repeated outages in 2025 and took six months to find. The bug had been sitting in the write-ahead log checkpointing since 2010, waiting for a rare combination of conditions. It needed multiple open connections, WAL mode, and manual checkpoint control, and Tailscale's setup happened to be exactly that. The SQLite maintainers had to build a custom logging layer just to catch it in the act.
+
+I believe every word of that story, because I have met that bug's cousins. The five-year-old transformation tool from my migration was one of them. Nobody suspected it for the same reason nobody suspects SQLite: it had been working, quietly, for longer than anyone in the room had been employed. Incident hunts start with the newest code, because that is where we expect risk to live. But estates run on components that predate everyone on the team, and those components have the least documentation, the least ownership, and the most load-bearing weight.
+
+Trusted, in most stacks, mostly means old enough that nobody remembers to suspect it.
+
+This is tech debt in its purest form. Left alone, it does not disappear. It goes quiet, waits, and collects with interest. In Tailscale's case it waited sixteen years. In mine it waited five. A governance program that has a policy for every table but no inventory of the components running underneath those tables is prepared for the failures it can imagine and defenseless against the ones it cannot.
+
+**Discovery is a governance act, not a migration chore**
+
+Here is the uncomfortable pattern. Most companies inventory their data estate exactly once: when they are forced to move it. Discovery gets budgeted as the boring first phase of a migration, something to get through so the real work can start. And because the migration has a deadline, discovery is the phase that gets cut short.
+
+Then the estate moves, and the classification work that a move forces on you happens under pressure. Keep, archive, delete. Migrate, park, kill. It is slow, it is tedious, and it is the actual governance work. Skip it and you are not migrating, you are paying professional movers to relocate your junk drawer. Lift-and-shift is that exact move: boxes that arrive at the new platform and never get opened, except now the rent is a cloud bill.
+
+I want to flip that framing. Discovery is not a migration chore. It is the governance act that everything else depends on. You cannot assign an owner to a table nobody has found. You cannot set a retention policy on a dataset that does not appear in any inventory. You cannot mark data as sensitive if the only place it exists is a silent tool's intermediate output. Every governance capability you buy is downstream of one question: do you know what you have?
+
+The green-pipeline problem lives here too. Every time I have traced a wrong number that reached a decision, the pipeline was healthy and the owners were not watching the final report, and often the honest answer was that nobody had ever been named as the owner at all. That is not a monitoring failure. It is a discovery failure that showed up as a monitoring failure. The gap was invisible until someone went looking, and someone went looking only because a number was already wrong.
+
+Preparedness means going looking before the number is wrong.
+
+**What prepared actually looks like**
+
+None of this needs a new platform. It needs a decision to spend time on the part of the estate that does not currently generate tickets. In practice, four things.
+
+Read the configuration once. Not the documentation, not the catalog export. The actual pipeline definitions, the job schedulers, the scripts in the folder nobody opens. It is slow work, and it is the only work that finds the silent tool. Do it before a migration forces you to do it under a deadline.
+
+Own it or retire it. Every component the read turns up gets a named owner or a decommission date. There is no third state. Unowned and running is exactly the condition that let the five-year-old tool operate in silence, and it is the condition shadow data lives in.
+
+Treat unknown provenance as an incident. If a dataset exists and nobody can say what produces it, that is not a documentation gap to schedule for next quarter. It is a live risk with the same profile as the SQLite bug: quiet, load-bearing, and waiting for the right combination of conditions.
+
+Budget discovery as recurring, not as a project phase. Estates grow between migrations. The tools that were new in the last inventory are the trusted old components of the next one. A yearly line-by-line pass costs a fraction of one migration batch that refuses to work, and a tiny fraction of one breach that started in a source nobody knew existed.
+
+We did the ending right in my migration, at least. That silent edge case became a proper, documented, owned tool on the new platform. It took time. It was worth it. And it only happened because one batch failed loudly enough to force us into the basement.
+
+The governance you have is the governance of the estate you know. The estate you know is always smaller than the one you run.
+
+**Sources**
+
+1. Tailscale outages traced to a 16-year-old SQLite bug (WAL checkpointing race present since v3.7.0, July 2010; six-month investigation; custom logging shim built by the SQLite maintainers): The Register, 12 August 2026. https://www.theregister.com/databases/2026/08/12/deeply-buried-16-year-old-sqlite-bug-caused-last-years-tailscale-outages/5287004
+
+2. Shadow data in breaches (more than one-third of breaches involved data stored in unmanaged data sources): IBM, Cost of a Data Breach Report 2024, research by Ponemon Institute, 604 organizations breached between March 2023 and February 2024. Vendor-published. https://newsroom.ibm.com/2024-07-30-ibm-report-escalating-data-breach-disruption-pushes-costs-to-new-highs

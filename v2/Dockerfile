@@ -8,8 +8,17 @@
 FROM python:3.11-slim
 
 WORKDIR /app
-RUN pip install --no-cache-dir "mcp>=1.0" "requests>=2.31" "psycopg2-binary>=2.9" \
-    "fastapi>=0.110" "uvicorn[standard]>=0.29" "websockets>=13"
+# ⚠ mcp is PINNED <2: 2.x renames FastMCP → MCPServer, so an unpinned rebuild breaks every
+# mcp_*.py import and the engine won't boot. Unpin only together with the v1→v2 API migration.
+RUN pip install --no-cache-dir "mcp>=1.0,<2" "requests>=2.31" "psycopg2-binary>=2.9" \
+    "fastapi>=0.110" "uvicorn[standard]>=0.29" "websockets>=13" \
+    "pytest>=8"   # server.py needs fastapi+psycopg2, which the host does not have, so its tests run
+                  # HERE. Name the files, because bare collection also imports test_2a/test_3c/
+                  # test_engine, which are standalone scripts that sys.exit at import:
+                  #   docker compose exec nomad-v2-engine sh -c \
+                  #     'python -m pytest test_chat_context.py test_engine_states.py -q'
+                  # Installing pytest ad hoc into a running container works until the next recreate,
+                  # at which point the tests quietly stop being runnable, which is how a suite dies.
 
 COPY *.py ./
 COPY skills ./skills

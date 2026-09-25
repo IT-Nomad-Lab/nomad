@@ -1,0 +1,11 @@
+Most data engineering CVs are a list of tools. Most interviews test tools. Neither tells you whether someone actually understands data engineering.
+
+I have tested for this in interviews. Two questions that reveal it fast. Ask about joins in Spark. Most candidates default to SQL joins. What that tells you: they know the syntax but they have not thought about what a join actually does in a distributed system. Data moving across nodes, shuffling, memory pressure. The concept underneath the command.
+
+Ask how they would recover a corrupted database. The answer tells you everything about how they think about data integrity, backup strategy, and recovery. Not which tool they would use. How they would reason through it.
+
+The fundamentals of data engineering are not tool-specific. We have data modeling, distributed systems, pipeline reliability, data quality and lineage, Governance. These are the concepts that transfer across every stack: Spark, Databricks, Cloudera, Postgres, S3, etc. The tool changes. The underlying principle does not.
+
+A candidate who understands the fundamentals has a different quality to their answers. Not just what they say but how they say it. Confidence without rigidity. They know what they know and they know what they do not know.
+
+That is what you are hiring for.

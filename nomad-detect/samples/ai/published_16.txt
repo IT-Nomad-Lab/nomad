@@ -1,0 +1,11 @@
+Ingestion was lagging. Memory errors kept climbing. The data coming in was bigger than anything the pipeline had been sized to handle, and it was not slowing down.
+
+In data pipelines you learn the peaks. Month-end, Monday mornings, the big reporting runs. A well-built platform also plans for the spikes you cannot predict. Often the platform is not that well built.
+
+When the volume hit, scaling the infrastructure was not the first move. It is the expensive one. First you prioritize what has to flow now. You apply backpressure. You play with retention. Those levers are cheap and they buy you time. Sometimes, after all that, you still have to add capacity, the way GitHub just did when it borrowed AWS to survive its own traffic.
+
+What saved us was not that we predicted it. We did not. Monitoring caught the lag and the memory errors early. We were not fully ready, but we could react, and we planned better for the next time.
+
+GitHub is the same story at a scale most of us will never touch. AI agents flooded its infrastructure around the clock. No nightly drop. No quiet weekend. Just constant machine-speed load against a platform built for human rhythms.
+
+Every capacity plan I have ever built assumed people. People sleep. Agents do not. Most infrastructure still assumes they do.

@@ -23,6 +23,10 @@ _db = NocoDB()
 mcp = FastMCP("nomad-comms")
 
 N8N_SEND_URL = _E.get("N8N_V2_SEND_URL", "http://localhost:5678/webhook/v2-send")
+# n8n publishes 5678 on 0.0.0.0, and the send workflow is webhook straight into Gmail Send:
+# the approval interlock below lives here, in front of n8n, not inside the workflow. So the
+# webhook itself requires this shared header (n8n credential "NOMAD webhook token", 2026-09-23).
+N8N_WEBHOOK_TOKEN = _E.get("N8N_WEBHOOK_TOKEN", "")
 OPERATOR_EMAIL = _E.get("OPERATOR_EMAIL", "")
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
@@ -49,18 +53,25 @@ def send_message_impl(to: str, body: str, run_id: str, subject: str = "Message f
         return {"ok": False, "gated": True, "reason": "run not approved — refusing to send"}
     addr = _email(to)
     sent = False
+    err = "" if addr else "no address"
     if addr:
+        headers = {"Content-Type": "application/json"}
+        if N8N_WEBHOOK_TOKEN:
+            headers["X-Nomad-Token"] = N8N_WEBHOOK_TOKEN
         try:
             req = urllib.request.Request(
-                N8N_SEND_URL, method="POST", headers={"Content-Type": "application/json"},
+                N8N_SEND_URL, method="POST", headers=headers,
                 data=json.dumps({"to": addr, "subject": subject, "body": body}).encode())
             urllib.request.urlopen(req, timeout=20)
             sent = True
-        except Exception:
-            sent = False
+        except Exception as e:  # a 403 here means the webhook token is missing or wrong
+            err = f"{type(e).__name__}: {e}"
     out = _db.create("outbox", {"run_id": run_id, "to": addr or to,
                                 "body": f"Subject: {subject}\n\n{body}", "delivered_at": _now()})
-    return {"ok": True, "outbox_id": out["Id"], "sent": sent, "to": addr or to}
+    r = {"ok": True, "outbox_id": out["Id"], "sent": sent, "to": addr or to}
+    if not sent:
+        r["error"] = err
+    return r
 
 
 @mcp.tool()

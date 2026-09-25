@@ -1,0 +1,55 @@
+# NOMAD secret-scanning config (T0.3).
+# Engine: gitleaks (default ruleset) + the allowlists below.
+# Keep allowlists NARROW. Every entry here is a place a real credential could hide
+# unnoticed, so each one needs a reason and a path regex, never a blanket "*".
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Vendored minified xterm.js bundles. Minifier output ('t.FourKeyMap=<8 chars>') trips generic-api-key. Third-party build artifact, no credential is ever authored here."
+paths = [
+  '''(^|/)static/vendor/xterm\.js$''',
+  '''(^|/)static/vendor/xterm-addon-[a-z-]+\.js$''',
+]
+
+[[allowlists]]
+description = "Example env files carry placeholders only. They are committed on purpose; the real values live in the gitignored .env."
+paths = [
+  '''(^|/)\.env\.example$''',
+]
+
+# --- custom rules -----------------------------------------------------------
+# gitleaks 8.28's default ruleset has NO Anthropic rule (verified: a planted
+# sk-ant-api03 key scanned clean). This repo leaked an Anthropic key once already,
+# so the one shape that matters most here was the one shape the scanner missed.
+
+[[rules]]
+id = "anthropic-api-key"
+description = "Anthropic API key"
+regex = '''sk-ant-api[0-9]{2}-[A-Za-z0-9_\-]{20,}'''
+keywords = ["sk-ant-api"]
+
+[[rules]]
+id = "anthropic-admin-key"
+description = "Anthropic admin key"
+regex = '''sk-ant-admin[0-9]{2}-[A-Za-z0-9_\-]{20,}'''
+keywords = ["sk-ant-admin"]
+
+# Same reasoning as the Anthropic rules above: the stock ruleset does not match these
+# two shapes either, and a Notion token is the OTHER credential this repo has leaked.
+# secret_scan.py's FALLBACK_RULES already cover both, but that fallback only runs when
+# gitleaks is missing, so with gitleaks installed these were going unscanned.
+
+[[rules]]
+id = "notion-api-token"
+description = "Notion API token"
+regex = '''\b(?:ntn_|secret_)[A-Za-z0-9]{35,}'''
+keywords = ["ntn_", "secret_"]
+
+[[rules]]
+id = "openai-api-key"
+description = "OpenAI API key"
+regex = '''\bsk-(?:proj-)?[A-Za-z0-9_\-]{32,}'''
+keywords = ["sk-"]
+entropy = 3.5

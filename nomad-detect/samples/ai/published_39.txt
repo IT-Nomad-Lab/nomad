@@ -1,0 +1,17 @@
+I was in charge of the migration. I did not own a single one of the data assets I was migrating.
+
+The owners sat in other departments. They had their own roadmaps and their own quarters. My timeline was not their problem, and nobody above us had made it their problem either.
+
+That is the part nobody puts in the plan. Before you move anything you have to find out who owns it, and there is no list. You build it. Asset by asset, you work out who owns the thing and what it actually is, then you agree how it moves, and the business keeps running exactly as it did before while you do all of it.
+
+Only then do you get approval. Then tests and simulations. Then a date.
+
+Then you communicate. Emails, chats, calls, the same message in all of them, again the week before and again the morning of.
+
+On the day, someone still says: I didn't know that was going to happen today.
+
+So you explain it again, and you push, and you insist.
+
+A migration is not a technical event with stakeholders attached. It is months of finding people who never volunteered for it, and holding the line on the day one of them forgets.
+
+There is no turning back. The migration is happening. The only question was ever when.

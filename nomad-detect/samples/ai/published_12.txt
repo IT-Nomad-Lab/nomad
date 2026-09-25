@@ -1,0 +1,11 @@
+The worst place to find out your pipeline is broken is a business report. By then, the data has been wrong for hours. The error happened somewhere else entirely.
+
+I have seen a full infrastructure failure from insufficient memory. I have also seen a production incident caused by bad indentation in a YAML file. What they had in common: the symptom and the cause were never in the same place.
+
+Errors that are not caught properly show downstream. They travel through the pipeline silently and surface at the worst moment. This is why QA is not optional. Before any deployment, QA gives a green stamp. Not a soft review. A hard gate.
+
+Zero errors is what you push for. Let us be honest: it is not always achievable. What is achievable is detecting problems before the user does. A system that catches its own failures first is worth more than a perfect record that does not exist.
+
+When something breaks, you start at the data source. Not the error message. The source. This is where data lineage becomes a diagnostic tool, not a governance checkbox. Lineage lets you follow the alarm upstream, step by step, to the origin.
+
+The engineer who can trace a problem through a complex pipeline is not lucky. They built the system so they could find it.

@@ -1,0 +1,111 @@
+# The Third Map
+
+For years the answer to "where should the data live" was latency. You looked at where your biggest customers were, put the hardware as close to them as you could, and moved on. The difference was milliseconds, and most users would never have noticed either way. You did it anyway, because it was cheap to do and it felt like engineering.
+
+That decision is not yours anymore.
+
+In the five European markets everyone has built in for twenty years, Frankfurt, London, Amsterdam, Paris and Dublin, getting a grid connection now takes the better part of a decade. CBRE's second quarter numbers for 2026 show what that does to behaviour. Of roughly 700 MW of new capacity added across Europe in the quarter, only 37% landed in those five cities. The other 63% went to Spain, Portugal, Belgium, Italy and the Nordics. Europe reaches 13 GW of capacity by the end of this year, a fifth more than last year, and most of the growth is happening in places nobody had on a slide in 2020. [1]
+
+Proximity stopped being a design choice. It became a queue you are standing in.
+
+Most teams still draw two maps when they decide where data goes. The legal one and the power one. There is a third map, almost nobody draws it, and in Europe it is the one that will decide what actually gets built.
+
+## Map one: the law moved while the architecture stayed still
+
+I worked on a fintech platform where the data had to sit inside the client's jurisdiction. Not for performance. Because the client's regulator said so, and the client knew it before we started. On another project, with Chinese partners, data generated in China had to stay on servers in China. Same pattern. The requirement arrived before the design, and we researched every legal constraint before anyone drew a box on a diagram.
+
+Both projects went fine. That is the point.
+
+They went fine because the legal map came first. When it comes second, you are not designing a system, you are unpicking one. And the law is a moving target. China's rule, for what it is worth, is narrower than most people repeat: there is no blanket ban on data leaving. Domestic storage and a state security assessment bind operators of critical information infrastructure, anything classed as important data, and personal data above volume thresholds. [2] Below that, since March 2024, whole categories of transfer are exempt from reporting. [3] Our client applied the stricter reading, which was their call to make. Most companies never find out which reading applies to them until someone asks.
+
+In Europe the ground is moving faster. From 12 January 2027 the Data Act bans switching fees between cloud providers, egress charges for the migration included. [4] That kills the cost of leaving. It does not kill data gravity, and it does not move your data for you. Since January 2026, AWS runs a European Sovereign Cloud out of Brandenburg, operated by an EU parent company, staffed only by EU residents, with €7.8 billion committed and sovereign local zones announced for Belgium, the Netherlands and Portugal. [5] On 3 June 2026 the Commission proposed the Cloud and AI Development Act, which puts an EU sovereignty assessment framework next to a plan to accelerate data centre deployment. [6] And since January 2025, any financial entity under DORA has to keep a register of every ICT third party arrangement it holds. [7] Where your workload physically runs is now a line a supervisor can read.
+
+So here is the practical version. Somewhere in your top twenty customer contracts there is a residency clause naming a country, or worse a city, instead of a legal area. It was written by someone who was not thinking about placement. It now governs where hardware can sit for years, and nobody in the data organisation has read it, because it lives in legal's repository. Frankfurt is not a legal area. The EEA is. That distinction costs nothing at signature and buys back the entire placement decision later.
+
+## Map two: the power, and the price of admission
+
+Ireland is the clearest case in Europe of what happens when growth meets a grid.
+
+Data centres there consumed 7,663 GWh in 2025. That is 23% of all metered electricity in the country, up from 5% in 2015. Irish households, all of them together, account for 28%. [8] A single industry is now within striking distance of every home in the state.
+
+Dublin's connection freeze ended in December 2025, and the regulator did not simply reopen the door. Under the new policy, a new data centre has to bring generation or storage of its own, onsite or local, sized to the capacity it is asking for, and it has to match at least 80% of its annual demand with additional renewable generation built in Ireland. Not existing renewables. New ones. Connections are now assessed as constrained or unconstrained per application, not per region. [9]
+
+Read that again as an operator. You do not connect to the grid. You bring one.
+
+At the same time, Europe is pushing in the opposite direction with both hands. In July the Commission opened bidding on seven AI gigafactories, €10 billion of public money against an expected €30 billion total, each site holding at least 100,000 accelerators. [10] The earlier call for interest drew 77 proposals across 16 member states and 60 different sites. [11] All of that lands on the same grid that cannot connect a 50 MW hall in Amsterdam this decade.
+
+And it lands under measurement. Since 2024, every data centre in the EU with 500 kW or more of installed IT load reports annually into a European database: power usage effectiveness, water usage effectiveness, energy reuse, renewable share, plus another eighteen indicators. [12] Water is in the file now, next to power, in a public statistical series. That matters more than it sounds, because it is the raw material for the third map.
+
+## Map three: whether the region will have you
+
+This is the one that does not get drawn.
+
+Meta planned the largest data centre in the Netherlands at Zeewolde. It does not exist. A local campaign killed it. Save the Wieringermeer has spent years fighting server farm expansion on Dutch farmland. In Ireland, Not Here Not Anywhere is credited with pushing the Dublin connection moratorium that shaped the policy the whole market now lives under. In Spain, a campaign called Tu Nube Seca Mi Río, "your cloud dries my river", is fighting hyperscale approvals in Aragón, one of the driest regions in Europe, where farmers have been losing crops to drought. In Marseille, La Quadrature du Net argues the power should go to public transport instead. In Hessen and the Rhineland, BUND is challenging the environmental assessments directly. [13]
+
+Meanwhile governments are competing to make building easier. Italy passed a law in February 2026 simplifying authorisation. Aragón created a fast track through its general interest project framework. German municipalities are offering tax incentives. Europe is rolling out a red carpet at the exact moment the opposition is getting organised, which is precisely what happened in the United States, where Microsoft walked away from a Wisconsin site and Amazon pulled out of Tucson over water. [14]
+
+I want the capacity built in Europe. I want it built here rather than rented from somewhere with weaker rules. But I do not want European towns finding out what a gigawatt campus does to their water table and their electricity bill after the permit is signed, which is the American pattern, and it is arriving.
+
+Because here is what the grid queue and the permit fight have in common. Both are queues. One of them you can shorten with money and a substation. The other one you cannot, and it does not clear in seven years.
+
+## What lands on everyone downstream
+
+Placement is treated as an infrastructure decision. It is not. It reaches every layer above it.
+
+**For people consuming data**, the thing they actually get from your placement choice is not speed. It is availability and legality. Whether the service works during a regional failure, whether their information can be handed to a party they never agreed to, whether the product is even offered in their country. Nobody churns over 40 milliseconds. They churn when the service is unavailable, or when a regulator makes it unavailable.
+
+**For people producing data**, where it is collected decides what may ever be done with it. A mobile app that writes to whichever region the SDK defaulted to has already made a jurisdictional decision on behalf of the company, usually without a single lawyer in the room. Sensors, point of sale, telemetry, all the same. The collection point is a placement decision, and it is normally made by whoever shipped the first version.
+
+**For people building applications**, this is a constraint with a lead time longer than the system's life. A grid connection is a seven to ten year wait. Most services do not survive ten years. So the region cannot be a constant in your code. Three things follow from that, and they are cheap now and expensive later.
+
+Do not hardcode region. Placement belongs in configuration, and it should be possible to stand the service up somewhere else without touching application logic. Know your replication and egress bill before residency forces the topology on you, because the Data Act makes leaving a provider free in 2027 but moving 400 TB across a continent is still a project with a date and a budget. And write residency into the design review as an input, not a compliance sign off at the end. The projects I have seen go smoothly are the ones where somebody read the contract first.
+
+Two maps get drawn in every placement review: what the law allows and what the grid can deliver. The third one decides whether the site is still there in 2035, and nobody in the room is holding it.
+
+---
+
+## References
+
+Numbered in order of appearance. Every link was opened and confirmed reachable on 21 August 2026.
+
+[1] CBRE, European data centre market update Q2 2026, reported by The Next Web. Used for: 700 MW added in the quarter, the 37% / 63% split against Frankfurt, London, Amsterdam, Paris and Dublin, 13 GW of European capacity by end 2026, and Amsterdam connection waits approaching a decade.
+https://thenextweb.com/news/europe-data-centres-leaving-flap-d-grid-queues-land
+
+[2] DLA Piper, Data Protection Laws of the World, China chapter. Used for: the scope of Chinese data localisation, which binds critical information infrastructure operators, important data, and personal data above volume thresholds, rather than all data.
+https://www.dlapiperdataprotection.com/index.html?c=CN
+
+[3] Greenberg Traurig, China relaxes requirements for cross-border data transfers, March 2024. Used for: the categories of transfer exempted from reporting under the 2024 CAC provisions.
+https://www.gtlaw.com/en/insights/2024/3/china-relaxes-requirements-for-cross-border-data-transfers
+
+[4] European Commission, Data Act explained. Used for: the ban on switching charges, including egress fees for migration, applying from 12 January 2027.
+https://digital-strategy.ec.europa.eu/en/factpages/data-act-explained
+
+[5] Amazon Web Services, AWS launches the AWS European Sovereign Cloud, 15 January 2026. Used for: the Brandenburg launch, the €7.8 billion commitment, the EU parent company and EU-resident operations, and the announced sovereign local zones in Belgium, the Netherlands and Portugal.
+https://press.aboutamazon.com/aws/2026/1/aws-launches-aws-european-sovereign-cloud-and-announces-expansion-across-europe
+
+[6] European Commission, proposal for a Cloud and AI Development Act, 3 June 2026. Used for: the proposal date, the deployment acceleration measures, and the EU sovereignty assessment framework.
+https://digital-strategy.ec.europa.eu/en/library/proposal-cloud-and-ai-development-act-cada
+
+[7] European Banking Authority, preparation for the application of DORA. Used for: the requirement on financial entities to maintain a register of information on all ICT third party arrangements.
+https://www.eba.europa.eu/activities/direct-supervision-and-oversight/digital-operational-resilience-act/preparation-dora-application
+
+[8] Central Statistics Office Ireland, Data Centres Metered Electricity Consumption 2025. Used for: 7,663 GWh consumed in 2025, 23% of all metered electricity, the rise from 5% in 2015, and the 28% residential share.
+https://www.cso.ie/en/releasesandpublications/ep/p-dcmec/datacentresmeteredelectricityconsumption2025/keyfindings/
+
+[9] Commission for Regulation of Utilities (Ireland), decision on a new electricity connection policy for data centres, 12 December 2025. Used for: the onsite or local generation requirement sized to requested capacity, the 80% additional Irish renewable matching obligation, and the constrained versus unconstrained assessment per application.
+https://www.cru.ie/about-us/news/the-cru-publishes-its-decision-on-new-electricity-connection-policy-for-data-centres/
+
+[10] European Commission AI gigafactory tender, July 2026. Used for: €10 billion of public funding against roughly €30 billion in total investment, seven sites, and the minimum of 100,000 accelerators per site.
+https://www.news4jax.com/business/2026/07/30/eu-lays-out-114-billion-for-7-ai-gigafactories-as-it-aims-to-catch-up-with-us-and-china/
+
+[11] European Commission, AI Gigafactories. Used for: 77 proposals received from 16 member states covering 60 sites, under the InvestAI facility.
+https://commission.europa.eu/topics/competitiveness/competitiveness-coordination-tool-projects/ai-gigafactories_en
+
+[12] European Data Centre Association, Energy Efficiency Directive Article 12. Used for: the 500 kW installed IT power threshold, the annual reporting obligation into the European database, and the PUE, WUE, energy reuse and renewable share indicators set out in Delegated Regulation (EU) 2024/1364.
+https://www.eudca.org/energy-efficiency-directive
+
+[13] AlgorithmWatch, a guide to data centres for local communities in Europe. Used for: the Zeewolde cancellation, Save the Wieringermeer, Not Here Not Anywhere and the Dublin moratorium, Tu Nube Seca Mi Río in Aragón, La Quadrature du Net in Marseille, and BUND in Hessen and the Rhineland.
+https://algorithmwatch.org/en/a-guide-to-data-centers/
+
+[14] EUobserver, Europe rolls out the red carpet for AI data centres as water and energy backlash spreads. Used for: Italy's February 2026 simplified authorisation law, the Aragón fast-track framework, German municipal tax incentives, and the Microsoft Wisconsin and Amazon Tucson withdrawals.
+https://euobserver.com/217320/europe-rolls-out-the-red-carpet-for-ai-data-centres-as-water-and-energy-backlash-spreads/

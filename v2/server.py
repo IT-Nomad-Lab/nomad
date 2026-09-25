@@ -14,19 +14,24 @@ webhook POSTs here → we map status→decision and resume the paused run. Defen
 is deferred to Phase 2 — the status-flip → resume semantics are unchanged.)
 """
 import asyncio
+import functools
 import json
 import os
+import re
+import subprocess
 import threading
 import time
 import urllib.parse
 import urllib.request
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 from fastapi import FastAPI, Request, Response, WebSocket
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from engine import Engine
+import engine as engine_mod
+from engine import Engine, proposal_hash
 from mcp_image import generate_image_impl   # direct local image gen for the nomad-image MCP bridge
 from nocodb import NocoDB
 
@@ -34,9 +39,28 @@ HOST = os.environ.get("NOMAD_V2_ENGINE_HOST", "127.0.0.1")   # localhost-only (s
 PORT = int(os.environ.get("NOMAD_V2_ENGINE_PORT", "8099"))
 GATE_POLL_SECS = int(os.environ.get("NOMAD_V2_GATE_POLL", "3"))
 VOICE_URL = os.environ.get("NOMAD_VOICE_URL", "http://nomad-voice:8200")   # 3D: local Piper/Whisper
-CONSOLE_URL = os.environ.get("NOMAD_CONSOLE_URL", "http://nomad-console:8000")  # telemetry source (CPU/MEM/GPU)
+CONSOLE_URL = os.environ.get("NOMAD_CONSOLE_URL", "http://nomad-console:8000")  # v1 telemetry fallback only
 TERM_BASE = os.environ.get("NOMAD_TERM_URL", "ws://host.docker.internal:8091")  # interactive project terminal
 DISPATCH_URL = os.environ.get("NOMAD_DISPATCH_URL", "http://host.docker.internal:8090")  # project list
+
+
+def _dispatch_token():
+    """Shared secret for the Builder dispatcher (auto-generated on the host at
+    ~/.config/nomad/dispatch-token). The dispatcher refuses every route but /health without
+    it. Candidates cover the container mounts and the host; '' means the call will 401."""
+    env = os.environ.get("NOMAD_DISPATCH_TOKEN")
+    if env:
+        return env
+    for cand in ("/term-secret/dispatch-token", "/host/.config/nomad/dispatch-token",
+                 os.path.expanduser("~/.config/nomad/dispatch-token")):
+        try:
+            return open(cand).read().strip()
+        except Exception:
+            continue
+    return ""
+
+
+DISPATCH_TOKEN = _dispatch_token()
 
 
 def _term_token():
@@ -111,6 +135,75 @@ def _pipeline_context(limit=12) -> str:
     return "\n".join(lines)
 
 
+# A run id is 12 lowercase hex characters. We accept a prefix too, because nobody retypes twelve
+# of those by hand, and we resolve every candidate against the real run list rather than trusting
+# the pattern — that resolution is the filter, so an ordinary hex-looking word matches nothing and
+# costs nothing.
+_RUN_ID_RE = re.compile(r"\b[0-9a-f]{6,32}\b")
+
+
+def _resolve_run_ids(message: str, max_runs: int = 2):
+    """Run ids named in `message`, as (resolved, ambiguous) id lists.
+
+    An ambiguous prefix returns its candidates instead of picking one. Injecting the wrong run's
+    error is worse than injecting none: the model would explain a failure that did not happen,
+    confidently, and the operator has no way to tell.
+    """
+    tokens, seen = [], set()
+    for tok in _RUN_ID_RE.findall(message.lower()):
+        if tok not in seen:
+            seen.add(tok)
+            tokens.append(tok)
+    if not tokens:
+        return [], []
+    resolved, ambiguous, known = [], [], None
+    for tok in tokens[:4]:
+        if len(tok) == 12 and db.find("comms", "run_id", tok):
+            resolved.append(tok)
+            continue
+        if known is None:                       # only pay for the scan if a prefix showed up
+            known = [r.get("run_id") for r in recent_runs(200) if r.get("run_id")]
+        hits = [rid for rid in known if rid.startswith(tok)]
+        if len(hits) == 1:
+            resolved.append(hits[0])
+        elif len(hits) > 1:
+            ambiguous.append((tok, hits[:6]))
+    return resolved[:max_runs], ambiguous[:max_runs]
+
+
+def _run_context(run_ids, ambiguous) -> str:
+    """The detail block for runs the operator named. `run_detail` already assembles the routing,
+    the proposal, the error and the episodic log; this only has to make it readable and bounded."""
+    blocks = []
+    for rid in run_ids:
+        d = run_detail(rid)
+        if not d.get("status"):
+            continue
+        lines = [f"Run {rid} — status {d['status']}, lane {d.get('lane') or '?'}"]
+        for label, key in (("goal", "goal"), ("intent", "intent"), ("target", "target"),
+                           ("action", "action")):
+            if d.get(key):
+                lines.append(f"  {label}: {str(d[key])[:300]}")
+        if d.get("error"):
+            lines.append(f"  ERROR: {str(d['error'])[:600]}")
+        det = d.get("detector")
+        if isinstance(det, dict) and det.get("verdict"):
+            lines.append(f"  detector: {det.get('verdict')}")
+        if d.get("log"):
+            lines.append("  log:")
+            for e in d["log"][-8:]:
+                lines.append(f"    {e.get('created_at') or ''} {e.get('agent') or ''}: "
+                             f"{str(e.get('what') or '')[:200]}")
+        blocks.append("\n".join(lines))
+    for tok, hits in ambiguous:
+        blocks.append(f"'{tok}' matches {len(hits)} runs ({', '.join(hits)}) — ask which one "
+                      f"rather than guessing.")
+    if not blocks:
+        return ""
+    return ("\n\nRUN DETAIL (the operator named these runs — answer from this, it is the record, "
+            "and quote the actual error rather than speculating):\n" + "\n\n".join(blocks))
+
+
 def chat_reply(message: str, history=None, session_id: str = "cockpit") -> dict:
     """Conversational turn grounded in live pipeline state + memory. Recalls relevant past
     conversations (cross-session, unified with the console) and the recent in-session history, then
@@ -132,6 +225,12 @@ def chat_reply(message: str, history=None, session_id: str = "cockpit") -> dict:
     if mems:
         mem_block = "\n\nRECALLED MEMORY (relevant past conversations — treat as things you remember):\n" + \
             "\n".join(f"- {m['role']}: {m['content'][:200]}" for m in mems)
+    # a named run: the recent-runs summary carries status and proposal but never the error, so
+    # "why did run X fail" could only be answered with a guess. Pull the actual record instead.
+    try:
+        run_block = _run_context(*_resolve_run_ids(message))
+    except Exception:
+        run_block = ""                      # a chat turn must not die because a lookup did
     # short-term: the recent in-session turns the client sends (continuity within this chat)
     hist_block = ""
     for t in (history or [])[-6:]:
@@ -143,7 +242,7 @@ def chat_reply(message: str, history=None, session_id: str = "cockpit") -> dict:
         "the operator concisely about the CURRENT pipeline state shown below. If they're handing you "
         "a task to act on, tell them to capture it (the ⚑ Capture button or 'capture: <goal>') so it "
         "enters the gate. Don't invent runs or claim you executed anything.\n\n"
-        f"LIVE PIPELINE STATE:\n{_pipeline_context()}{mem_block}"
+        f"LIVE PIPELINE STATE:\n{_pipeline_context()}{run_block}{mem_block}"
         + (f"\n\nRECENT CONVERSATION:{hist_block}" if hist_block else ""))
     try:
         reply = runtime.run(system, message, alias="balanced", max_tokens=400)
@@ -155,6 +254,28 @@ def chat_reply(message: str, history=None, session_id: str = "cockpit") -> dict:
     memory_chat.remember(session_id, "user", message)
     memory_chat.remember(session_id, "assistant", reply)
     return {"reply": reply, "remembered": True}
+
+
+def _delivery(run_id: str) -> list:
+    """Outbox rows for this run: what was attempted, and how strong the evidence is that it left.
+
+    `status` is empty on rows written before the column existed. That is reported as-is rather than
+    guessed at, because those rows were stamped `delivered_at` whether or not the send worked and
+    calling them delivered now would invent the fact the column exists to stop us inventing.
+
+    `provider_id` is Gmail's own message id and is what separates `sent` from `accepted`: one is a
+    receipt from the other end, the other is n8n saying it took the request. It is passed through so
+    an operator can go and find the message rather than take this system's word for it.
+    """
+    try:
+        rows = db.list("outbox", 20, where=f"(run_id,eq,{run_id})")
+    except Exception:
+        return []
+    return [{"outbox_id": r.get("Id"), "to": r.get("to"),
+             "status": r.get("status") or "unrecorded",
+             "provider_id": r.get("provider_id") or "",
+             "delivered_at": r.get("delivered_at"), "error": r.get("error") or ""}
+            for r in rows]
 
 
 def run_detail(run_id: str) -> dict:
@@ -178,13 +299,48 @@ def run_detail(run_id: str) -> dict:
             "from_agent": row.get("from_agent"), "goal": payload.get("goal"),
             "intent": payload.get("intent"), "target": payload.get("target"),
             "action": payload.get("action"), "args": payload.get("args", {}),
-            "error": payload.get("error"), "log": log}
+            "error": payload.get("error"), "detector": payload.get("detector"),
+            # What the specialist looked up while drafting, so an operator can see where the
+            # proposal's facts came from instead of taking the prose on faith.
+            "lookups": payload.get("lookups", []),
+            # Whether the thing actually left. A run reads `executed` because the tool returned,
+            # and until this was recorded that was the only evidence an operator had. Filtered at
+            # NocoDB, not scanned: it returns oldest-first, so a blind `limit` drops the newest rows.
+            "delivery": _delivery(run_id),
+            "proposal_hash": proposal_hash(payload) if row else None, "log": log}
+
+
+def _gpu() -> dict | None:
+    """The card, read here rather than borrowed from the console.
+
+    `nvidia-smi` exists in this container only because compose gives the service an nvidia device
+    reservation, the same one the console has. A reservation makes the device visible; it does not
+    hold VRAM, so this costs nothing against the one resource that is actually scarce here.
+
+    None means no reading was possible, which is the truthful answer when the binary is missing.
+    It is not the same as an idle card, and the caller must not render it as one."""
+    try:
+        q = "name,utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw,power.limit"
+        out = subprocess.run(["nvidia-smi", f"--query-gpu={q}", "--format=csv,noheader,nounits"],
+                             capture_output=True, text=True, timeout=5)
+        if out.returncode != 0 or not out.stdout.strip():
+            return None
+        f = [x.strip() for x in out.stdout.strip().splitlines()[0].split(",")]
+
+        def num(x):                      # laptop GPUs report some fields as "[N/A]"
+            try:
+                return float(x)
+            except Exception:
+                return None
+        return {"name": f[0], "util": num(f[1]), "mem_used": num(f[2]), "mem_total": num(f[3]),
+                "temp": num(f[4]), "power": num(f[5]), "power_limit": num(f[6])}
+    except Exception:
+        return None
 
 
 def _proc_telemetry() -> dict:
-    """Stdlib CPU%/MEM% from /proc — fallback when the console is unreachable. GPU unavailable
-    here (the engine container has no nvidia access), so gpu=None."""
-    out = {"cpu_percent": None, "mem_percent": None, "gpu": None, "source": "proc"}
+    """Stdlib CPU%/MEM% from /proc, plus the GPU read directly. No console, no psutil."""
+    out = {"cpu_percent": None, "mem_percent": None, "gpu": _gpu(), "source": "proc"}
     try:
         def _cpu_idle_total():
             with open("/proc/stat") as f:
@@ -213,13 +369,21 @@ def _proc_telemetry() -> dict:
 
 
 def _telemetry() -> dict:
-    """CPU/MEM/GPU for the cockpit strip. Prefer the console's /api/system (it has psutil + GPU,
-    reachable on the docker network with no auth); fall back to a stdlib /proc read."""
+    """CPU/MEM/GPU for the cockpit strip, read here first.
+
+    This used to ask the console and only fall back to /proc, which made the v2 cockpit's telemetry
+    strip a v1 dependency: stop the console and the GPU reading goes to None. Now the local read
+    leads, and the console is consulted only when this container has no card visible to it, so an
+    engine running without the nvidia reservation still shows a GPU while the console is alive. When
+    the console goes, the strip keeps working."""
+    local = _proc_telemetry()
+    if local.get("gpu"):
+        return local
     try:
         with urllib.request.urlopen(CONSOLE_URL + "/api/system", timeout=3) as r:
             d = json.loads(r.read()); d["source"] = "console"; return d
     except Exception:
-        return _proc_telemetry()
+        return local
 
 
 def _extract_hook(body: dict):
@@ -238,6 +402,7 @@ async def lifespan(app: FastAPI):
     threading.Thread(target=_gate_loop, daemon=True).start()      # backup
     threading.Thread(target=_gate_listen, daemon=True).start()    # push (LISTEN/NOTIFY)
     threading.Thread(target=_runs_listen, daemon=True).start()    # live cockpit (SSE refresh)
+    threading.Thread(target=_sweep_loop, daemon=True).start()     # fail abandoned runs
     print(f"NOMAD v2 engine (ASGI) on :{PORT} (gate: push+poll)", flush=True)
     yield
 
@@ -258,7 +423,8 @@ async def projects():
     def _f():
         try:
             import requests
-            return requests.get(f"{DISPATCH_URL}/projects", timeout=5).json()
+            return requests.get(f"{DISPATCH_URL}/projects",
+                                headers={"X-Nomad-Token": DISPATCH_TOKEN}, timeout=5).json()
         except Exception:
             return {"projects": []}
     return await asyncio.to_thread(_f)
@@ -278,11 +444,63 @@ async def cockpit():
     return HTMLResponse(COCKPIT)
 
 
+# Last time each background thread finished real work. The container being up says nothing about
+# whether these threads are still running, and a dead sweep thread is silent: runs abandoned in
+# `new` would simply stop being failed, with nobody waiting on them. /health reports the age so
+# nomad-watch can alarm on staleness instead of on reachability.
+_BEATS = {"sweep": time.time()}
+
+
 @app.get("/health")
 async def health():
     import runtime
+    now = time.time()
     return {"status": "ok", "service": "nomad-v2-engine", "runtime": runtime.active(),
-            "gate": "push+poll"}
+            "gate": "push+poll", "sweep_secs": engine_mod.SWEEP_SECS,
+            "sweep_age_s": int(now - _BEATS["sweep"])}
+
+
+GPU_HOT_C = float(os.environ.get("NOMAD_GPU_HOT_C", "85"))
+
+
+@app.get("/briefing")
+async def briefing():
+    """Things worth speaking up about, in the console's alert shape so the relay can just switch.
+
+    It returns one kind of alert, and that is deliberate rather than unfinished. The console's
+    briefing raised three, and the other two are already covered by something that does it better:
+    nomad-watch probes all 17 services on a timer and posts to the same Zulip channel, and the relay
+    raises its own alert on a failed run. The relay already discards the `approvals:` alerts, because
+    the v2 gate speaks for itself. Rebuilding any of that here would only double-post.
+
+    A card that cannot be read reports nothing rather than a reassuring zero: `_gpu` returns None
+    when there is no reading, and silence about an unknown temperature is honest where a green light
+    would not be."""
+    alerts = []
+    g = await asyncio.to_thread(_gpu)
+    if g and g.get("temp") and g["temp"] >= GPU_HOT_C:
+        alerts.append({"key": f"gpu_hot:{int(g['temp'])}", "severity": "warn",
+                       "text": f"GPU temperature is {g['temp']:.0f}°C — running hot."})
+    return {"alerts": alerts, "ts": datetime.now(timezone.utc).isoformat()}
+
+
+@app.post("/api/chat")
+async def api_chat(request: Request):
+    """The console's chat contract, so a client written against v1 can point here unchanged.
+
+    nomad-voice speaks `{messages:[…], model, session_id} → {reply}` because it was written against
+    the console. Its own `/chat` takes a single `message` plus `history`, so rather than edit the
+    voice service and every other v1-shaped caller, the engine accepts both shapes. The last user
+    message is the turn; everything before it is history. `model` is ignored: lane and alias choice
+    belongs to the engine, and honoring a caller-supplied model would let a client route around it."""
+    req = await _json(request)
+    msgs = [m for m in (req.get("messages") or []) if m.get("content")]
+    turn = next((m for m in reversed(msgs) if (m.get("role") or "user") == "user"), None)
+    if not turn:
+        return {"reply": ""}
+    history = [m for m in msgs if m is not turn and (m.get("role") or "") != "system"]
+    return await asyncio.to_thread(chat_reply, (turn.get("content") or "").strip(), history,
+                                   req.get("session_id") or "voice")
 
 
 @app.get("/runs")
@@ -334,7 +552,8 @@ async def capture(request: Request):
 @app.post("/resume")
 async def resume(request: Request):
     req = await _json(request)
-    r = await asyncio.to_thread(eng.resume_run, req["run_id"], req.get("decision", "rejected"))
+    r = await asyncio.to_thread(eng.resume_run, req["run_id"], req.get("decision", "rejected"),
+                                req.get("expect_hash"))
     _bump_runs()
     return r
 
@@ -344,14 +563,15 @@ async def generate_image_direct(request: Request):
     """Ungated, LOCAL-ONLY image generation for in-repo Claude Code (the nomad-image MCP bridge).
     Forces the ComfyUI provider — free + reversible (file left uncommitted), consistent with the
     edit-uncommitted guardrail. Cloud/spend backends (OpenAI/Firefly) stay behind the human gate
-    via the normal /capture pipeline. `save_hint` ("<project>/<subdir>") routes the file into a repo."""
+    via the normal /capture pipeline. `save_hint` ("<project>/<subdir>") routes the file into a repo; `style` names a preset in
+    prompts/image_styles.json (e.g. "nomad-blueprint", the Nomad Lab LinkedIn look)."""
     req = await _json(request)
     prompt = (req.get("prompt") or "").strip()
     if not prompt:
         return {"ok": False, "error": "prompt required"}
     run_id = "direct-" + str(int(time.time()))
     return await asyncio.to_thread(generate_image_impl, prompt, run_id, "comfyui",
-                                   req.get("save_hint"))
+                                   req.get("save_hint"), req.get("style"))
 
 
 @app.post("/retry")
@@ -384,6 +604,15 @@ async def chat(request: Request):
                                    req.get("session_id") or "cockpit")
 
 
+@app.get("/history")
+async def chat_history(session_id: str = "cockpit", limit: int = 60):
+    """This session's stored transcript, oldest first, so a reload rebuilds the conversation.
+    Every turn was already in Qdrant; the cockpit just had no way to ask for it."""
+    import memory_chat
+    turns = await asyncio.to_thread(memory_chat.history, session_id, min(max(limit, 1), 200))
+    return {"session_id": session_id, "turns": turns}
+
+
 @app.post("/plan-project")
 async def plan_project(request: Request):
     req = await _json(request)
@@ -394,6 +623,19 @@ async def plan_project(request: Request):
 async def run_next_task(request: Request):
     req = await _json(request)
     r = await asyncio.to_thread(eng.run_next_task, req.get("goal_id"))
+    _bump_runs()
+    return r
+
+
+@app.post("/run-backlog")
+async def run_backlog(request: Request):
+    """Self-development sweep, the target `nomadselfdevcron` points at now.
+
+    It used to fire at crew's `/run-backlog` on :8001, which ran the work and left uncommitted edits
+    behind with no gate in front of it. Here every run it starts stops at `awaiting-approval`, so a
+    07:00 cron queues proposals for the operator rather than acting while nobody is watching."""
+    req = await _json(request)
+    r = await asyncio.to_thread(eng.run_backlog, req.get("limit", 3))
     _bump_runs()
     return r
 
@@ -422,7 +664,9 @@ async def nocodb_hook(request: Request):
     print("NOCODB-HOOK:", json.dumps(req)[:500], flush=True)
     run_id, status = _extract_hook(req)
     if status in ("approved", "rejected") and run_id:
-        r = await asyncio.to_thread(eng.resume_run, run_id, status); _bump_runs()
+        # db_origin: the operator flipped this row in NocoDB itself, behind NocoDB's own auth.
+        r = await asyncio.to_thread(
+            functools.partial(eng.resume_run, run_id, status, db_origin=True)); _bump_runs()
         return {"gate": status, **r}
     return {"ignored": True, "status": status, "run_id": run_id}
 
@@ -495,10 +739,14 @@ def gate_scan():
     """THE GATE (poll): find comms rows the operator flipped to approved/rejected and resume
     the paused run. Idempotent; status flip in NocoDB → run resumes. Returns count acted on."""
     acted = 0
-    for r in db.list("comms", 50):
+    # Filter and sort at the DB. A blind `limit` scan is oldest-first, so once comms outgrows the
+    # window the newest approval is the first thing the backup gate stops seeing.
+    pending = db.list("comms", 50, where="(status,eq,approved)~or(status,eq,rejected)", sort="-Id")
+    for r in pending:
         rid, status = r.get("run_id"), (r.get("status") or "").strip()
         if rid and status in ("approved", "rejected") and rid not in _resolved:
-            eng.resume_run(rid, status)
+            # db_origin: the status flip IS the operator's decision, made on the row itself.
+            eng.resume_run(rid, status, db_origin=True)
             _resolved.add(rid)
             acted += 1
     return acted
@@ -511,6 +759,19 @@ def _gate_loop():
         except Exception:
             pass
         time.sleep(GATE_POLL_SECS)
+
+
+def _sweep_loop():
+    """Fail runs abandoned in `new`. See Engine.sweep_stalled for why this exists."""
+    while True:
+        time.sleep(engine_mod.SWEEP_SECS)
+        try:
+            for r in eng.sweep_stalled():
+                print(f"swept stalled run {r['run_id']} (comms#{r['comms_id']}, "
+                      f"{r['age_min']} min in 'new')", flush=True)
+            _BEATS["sweep"] = time.time()   # only on success; see /health, watched by nomad-watch
+        except Exception as e:
+            print(f"sweep_stalled failed: {type(e).__name__}: {e}", flush=True)
 
 
 def _gate_listen():
@@ -582,7 +843,7 @@ def recent_runs(limit=25):
     """Join comms rows into a cockpit-friendly run list (most recent first). For runs paused at
     the gate, include the proposal so the operator can see what they're approving."""
     out = []
-    for r in db.list("comms", limit):
+    for r in db.list("comms", limit, sort="-Id"):   # newest first, or limit drops the new runs
         item = {"run_id": r.get("run_id"), "lane": r.get("lane"),
                 "from_agent": r.get("from_agent"), "type": r.get("type"),
                 "status": r.get("status"), "goal_id": r.get("goal_id"),
@@ -702,8 +963,19 @@ function esc(s){ return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>'
 async function gate(rid, decision){
   if(decision==='rejected' && !confirm('Reject this run?')) return;
   const btns=document.querySelectorAll(`[data-rid="${rid}"]`); btns.forEach(b=>b.disabled=true);
+  const body={run_id:rid,decision};
+  // An approval must name the proposal it approves. Re-read it here rather than trusting the
+  // rendered card, so a proposal edited since this page was painted fails the check instead of
+  // being waved through by a stale hash.
+  if(decision==='approved'){
+    try{
+      const run=await (await fetch('/run?id='+encodeURIComponent(rid))).json();
+      if(!run.proposal_hash){ alert('Could not read this proposal; not approving.'); btns.forEach(b=>b.disabled=false); return; }
+      body.expect_hash=run.proposal_hash;
+    }catch(e){ alert('Could not read this proposal; not approving.'); btns.forEach(b=>b.disabled=false); return; }
+  }
   try{ await fetch('/resume',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({run_id:rid,decision})}); }catch(e){}
+        body:JSON.stringify(body)}); }catch(e){}
   tick();
 }
 async function retry(rid){
@@ -735,6 +1007,21 @@ async function loadDetail(rid){
     const a=r.args||{}; const body=a.body||a.brief||a.content||a.task||a.prompt;
     if(a.subject) h+=kv('subject',a.subject);
     if(body) h+=`<div class=kv><span class=k>draft</span></div><div class=pv>${esc(String(body))}</div>`;
+    // Delivery. The whole point of the outbox is that a run reading `executed` is the tool
+    // returning, not the mail arriving, so the difference belongs on the page the operator opens.
+    // `sent` carries Gmail's id; `accepted` means n8n took it and nothing more; `unknown` means the
+    // wait expired and it may have gone out anyway, which is the one case where retrying can double
+    // send. Colour follows that ladder rather than a pass/fail split.
+    if(r.delivery && r.delivery.length){
+      const COL={sent:'#33dd88',accepted:'#e8c33a',unknown:'#ff8c5a',failed:'#ff5a5a',unrecorded:'#6b6b80'};
+      h+='<div class=log>';
+      r.delivery.forEach(d=>{
+        const st=(d.status||'unrecorded').toLowerCase();
+        h+=`<div class=le><b style="color:${COL[st]||'#6b6b80'}">${esc(st.toUpperCase())}</b> · `+
+           `${esc(d.to||'')}${d.provider_id?` <span class=mut>id ${esc(d.provider_id)}</span>`:''}`+
+           `${d.error?` <span style="color:#ff8c5a">${esc(d.error)}</span>`:''}</div>`;
+      });
+      h+='</div>'; }
     if(r.log && r.log.length){ h+='<div class=log>';
       r.log.forEach(e=>{ h+=`<div class=le><b>${esc(e.agent||'')}</b> · ${esc(e.what||'')} <span class=mut>${(e.created_at||'').slice(11,19)}</span></div>`; });
       h+='</div>'; }
@@ -826,7 +1113,20 @@ document.getElementById('csend').onclick=()=>csendMsg(false);
 document.getElementById('ccap').onclick=()=>csendMsg(true);
 cin.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); csendMsg(e.shiftKey); } });
 
-/* telemetry strip — CPU / RAM / GPU (from the console, or /proc fallback) */
+/* Rehydrate on load. Every turn was already stored in Qdrant, but chatHist lived only in this
+   page, so a reload silently lost the conversation the engine could still remember. */
+(async function restoreChat(){
+  try{
+    const r=await (await fetch('/history?session_id='+encodeURIComponent(chatSession))).json();
+    for(const t of (r.turns||[])){
+      if(!t.content) continue;
+      clogAdd(t.role==='user'?'you':'nomad', t.content);
+      chatHist.push({role:t.role, content:t.content});
+    }
+  }catch(e){}   /* memory down is not a reason to have no chat box */
+})();
+
+/* telemetry strip — CPU / RAM / GPU, read by the engine itself (v1 console is a fallback) */
 function meter(lbl,pct,extra){
   if(pct==null) return `<div class=m><span class=lbl>${lbl}</span><span class=mut>n/a</span></div>`;
   const cls = pct>=85?'hot':(pct>=65?'warn':'');

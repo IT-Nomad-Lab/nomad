@@ -86,8 +86,10 @@ In practice:
 | [`nomad-stt/`](nomad-stt/) | Kyutai streaming STT on the GPU (low-latency ear) — the Phase 2 upgrade path for the voice pipeline | [README](nomad-stt/README.md) |
 | [`nomad-audio/`](nomad-audio/) | Local music/sound generation (ACE-Step, host-native GPU service) | [README](nomad-audio/README.md) |
 | [`nomad-scraper/`](nomad-scraper/) | LLM-driven web scrape/search (ScrapeGraphAI) | [README](nomad-scraper/README.md) |
+| [`nomad-detect/`](nomad-detect/) | AI-text detection on the GPU (Binoculars + JDE_STYLE tell linter) — the gate every written draft clears | [README](nomad-detect/README.md) |
 | [`nomad-image/`](nomad-image/) | Local ComfyUI image-generation host service (RTX GPU) + install scripts | [README](nomad-image/README.md) |
 | [`claude-bridge/`](claude-bridge/) | OpenAI-compatible shim that answers via the local `claude` CLI | [README](claude-bridge/README.md) |
+| [`codex-bridge/`](codex-bridge/) | Same shim for the local `codex` CLI — the backup brain when the Claude subscription throttles | [README](codex-bridge/README.md) |
 | [`litellm/`](litellm/) | Model-gateway routing config (role aliases → real models) | [README](litellm/README.md) |
 | [`n8n/`](n8n/) | Automation + approval-gate workflow templates | [README](n8n/README.md) |
 | [`notion/`](notion/) | Optional Notion mission-control schema + setup (rollback/mirror data layer) | [README](notion/README.md) |

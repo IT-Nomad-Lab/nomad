@@ -1,0 +1,11 @@
+We have always modeled data for the people who would use it. There is now an open standard for modeling it for agents. The reader changed.
+
+For years, the consumer of a data model was a person. The BI team. The analyst. The data scientist. You shape the model around how they query, what they trust, what they need to decide. A human brings context. They notice when a number looks wrong. They ask a follow up before they act.
+
+The new idea is called an Agents Schema. A designated part of your warehouse modeled not for a person, but as the shared context layer a machine reads and reasons over. The consumer is no longer the analyst. It is the agent.
+
+I have not built one. I find it genuinely interesting, because it breaks an assumption I never had to question. The agent does not bring context. It does not pause on a number that looks off. It takes what the model says and acts.
+
+So the trust a human used to supply now has to live inside the model. The meaning, the guardrails, the definition of what good looks like. That is a new job on the data team, and nobody has a title for it yet.
+
+The dashboard always had a human in front of it. The agent does not.

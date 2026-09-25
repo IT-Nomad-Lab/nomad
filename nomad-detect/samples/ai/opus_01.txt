@@ -1,0 +1,11 @@
+Hiring for data roles is broken in a specific and fixable way.
+
+Most interview loops test whether a candidate can write a window function under time pressure while a stranger watches. Almost no loop tests whether the candidate can tell when a stakeholder is asking the wrong question, which is the thing they will do every single week once hired.
+
+I changed our process two years ago. We replaced the algorithmic screen with a conversation about a real project that had gone wrong, and we asked candidates to find the failure. Not to solve it. To find it.
+
+The signal was immediate. Strong candidates asked about ownership and incentives before they asked about the schema. Weaker candidates jumped straight to the technology and proposed a rewrite.
+
+Our retention improved and our time to first meaningful contribution dropped by roughly half. The candidates we hired were not better engineers in the narrow sense. They were better at knowing which problem was actually in front of them.
+
+Test for the job, not for the credential. It sounds obvious written down, and almost nobody does it.

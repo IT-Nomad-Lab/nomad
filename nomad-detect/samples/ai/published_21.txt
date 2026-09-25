@@ -1,0 +1,11 @@
+The pipeline was green. Every job ran. Every check passed. The data was still wrong, and nobody noticed until the report had already been used to make a decision.
+
+Nothing in the pipeline broke. The problem was upstream, at the source, where the data was never generated correctly in the first place. Everything downstream did its job perfectly. It just carried a bad number all the way to the top.
+
+The other half of the problem was quieter. The data had owners. On paper. In practice nobody was really watching the final report, so the wrong number sat there for weeks until someone senior finally asked about it. By then the decision was made.
+
+This is why data quality is shifting left. Checks are moving to the moment data enters and the moment it changes, instead of a month-end audit that finds the mistake three weeks after it mattered. That shift is real, and it helps.
+
+But tooling is only half of it. A check at ingestion catches a broken schema. It does not make anyone care. Someone still has to own the number and actually look at it.
+
+A green pipeline only proves the pipeline ran. It says nothing about whether the data is true.

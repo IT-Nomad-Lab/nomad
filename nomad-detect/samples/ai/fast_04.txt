@@ -1,0 +1,9 @@
+**The Hidden Side of Hiring Data Engineers: What the Interview Loop Misses**
+
+As a seasoned leader in the data engineering space, I've had the privilege of participating in numerous hiring processes for this specialized role. While the interview loop is designed to assess a candidate's technical skills and experience, I've come to realize that there's a crucial aspect often overlooked: the ability to navigate ambiguity and uncertainty.
+
+Data engineers are not just coders or problem-solvers; they're architects who build and maintain the backbone of our data infrastructure. They must be able to navigate complex systems, troubleshoot issues, and make decisions in the face of uncertainty. Yet, our interview processes often focus on past projects and technical certifications rather than the more intangible qualities required for success in this role.
+
+As a result, we may be passing over talented individuals who, although lacking in traditional technical experience, possess the creative problem-solving skills and adaptability needed to excel in data engineering. We may also be ignoring the very skills that will serve our teams best in the long run: the ability to communicate complex technical concepts to non-technical stakeholders, to collaborate across disciplines, and to prioritize and manage competing demands.
+
+To truly succeed in hiring data engineers, we need to think beyond the standard interview loop. We must prioritize skills like critical thinking, creativity, and emotional intelligence, and create an environment where candidates feel encouraged to share their experiences and showcase their problem-solving abilities. By doing so, we'll not only find the best fit for our teams but also create a more resilient, adaptable, and innovative data engineering function.

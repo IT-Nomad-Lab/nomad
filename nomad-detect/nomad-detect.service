@@ -1,0 +1,19 @@
+[Unit]
+Description=NOMAD detect — AI-text detection (Binoculars + style linter) on the GPU
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/nomad/nomad-detect
+EnvironmentFile=-%h/nomad/.env
+Environment=NOMAD_DETECT_OBSERVER=Qwen/Qwen2.5-1.5B
+Environment=NOMAD_DETECT_PERFORMER=Qwen/Qwen2.5-1.5B-Instruct
+Environment=NOMAD_DETECT_DEVICE=cuda
+Environment=NOMAD_DETECT_PORT=8214
+Environment=NOMAD_DETECT_EAGER_LOAD=1
+ExecStart=%h/nomad/nomad-detect/.venv/bin/python %h/nomad/nomad-detect/server.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

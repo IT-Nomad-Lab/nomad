@@ -1,0 +1,17 @@
+Here is a LinkedIn post on moving from batch ETL to streaming:
+
+**From Batch to Streaming: When to Make the Leap**
+
+As I reflect on my journey as a data engineer, I've come to realize that the evolution of ETL (Extract, Transform, Load) processes has been a crucial aspect of our industry's growth. In my early days, batch ETL was the norm – data was extracted, processed, and loaded in batches, often overnight. While this approach worked well for many use cases, I've witnessed firsthand the limitations it imposes on real-time data processing and decision-making.
+
+As organizations continue to grow and mature, they're increasingly adopting streaming ETL solutions to keep pace with the speed and complexity of modern data flows. Streaming enables us to process data as it arrives, allowing for near-real-time insights and more agile decision-making. By leveraging streaming ETL, I've seen companies improve their operational efficiency, enhance customer experiences, and even drive revenue growth.
+
+So, when should you consider making the leap from batch to streaming? Here are a few scenarios:
+
+* High-volume, high-velocity data sources that require immediate processing (e.g., IoT sensors, social media feeds)
+* Use cases that demand real-time insights, such as financial transactions or supply chain optimization
+* Companies looking to integrate AI/ML models that require continuous data streaming
+
+Of course, not every organization is ready to adopt streaming ETL. If your data is relatively static, and batch processing still meets your needs, then sticking with batch ETL is likely a safe choice.
+
+For those ready to take the next step, I'd love to hear about your own experiences with batch vs. streaming ETL. What lessons have you learned, and what advice would you share with others?

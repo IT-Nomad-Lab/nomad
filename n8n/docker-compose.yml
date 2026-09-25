@@ -8,12 +8,26 @@ services:
     image: n8nio/n8n:latest
     container_name: nomad-n8n-standalone
     ports:
-      - "5678:5678"
+      # localhost only. n8n holds every stored credential, and a resume URL
+      # approves a real action with no login. Remote access is the tailnet
+      # serve rule on 8447, never a LAN bind. Containers are unaffected: they
+      # reach it on host.docker.internal:5678, which works against a
+      # loopback-published port (verified 2026-09-23 from four containers).
+      - "127.0.0.1:5678:5678"
     environment:
       - N8N_HOST=localhost
       - N8N_PORT=5678
       - N8N_PROTOCOL=http
       - N8N_SECURE_COOKIE=false
+      # Base URL n8n GENERATES links from: production webhook URLs and, the reason
+      # this exists, the {{$execution.resumeUrl}} that builds the APPROVE/REJECT
+      # links in the gate's notification mail. Without it those render as
+      # http://localhost:5678/... and are dead on any device but this one.
+      # Points at a tailnet-only `tailscale serve --https=8447` rule -> 127.0.0.1:5678.
+      # NEVER expose this with `tailscale funnel`: a resume URL is a bearer link.
+      # It does not change the paths n8n REGISTERS, so callers that POST to
+      # http://localhost:5678/webhook/... keep working unchanged.
+      - WEBHOOK_URL=https://rogue01.tailc3147c.ts.net:8447/
       - GENERIC_TIMEZONE=America/New_York
       # Encryption key for stored credentials — set in .env (see .env.example).
       - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}

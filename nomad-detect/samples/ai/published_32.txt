@@ -1,0 +1,13 @@
+Vibecoding did not create the requirements problem. It just took away the time we used to hide it in.
+
+I just built a full web app with a team of AI agents. The code showed up fast. The project still kept stopping. The agents kept hitting decisions that existed only in my head. What happens when the system is offline. Who counts as a user. What published actually means. None of it was written anywhere. None of it was code.
+
+We used to get away with this. Development was slow enough that you could figure out what you wanted while it was being built. Now the code arrives in minutes, and the unmade decisions are the only thing left on the critical path.
+
+The discipline that matters is not over-engineering, and it is not hunting edge cases. It is sitting down and asking: when this use case runs and the output is not what I expected, what do I actually want to happen?
+
+I once spotted a new capability in an open source tool I ran with a colleague and proposed a feature no user had asked for. Others did not get it at first. Then we put it in front of the users, and everything fell in line. It changed how they worked with the platform.
+
+No agent would have stopped to ask for that feature. The question did not exist yet.
+
+The code got cheap. Knowing what you want never will.

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>NOMAD · Command Console</title>
+  <title>NOMAD · Mission Monitor</title>
   <link rel="manifest" href="/static/manifest.json">
   <meta name="theme-color" content="#ffb000">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -21,74 +21,38 @@
 
   <!-- top bar -->
   <header id="topbar">
-    <div class="elbow"></div>
-    <div class="title">NOMAD<span class="sub">NETWORKED OPERATIONS &amp; MANAGEMENT ASSISTANT FOR DECISIONS</span></div>
+    <div class="title">NOMAD<span class="sub">MISSION MONITOR</span></div>
     <div class="readout">
-      <span class="lab">STARDATE</span><span id="stardate">—</span>
+      <span class="lab">UPTIME</span><span id="rail-uptime">—</span>
       <span class="lab">UTC</span><span id="clock">—</span>
     </div>
-    <div id="alert" class="alert nominal">● NOMINAL</div>
+    <div id="need" class="need ok">● ALL NOMINAL</div>
   </header>
 
   <div id="body">
 
-    <!-- decorative LCARS rail -->
-    <nav id="rail">
-      <div class="rail-cap"></div>
-      <div class="rail-btn c-amber">LCARS</div>
-      <div class="rail-btn c-orange">01·OPS</div>
-      <div class="rail-btn c-blue">02·INTEL</div>
-      <div class="rail-btn c-purple">03·CREW</div>
-      <div class="rail-btn c-amber">04·SYS</div>
-      <div class="rail-fill"></div>
-      <div class="rail-btn c-orange" id="rail-uptime">UP —</div>
-      <div class="rail-btn c-blue">NCC·1701</div>
-    </nav>
-
-    <!-- dashboard -->
+    <!-- the monitor: projects-first, sorted by what needs you -->
     <main id="dash">
-      <section class="panel span2">
-        <h2 class="c-orange">SYSTEMS ONLINE</h2>
-        <div class="pbody" id="systems"><div class="muted">scanning…</div></div>
+      <section class="panel span-all" id="p-projects">
+        <h2 class="c-orange">PROJECTS <span class="hint">sorted by what needs you</span>
+          <button id="mon-refresh" title="rescan repos">↻</button></h2>
+        <div class="pbody" id="monitor"><div class="muted">scanning repositories…</div></div>
       </section>
 
-      <section class="panel">
-        <h2 class="c-amber">CORE TELEMETRY</h2>
-        <div class="pbody" id="telemetry"><div class="muted">…</div></div>
-      </section>
-
-      <section class="panel">
-        <h2 class="c-blue">GPU · RTX 5090</h2>
-        <div class="pbody" id="gpu"><div class="muted">…</div></div>
-      </section>
-
-      <section class="panel">
-        <h2 class="c-orange">PROJECTS</h2>
-        <div class="pbody scroll" id="projects"><div class="muted">…</div></div>
-      </section>
-
-      <section class="panel">
-        <h2 class="c-purple">AGENT ROSTER</h2>
-        <div class="pbody scroll" id="agents"><div class="muted">…</div></div>
-      </section>
-
-      <section class="panel">
-        <h2 class="c-purple">ENGINEERING CREW <span id="builder-stat" class="tag off">BUILDER —</span></h2>
-        <div class="pbody scroll" id="devteam"><div class="muted">…</div></div>
-      </section>
-
-      <section class="panel">
-        <h2 class="c-blue">MISSION LOG</h2>
-        <div class="pbody scroll" id="activity"><div class="muted">…</div></div>
-      </section>
-
-      <section class="panel" id="p-approvals">
-        <h2 class="c-red">APPROVAL QUEUE</h2>
+      <section class="panel" id="p-gate">
+        <h2 class="c-red">HUMAN GATE <span id="gate-count" class="pill">0</span></h2>
         <div class="pbody scroll" id="approvals"><div class="muted">…</div></div>
+      </section>
+
+      <section class="panel" id="p-health">
+        <h2 class="c-amber">SYSTEMS</h2>
+        <div class="pbody" id="systems"><div class="muted">scanning…</div></div>
+        <div class="pbody tele" id="telemetry"></div>
+        <div class="pbody tele" id="gpu"></div>
       </section>
     </main>
 
-    <!-- NOMAD comms / chat -->
+    <!-- NOMAD comms / chat (unchanged) -->
     <aside id="comms">
       <h2 class="c-amber">NOMAD // COMMS</h2>
       <div id="chatlog"></div>
@@ -106,7 +70,7 @@
         <button id="wake" title="always-on wake word: say “Hey Jarvis …”" class="off" aria-label="Wake word">
           <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="2"/><path d="M8.5 8.8a5 5 0 0 0 0 6.4"/><path d="M15.5 8.8a5 5 0 0 1 0 6.4"/><path d="M6 6a9 9 0 0 0 0 12"/><path d="M18 6a9 9 0 0 1 0 12"/></svg>
         </button>
-        <button id="tts" title="spoken replies (local Piper voice)" class="off" aria-label="Speaker">
+        <button id="tts" title="spoken replies (local voice)" class="off" aria-label="Speaker">
           <svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5.5a9 9 0 0 1 0 13"/></svg>
         </button>
         <button id="live" title="live voice — real-time, interruptible conversation (barge-in)" class="off" aria-label="Live voice">

@@ -1,0 +1,13 @@
+My own AI assistant remembers whatever it picks up. I never gated it. That is a defensible choice for exactly one reason, and most companies do not have it.
+
+Nothing it remembers leaves my machine. No inbox it reads unattended, no external content writing into it while I am not looking. The blast radius is me.
+
+Take that away and the same design is reckless. Research this month showed why. One email, and an assistant with inbox access quietly stores a false fact, tells you nothing, and behaves differently in every session after. Against one production agent framework it worked seven times out of ten. The attacker steals nothing. They just change what your assistant believes.
+
+The reason it works is structural. These assistants read untrusted things in the background and answer you in the foreground, and both write to the same memory. Anything picked up while nobody was watching becomes trusted afterward.
+
+Now look at that memory as what it is. A data store, accumulating facts about your business across thousands of sessions.
+
+No owner. No lineage. No retention policy. No quality checks. No approver, and no diff to review.
+
+We would reject a production table with those properties in five minutes. We hand our whole business to one every day and call it an assistant.

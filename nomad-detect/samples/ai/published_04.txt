@@ -1,0 +1,11 @@
+97% of companies are building AI agents. 12% know what those agents are actually doing. That number is not a prediction. It is the current state, published this week.
+
+Companies rush to deploy before they understand the tool. That pattern is not new. We saw it with SaaS. We saw it with cloud. Every time a technology moves faster than governance, the same thing happens: things run in production that nobody owns, nobody audited, and nobody can fully explain.
+
+Shadow IT gave us data silos and compliance headaches. Rogue SaaS apps were annoying. They sat there, they held data and they didn't act.
+
+Agents are acting. They query databases, trigger workflows, send communications, make decisions. But an uncontrolled agent is not a data silo. It is an autonomous process running in your production environment with no owner on record. And most importantly, eating your budget.
+
+97% exploring. 12% in control. That gap is not an adoption story. It is a governance emergency that most organisations have not named yet.
+
+You do not need to slow down AI adoption. You need to know what you have already deployed.

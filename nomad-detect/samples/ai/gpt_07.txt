@@ -1,0 +1,14 @@
+**From Model to Production: How to Know When Your ML Model is Really Deployed**
+
+As a machine learning engineer, I've been there - you've spent months training, testing, and refining your model, and finally, it's time to deploy it into production. But, have you ever stopped to think: is it really in production? Or is it just sitting on a server somewhere, collecting digital dust?
+
+In my experience, there's a common pitfall we all fall into: assuming that just because we've pushed the model to a cloud platform, it's good to go. But, deployment is about more than just moving code from one environment to another. It's about ensuring that the model is integrated with the rest of the system, that it's handling production traffic, and that it's providing the desired outcome.
+
+So, how do you know if your ML model is truly in production? Here are a few key signs to look out for:
+
+1. **Monitoring**: Are you collecting and analyzing logs and metrics to ensure the model is behaving as expected? Are you receiving alerts when something goes wrong?
+2. **Integration**: Is the model integrated with the rest of the system, including APIs, databases, and other dependencies?
+3. **Traffic**: Is the model handling production traffic, or is it still just testing small batches of data?
+4. **Feedback**: Are you collecting feedback from users and incorporating it into the model to improve its performance?
+
+If you can answer "yes" to these questions, then congratulations - your ML model is truly in production!

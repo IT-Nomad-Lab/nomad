@@ -1,0 +1,13 @@
+If you cannot run your governance, you do not have governance. You have a document.
+
+That is most of what I have seen. The policy exists. The standard was signed off. And almost nobody can show you, today, that any of it is actually being followed.
+
+The shift happening now is that governance is becoming code. Lineage, access rules, quality checks, audit trails, written as things the system runs instead of things a committee agrees to. Compliance stops being an annual event and becomes a query you can run right now.
+
+That matters more than it sounds. A written policy is a claim. Code is a check. A rule that cannot fail a test was never a rule. It was a wish.
+
+The tooling posts skip the hard part. Governance is lovely in theory. Implementing it is a lot of unglamorous work that almost nobody volunteers for. Naming owners. Defining what good actually means. Writing the checks. Keeping them true as the data changes. That work does not disappear when you move governance into code. It becomes visible, and unavoidable.
+
+Which is exactly why it will still fail in plenty of places. Not because anyone disagrees with governance. Because someone has to do the work.
+
+Governance as code does not make governance cheaper. It makes it provable. The work is still the work.

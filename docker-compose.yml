@@ -14,7 +14,10 @@ services:
     image: ghcr.io/berriai/litellm:main-latest
     container_name: nomad-litellm
     ports:
-      - "4000:4000"
+      # localhost only: the gateway carries every cloud API key and answers
+      # with the master key alone. Containers use http://litellm:4000 over the
+      # compose network; host-native callers already use 127.0.0.1:4000.
+      - "127.0.0.1:4000:4000"
     volumes:
       - ./litellm/config.yaml:/app/config.yaml:ro
     command: ["--config", "/app/config.yaml", "--port", "4000"]
@@ -26,7 +29,7 @@ services:
     image: ghcr.io/open-webui/open-webui:main
     container_name: nomad-openwebui
     ports:
-      - "3000:8080"
+      - "127.0.0.1:3000:8080"   # host-only; a browser on this machine is the only client
     volumes:
       - openwebui:/app/backend/data
     environment:
@@ -41,7 +44,7 @@ services:
     image: qdrant/qdrant:latest
     container_name: nomad-qdrant
     ports:
-      - "6333:6333"
+      - "127.0.0.1:6333:6333"   # localhost only: Qdrant has NO auth and holds every conversation turn
     volumes:
       - qdrant:/qdrant/storage
     restart: unless-stopped
@@ -105,9 +108,16 @@ services:
       - NOMAD_IMAGE_DIR=/app/generated_images
       - NOMAD_PROMPTS_DIR=/app/prompts                  # named prompt registry (JDE_STYLE etc.)
     volumes:
-      - ${HOME}/.config/nomad:/term-secret:ro   # read the terminal daemon's shared token
+      - /home/jdelimam/.config/nomad:/term-secret:ro   # read the terminal daemon's shared token
       - ./v2/generated_images:/app/generated_images    # persisted generated images (served at /images)
       - ./prompts:/app/prompts:ro                       # house voice + shared prompt blocks (single source of truth)
+    deploy:                    # GPU so the cockpit reads nvidia-smi itself instead of asking the v1 console
+      resources:              # a reservation makes the device visible; it does not hold VRAM
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     depends_on:
       - nocodb
       - litellm
@@ -117,13 +127,21 @@ services:
     restart: unless-stopped
 
   # ── Automation + integrations + APPROVAL GATES ─────────────────────
-  # NOTE: nomad/n8n/ has a *standalone* compose for bringing n8n up first
-  # (per CLAUDE.md). This service is n8n as part of the full stack.
+  # DISABLED 2026-09-18, container + volume DELETED 2026-09-23. The authoritative n8n is the
+  # STANDALONE one in nomad/n8n/ — it holds the encryption key, every workflow and every attached
+  # credential. This full-stack copy could not resolve `postgres` and crash-looped 8228 times.
+  # The profile alone did not park it: the restart policy lives on the CONTAINER, so `unless-stopped`
+  # brought it back after every engine restart no matter what this file said. Hence `restart: "no"`
+  # below, and no host port publish: it declared 5678, the same port as the real n8n, so on a boot
+  # it won it would have bound the port and kept the real one from starting.
+  # Its old `nomad_n8n` volume held nothing but an encryption key it generated for itself —
+  # a revive starts EMPTY. To bring it back:  docker compose --profile fullstack-n8n up -d n8n
   n8n:
+    profiles: ["fullstack-n8n"]
     image: n8nio/n8n:latest
     container_name: nomad-n8n
-    ports:
-      - "5678:5678"
+    # No `ports:` on purpose — see above. Reach it on the compose network, or publish to a
+    # DIFFERENT host port (e.g. "127.0.0.1:5679:5678") if it is ever genuinely needed.
     environment:
       - N8N_HOST=localhost
       - N8N_PORT=5678
@@ -139,14 +157,17 @@ services:
       - n8n:/home/node/.n8n
     depends_on:
       - postgres
-    restart: unless-stopped
+    restart: "no"   # never loop: this is the copy that crash-looped 8228 times
 
   # ── The autonomous agent team ──────────────────────────────────────
   crew:
     build: ./crew
     container_name: nomad-crew
     ports:
-      - "8001:8001"
+      # localhost only: /run-dev and /run-backlog make real edits in real repos
+      # with no auth. The console calls it as http://crew:8001 over the compose
+      # network; the n8n self-dev cron via host.docker.internal:8001.
+      - "127.0.0.1:8001:8001"
     env_file: .env
     environment:
       - LITELLM_BASE_URL=http://litellm:4000
@@ -154,6 +175,7 @@ services:
       - NOMAD_PROMPTS_DIR=/app/prompts   # named prompt registry (JDE_STYLE etc.)
     volumes:
       - ./prompts:/app/prompts:ro        # house voice + shared prompt blocks (single source of truth)
+      - /home/jdelimam/.config/nomad:/term-secret:ro   # the dispatcher's shared token (X-Nomad-Token)
     depends_on:
       - litellm
     restart: unless-stopped
@@ -201,7 +223,7 @@ services:
       - NC_BASE_URL=http://nocodb:8080            # mission-control reads when NOMAD_SOURCE=nocodb
     volumes:
       # read-only; backend only reads Nomad.md + CLAUDE.md/AGENTS.md/README per project
-      - ${HOME}:/host:ro
+      - /home/jdelimam:/host:ro
     depends_on:
       - litellm
       - qdrant

@@ -1,0 +1,63 @@
+The budgets are enormous. $665 billion in global AI spend [5]. Roadmaps approved in January, quietly abandoned by June. Everyone agrees to call it a pivot.
+
+This is not an AI problem. The technology is doing exactly what it was built to do.
+
+The problem is underneath.
+
+---
+
+The foundation you deferred is now your bottleneck
+
+When Snowflake reported Q1 FY2027 results, the stock jumped 36% in a single day. Revenue grew 33% year-over-year and the company announced a $6 billion AWS commitment in the same window [1]. That is not a coincidence and it is not noise. That is the market pricing in something that internal IT champions have been losing budget arguments over for a decade: data infrastructure is not the support cost for AI. It is the precondition.
+
+Every AI initiative I have seen stall traces back to the same place. Not the model. The data feeding it.
+
+Most organizations fund the tool first and defer the foundation. The model gets procured. The integration gets built. And then someone asks what the agents are actually reading. The answer is stale PDFs from a deprecated intranet, wikis nobody has touched since 2021, databases with no ownership, no lineage, no trusted source of record. The model runs on all of it. It generates output. It sounds confident. It is confidently wrong.
+
+The model is not hallucinating. It is doing exactly what you told it to do: read the data, generate the answer. Shitty data generates shitty AI.
+
+Informatica's 2026 announcements [6], along with Alation's work on unified AI governance and context catalogs [7], point to the same diagnosis reaching the product layer. Vendors are building systems of record for AI models because organizations discovered too late that they had no idea what their agents were using as source material. That is a data governance failure pretending to be an AI failure.
+
+The data platform is not the cost. It is the bet.
+
+---
+
+Adoption is not the same as deployment
+
+Klarna cut headcount, attributed it to AI productivity gains, and six months later came back hiring [9]. CEO Sebastian Siemiatkowski said it plainly: they focused too much on efficiency and the result was lower quality [10]. Forrester's 2026 predictions [8] and Careerminds survey data [9] corroborate the pattern: companies are cutting people before the tools are ready and before the people who remain know how to use them.
+
+At Playtika, I watched this dynamic play out from the inside. Rolling out AI tooling across an engineering organization is not a procurement event. It is a behavioral change problem. Not everyone moves at the same pace. Not everyone believes the tool is worth the adjustment cost. For a while, some people were getting strong individual results while the org-level metrics barely moved.
+
+The Faros.ai 2026 report captured this precisely. Across 22,000 developers, individual throughput improved 66% with AI tooling. Org-level metrics stayed flat. That gap is not a measurement error. It is what uneven adoption looks like in the data [3].
+
+When adoption reached critical mass at Playtika, the results were concrete and fast. QA coverage jumped 87%. Data engineers who had never shipped a UI were shipping usable interfaces. Code and documentation velocity improved across the board. Individual wins don't compound until the whole team is playing.
+
+The executives who see the individual gains and cut the people who are not yet convinced are solving the wrong problem. Those people are not the laggards. They are the adoption gap. Fire them and the gap persists in the form of missing institutional knowledge, missing edge-case coverage, missing the team-wide coordination that makes the productivity real.
+
+Train your people. Don't fire them.
+
+---
+
+What you've built and what you're controlling are two different numbers
+
+According to TechHQ, 97% of organizations are currently exploring or building AI agents. 12% have centralized control over what those agents are doing [4].
+
+That gap is worth sitting with.
+
+Shadow IT gave us data silos. Uncontrolled spreadsheets became the source of record for financial decisions nobody could audit. Rogue SaaS proliferated until IT had no map of what the organization was actually running. The pattern repeated long enough that most organizations have some form of SaaS governance now, even if it is imperfect. I have watched this cycle run its full course. Spreadsheet chaos, then SaaS sprawl, then the SaaS audit that took months and still missed half the tools.
+
+Agentic AI is the same pattern with a larger blast radius. A spreadsheet holds data and waits. An agent acts. It calls APIs, makes decisions, books things, modifies records, consumes compute budget. An agent without a registered owner is not a dormant risk. It is an autonomous process running in production with nobody accountable for what it does next.
+
+According to AI Governance Today, 61% of enterprise AI projects were approved on projected ROI that nobody measured after launch. 73% failed to deliver ROI [5]. The projects did not fail because the technology did not work. They failed because nobody's job depended on watching. Nobody caught the failure in time to fix it. The organization moved on and called it a learning experience.
+
+This is the accountability gap. It is not unique to AI. IT project management has normalized it for years: approve on optimistic projections, measure nothing, declare a pivot when the numbers do not materialize. AI did not create this habit. It is just giving it more expensive consequences.
+
+You do not need to slow down AI adoption. You need to know what you have already deployed.
+
+Every January, roadmaps get approved. Every March, the market has moved. Without governance structures that force accountability, the ones who survive that cycle are not the ones who built the best AI. They are the ones who knew what they had, could measure whether it worked, and had someone on record whose job depended on the answer. Without it, every broken promise becomes a strategy pivot.
+
+---
+
+The $665 billion going into AI is not wasted money looking for a home [5]. It is real investment heading toward a real wall. The wall is not the technology. It is the data nobody cleaned, the people nobody trained, the agents nobody registered, and the ROI nobody measured.
+
+Fix those four things and the AI works. Skip them and you will be very busy calling failures pivots.

@@ -1,0 +1,13 @@
+Hey, it is not all that bad. But it is not all that good either.
+
+That is roughly where enterprise AI sits in 2026. MIT found that 95% of enterprise generative AI projects showed no measurable financial return within six months. Cisco found only about a third of organizations consider their infrastructure ready for AI, and fewer than a quarter consider their governance ready.
+
+Read those numbers as a failure of the technology and you miss the point. AI does real things. I have seen where it genuinely helps. The gap is not the model.
+
+The gap is understanding. A lot of the people approving AI budgets, especially on the management side, do not fully grasp two things. What AI can actually do today, and what it really costs to run. The pitch deck shows the upside. It does not show the bill, or the work underneath, or the parts that still do not work.
+
+So you get big spend and thin returns. Not because AI is fake, but because the bet was made without understanding what was being bought.
+
+AI is not the miracle the slides promised. It is not the bubble the skeptics want either. It is a tool that pays off when the people pointing it understand its reach and its limits.
+
+The question was never whether AI works. It is whether the people betting on it understand what they are buying.

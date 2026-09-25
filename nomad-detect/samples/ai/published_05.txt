@@ -1,0 +1,11 @@
+Snowflake stock jumped 36% in a single day. The market just told you where the real AI bet is.
+
+Not the model. Not the agent layer. The data platform underneath all of it.
+
+Snowflake is one of the most important companies in the cloud data space right now. Their results this week were not driven by hype. They were driven by enterprises finally understanding that AI is only as good as the data infrastructure it runs on. Companies with production AI workloads need governed, queryable, trusted data. Snowflake built exactly that.
+
+I have seen data platform investments deprioritized because the ROI is hard to show in a quarterly review. The AI tool gets funded. The foundation gets deferred. Then the AI tool underperforms and nobody connects the dots.
+
+The Snowflake result connects the dots. A proper data platform is not a cost center. It is the foundational bet that makes every AI initiative above it more likely to deliver.
+
+The data platform is not the cost. It is the bet.

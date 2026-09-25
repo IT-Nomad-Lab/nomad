@@ -1,0 +1,13 @@
+The per-seat software model was built for humans. AI agents do not have seats. $285 billion in SaaS company value was erased in early 2026. Agentic AI is growing at 119% year over year. The market is repricing something most enterprise software contracts were not built for.
+
+The question is why it takes companies so long to see it coming.
+
+In IT and data, changes come fast. Sometimes too fast. Some are real. Some are bubbles that destroy years of work if chased at the wrong time. That is why so many people in this industry resist change. They have seen it go wrong.
+
+At Playtika, I watched an entire R&D group build itself around a tech stack that had serious structural problems. Their only solution was to keep throwing money at it. When my teams built tools that worked better and made the rest of the company more productive, the reaction was resistance. There is still infighting about it today.
+
+That pattern is everywhere. Not because people are irrational. Because when your career and your team are built on what exists, change feels like a threat.
+
+The per-seat model just works. Until the agent does not need the seat.
+
+Do not chase every new thing. But do not let comfort be the reason you miss what is actually coming.

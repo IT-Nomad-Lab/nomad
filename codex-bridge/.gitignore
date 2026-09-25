@@ -1,0 +1,5 @@
+_workdir/
+bridge.log
+
+# transient CLI output (codex login etc.)
+*.out

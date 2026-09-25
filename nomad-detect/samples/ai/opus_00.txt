@@ -1,0 +1,11 @@
+Three years ago I inherited a data platform that everyone described as "mostly working." That phrase should have been a warning.
+
+The pipelines ran on schedule. The dashboards refreshed every morning. And yet every quarterly planning meeting turned into an argument about whose numbers were right, because finance and operations were pulling from tables that had diverged eighteen months earlier and nobody had noticed.
+
+What I learned is that observability in data is not the same as observability in software. A service that breaks tells you it broke. A pipeline that silently drifts keeps producing output that looks entirely reasonable until someone makes a decision on it.
+
+We fixed it by making correctness visible rather than assumed. Every critical table got an owner, a freshness contract, and a test that failed loudly when reality diverged from the contract. It was unglamorous work and it took four months.
+
+The result was not a better dashboard. The result was that arguments about the numbers stopped, and the meetings became about what to do instead of what was true.
+
+If your data team spends more time defending numbers than producing insight, the problem is not your tooling. It is that nobody has been made accountable for what correct looks like.

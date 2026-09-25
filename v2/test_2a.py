@@ -7,7 +7,7 @@ Cleans up after.
 import sys
 
 from nocodb import NocoDB
-from engine import Engine
+from engine import Engine, proposal_hash
 
 db = NocoDB()
 eng = Engine(db)
@@ -40,7 +40,7 @@ ok &= check("research proposes save_brief", r["proposal"]["action"] == "save_bri
 # ── research lane: approve → one knowledge row ──
 print("research gate (approve)")
 ok &= check("no knowledge row before approval", len(knowledge_for(r["run_id"])) == 0)
-res = eng.resume_run(r["run_id"], "approved")
+res = eng.resume_run(r["run_id"], "approved", proposal_hash(r["proposal"]))
 kn = knowledge_for(r["run_id"]); created["knowledge"] += [x["Id"] for x in kn]
 ok &= check("approve → exactly one knowledge row", len(kn) == 1)
 ok &= check("run executed via save_brief", res.get("action") == "save_brief" and res.get("status") == "executed")

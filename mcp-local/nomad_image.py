@@ -51,17 +51,24 @@ mcp = FastMCP("nomad-image")
 
 
 @mcp.tool()
-def generate_image(prompt: str, subdir: str = "assets/nomad-images", filename: str = "") -> str:
+def generate_image(prompt: str, subdir: str = "assets/nomad-images", filename: str = "",
+                   style: str = "") -> str:
     """Generate an image from `prompt` on the LOCAL GPU (ComfyUI) and save it into the CURRENT
     project's folder. `subdir` is the destination inside the repo (default 'assets/nomad-images';
     for Unity projects use e.g. 'Assets/Art/Generated'). `filename` is optional (auto-named .png).
-    Local-only + free; the file is left uncommitted for you to review. Returns the saved path."""
+    Local-only + free; the file is left uncommitted for you to review. Returns the saved path.
+
+    `style` applies a named preset from nomad/prompts/image_styles.json. "nomad-blueprint" is the
+    official Nomad Lab LinkedIn style (isometric line drawing, one orange accent, Qwen-Image,
+    1024x1280): pass ONLY the scene, write {nomad} where the recurring character appears, give
+    callout labels as exact quoted words, and expect ~5 min per image."""
     proj = _project_name()
     save_hint = f"{proj}/{subdir.strip('/')}"          # resolve_from_text + _parse_subdir parse this
     try:
         r = requests.post(f"{_engine()}/generate-image",
-                          json={"prompt": prompt, "save_hint": save_hint, "filename": filename},
-                          timeout=400)
+                          json={"prompt": prompt, "save_hint": save_hint, "filename": filename,
+                                "style": style or None},
+                          timeout=960 if style else 400)
         d = r.json()
     except Exception as e:
         return f"[image error: {str(e)[:240]}]"

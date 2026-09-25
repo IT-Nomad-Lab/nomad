@@ -1,0 +1,15 @@
+Having the best technical solution does not give you the right to move.
+
+I have run migrations off legacy processes that had been running for years. Every time, my side arrived with the architecture settled. Cleaner, faster, cheaper, and we could prove all three.
+
+None of that decided when anything moved.
+
+What decided it was a run of negotiations with people whose interests were not mine. Every party at the table had something to protect. About half the time, their reason for slowing us down was a good one.
+
+The part nobody budgets for is that the business has to keep working the whole way through. Same output or better. On the old process, on the new one, and through the stretch where both are running and nobody is certain which number is the real one.
+
+That is not a deployment problem. That is people changing how they work, who they ask, and what they trust, while the quarter still has to close.
+
+A migration is a company change with a technical change inside it. The pipeline is the easy half.
+
+You can be right about the architecture and still be wrong about the move.

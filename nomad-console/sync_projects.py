@@ -78,7 +78,7 @@ def discover():
                 "lane": m.get("lane", ""),
                 "stack": _as_list(m.get("stack", "")),
                 "repo": m.get("repo", ""),
-                "owner": m.get("owner", "operator"),
+                "owner": m.get("owner", "Josias"),
             }
     return list(found.values())
 

@@ -1,0 +1,83 @@
+Part one of this series was the shape of NOMAD: one front door, many brains, and a human gate on anything it cannot undo. This is the first module up close. The one that makes images.
+
+Every cover in my recent posts was made here, on my own GPU, for nothing. Here is how that works, what the different models actually produce from the same prompt, and where I would take it next.
+
+**Why generate locally at all**
+
+Cloud image models are good. They are also metered. Every picture has a price, and every picture you generate leaves your machine. For a content engine that produces images every day, both of those add up. The bill grows, and you have handed your prompts and outputs to someone else's server.
+
+This content engine alone generates images most days. Covers, diagrams, comparison grids like the one below. On a metered cloud that is a running cost that never really stops. On my own hardware it rounds down to the electricity bill.
+
+The machine I built NOMAD on has an RTX 5090 with 24 GB of VRAM. That is enough to run real image models locally. So the default is simple. Generate on my own hardware, for free, in private. Reach for the cloud only when a specific job is worth paying for. Same principle as the rest of NOMAD. Local first for the cheap and the private, cloud only when it earns it.
+
+**The architecture**
+
+The whole module sits behind one tool. A call asks for an image with a prompt and, optionally, which project to save it into. Nothing runs until the request clears the same human gate the rest of NOMAD uses, because generating an image can mean spending money.
+
+Behind the tool is a provider chain, tried in order. ComfyUI on the local GPU first, because it is free and private. If that is unavailable or a job specifically needs a cloud model, it falls through to OpenAI, then to Adobe Firefly. The first one that succeeds wins, and a failure just moves to the next. One call, several possible engines, no rewiring.
+
+When an image comes back, three things happen. It gets saved, it gets recorded so I can find it later, and, if the call named a project, it gets dropped straight into that project's folder. That last part is why an image generated from inside this content engine lands in the right place without me moving files around.
+
+**The model lineup**
+
+Locally I keep four models, each with a different trade. The router picks one, and today that choice is a setting rather than something the caller asks for per image. More on that in a moment.
+
+SDXL is the old reliable. Fast to sample, strong on mood and lighting, but the loosest at following a precise instruction.
+
+FLUX.1 schnell is the quick one. A distilled model that produces a good image in four steps, with better prompt-following than SDXL and surprisingly decent text.
+
+FLUX.2 dev is the heavy hitter. The best prompt adherence and the cleanest text of the four, at the cost of being much slower and hungrier for memory.
+
+Qwen-Image is the other strong one. Excellent at following the prompt and the crispest text rendering of all four. The closest thing I have locally to a cloud model.
+
+**Same prompt, six models**
+
+Talking about models is cheap. So I gave the exact same prompt to all six, the four local models plus gpt-image-1 and Adobe Firefly, and let each render it untouched.
+
+The prompt asked for a robot barista handing a coffee cup to a customer, warm morning light, with the word NOMAD printed on the cup. A deliberately awkward brief: a specific action, hands, and readable text, which is where these models usually struggle.
+
+SDXL made the most cinematic frame and the least accurate one. The robot stands instead of handing anything over, the cups sit on the table, and the word NOMAD landed on the robot's chest and the customer's shirt instead of the cup. Beautiful, and not what I asked for.
+
+FLUX.1 got the actual scene. The robot hands the cup across the counter, the customer reaches for it, and NOMAD is legible on the cup. In four steps.
+
+FLUX.2 did it best. The handoff is right, the light is gorgeous, the hands hold together, and the text is crisp. It also took by far the longest and twice knocked the GPU over while loading, which tells you what best costs.
+
+Qwen matched it closely, with the sharpest text of the set and a clean, bright look. It even added an apron.
+
+Speed is the other half of the choice. FLUX.1 samples in four steps and is done in seconds. FLUX.2 and Qwen run twenty steps and take minutes, and they load large models into memory first. So the decision is never only which looks best. It is which is worth the wait for this particular image.
+
+The two cloud models did it cleanest of all. gpt-image-1 nailed the handoff, the hands, and the text, and threw in a legible chalkboard sign for free. Adobe Firefly produced the most polished, commercial-looking frame of the set, warm and sharp, with NOMAD crisp on the cup. Both are excellent. Both also cost money on every image, and in NOMAD they sit behind the approval gate.
+
+The lesson I did not expect: the assumption that only the newest models can render text did not hold. FLUX.1 wrote a short word cleanly. The real split is not text versus no text. It is obedience. The newer models do what you asked. The older one does something beautiful next to it.
+
+**Running the cloud ones**
+
+The cloud versions used the same prompt, pointed at a different provider. In NOMAD you force the backend:
+
+generate_image(prompt, provider="openai")   for gpt-image-1
+generate_image(prompt, provider="firefly")  for Adobe Firefly, licensed for commercial use
+
+Or straight to the OpenAI API with the identical prompt:
+
+POST https://api.openai.com/v1/images/generations
+{ "model": "gpt-image-1", "prompt": "the same barista prompt", "size": "1024x1024" }
+
+They are a step cleaner than the local models, and they bill for every image. For most of what I make, the local models are already good enough that the cloud stays closed. When a piece has to be flawless, the gate opens and I pay for it.
+
+**How I would make it better**
+
+This module works, and it has plenty of room. A few things I want next.
+
+Let the caller pick the model per image. Right now the local model is a global setting. The obvious upgrade is to choose per request, or better, to route automatically. Text-heavy or precise briefs go to FLUX.2 or Qwen. Fast, atmospheric ones go to SDXL or FLUX.1.
+
+Teach it my style. A small fine-tune or a style adapter so the outputs match a consistent brand look without me writing the same style sentence into every prompt.
+
+Add the boring but useful parts. Aspect-ratio and quality presets. An upscaler for print resolution. Layout control for when I need a specific composition rather than a lucky one. And a quiet rating loop, so over time NOMAD learns which model actually wins which kind of job, instead of me deciding by feel.
+
+Fix the memory crashes. Running the heavy models back to back knocked the GPU over more than once today. A model that unloads cleanly between jobs would make the heavy end reliable.
+
+None of this is exotic. It is the same pattern as the rest of NOMAD. Start with something that works, then let each real need pull the next piece into place.
+
+The repo is here if you want to see the wiring: github.com/IT-Nomad-Lab/nomad
+
+Next in the series: the local model layer, the text brains that run on the same GPU. Same approach, one module at a time.

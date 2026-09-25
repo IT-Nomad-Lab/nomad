@@ -180,3 +180,51 @@ body{
 .spark{flex:1;height:20px;display:block}
 .spark-empty{flex:1;height:20px;display:block;opacity:.2}
 .svc-item{cursor:pointer} .svc-item:hover{background:#14141f}
+
+/* ══ Mission Monitor (projects-first redesign) ══════════════════════════ */
+#body{grid-template-columns:1fr 400px}          /* rail dropped */
+#dash{grid-template-columns:1fr 1fr}
+.panel.span-all{grid-column:1/-1}
+.panel h2 .hint{font-weight:400;font-size:12px;opacity:.72;letter-spacing:.03em;text-transform:none}
+.panel h2 #mon-refresh{float:right;background:#0003;border:0;color:inherit;cursor:pointer;font-size:15px;line-height:1;padding:0 7px;border-radius:4px}
+#need{align-self:stretch;padding:0 18px;display:flex;align-items:center;font-weight:700;letter-spacing:.08em;font-size:15px}
+#need.ok{color:#2fe28a} #need.alert{color:#fff;background:var(--red);animation:blink 1s steps(2,start) infinite}
+
+#monitor{padding:4px 0}
+.mrow{border-bottom:1px solid #ffffff10}
+.mhead{display:grid;grid-template-columns:minmax(150px,1.3fr) 1.1fr 1.15fr auto 34px;align-items:center;
+  gap:12px;padding:8px 14px;cursor:pointer}
+.mrow.warm .mhead{background:#ffcc6610} .mrow.hot .mhead{background:#ff3b6b1c}
+.mhead:hover{background:#6699ff16}
+.mname{font-weight:600;color:var(--amber);display:flex;align-items:center;gap:8px;min-width:0}
+.mname .caret{color:#8b98b8;font-size:11px;width:9px;flex:0 0 auto} .caret.ghost{opacity:.25}
+.mstatus{font-size:9px;color:#9fb4ff;border:1px solid #ffffff22;border-radius:4px;padding:0 5px;
+  text-transform:uppercase;letter-spacing:.05em}
+.mcol{font-size:13px;color:#c8d2ec;min-width:0}
+.git{font-family:'Share Tech Mono',monospace;font-size:12px;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;display:inline-block;max-width:100%}
+.git.muted{opacity:.5}
+.git .br{color:#9fb4ff} .git .dirty{color:#ffcc66} .git .ahead{color:#ff8a5b}
+.git .behind{color:#6bb1ff} .git .clean{color:#2fe28a}
+.plan{display:flex;align-items:center;gap:8px} .plan.muted{opacity:.5;font-size:12px}
+.pbar{flex:1;height:8px;background:#ffffff16;border-radius:4px;overflow:hidden;min-width:36px}
+.pbar i{display:block;height:100%;background:linear-gradient(90deg,#2fe28a,#6699ff)}
+.ppct{font-size:12px;color:#c8d2ec;white-space:nowrap}
+.flags{text-align:right}
+.flag{font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;white-space:nowrap}
+.flag.gate{background:var(--red);color:#fff} .flag.dirt{background:#ffcc6630;color:#ffcc66}
+.mopen{background:#0003;border:0;color:#8b98b8;cursor:pointer;border-radius:5px;font-size:14px;padding:2px 6px}
+.mopen:hover{color:var(--amber);background:#6699ff22}
+
+.msub{padding:2px 14px 10px 34px;background:#00000035}
+.ms{display:flex;justify-content:space-between;font-size:12px;color:#9fb4ff;padding:5px 0 2px;border-top:1px solid #ffffff0c}
+.ms .mspct{color:#8b98b8}
+.tk{display:grid;grid-template-columns:16px 1fr auto;gap:9px;align-items:center;font-size:12px;padding:2px 0;color:#c8d2ec}
+.tk .tkic{text-align:center;color:#8b98b8}
+.tk.done .tkic{color:#2fe28a} .tk.blocked .tkic,.tk.failed .tkic,.tk.declined .tkic{color:#ff5544}
+.tk.inprogress .tkic,.tk.executing .tkic{color:#ffcc66}
+.tk .tklane{font-size:9px;color:#8b98b8;text-transform:uppercase;letter-spacing:.05em}
+
+.pill{background:#ffffff22;border-radius:10px;padding:0 9px;font-size:12px;margin-left:6px}
+.pill.hot{background:var(--red);color:#fff}
+#p-health .tele{padding-top:6px;border-top:1px solid #ffffff10;margin-top:2px}

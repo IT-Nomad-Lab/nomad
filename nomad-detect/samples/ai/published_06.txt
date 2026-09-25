@@ -1,0 +1,9 @@
+The hardest part of any technology project was never the technology. Everyone who has shipped one knows this.
+
+At a company I will not name (you know who you are), my CTO told me the project I was leading would take years. Not based on a plan. Based on rumors. I came back with data and a delivery roadmap. We were fully live in under a year.
+
+What that experience taught me: people at the top do not always have the facts. And when they don't, they fill the gap with assumptions. The assumptions travel faster than the data.
+
+This matters more than ever in 2026. The CIO role is changing. CIOs are no longer just technology owners. They are now being held accountable for whether the workforce actually uses what was deployed. That is a completely different job.
+
+Most CIOs were hired to deliver infrastructure. Not to change how an entire organization works. The technology was never the hard part. The hard part is walking into the room with data when everyone else is working off rumors, and making it count.

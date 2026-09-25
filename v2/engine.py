@@ -23,11 +23,24 @@ from mcp_research import save_brief_impl
 from mcp_content import save_content_impl       # 3B
 from mcp_dev import dispatch_build_impl          # 3B
 from mcp_image import generate_image_impl        # multi-provider: ComfyUI(local) → OpenAI → Firefly (gated)
-from specialists import SPECIALISTS, _IMAGE_WORDS   # 3B: config-driven, all lanes (+ visual-ask words)
+from specialists import SPECIALISTS, _IMAGE_WORDS, _prompt   # 3B: config-driven, all lanes (+ visual-ask words)
 import memory                                     # 3C: episodic recall
 import llm
 
 MANAGER_MODEL = "balanced"
+
+# The Manager routes and decomposes; both are judgement calls the operator only sees the RESULT of.
+# CRITIC_MODE makes it declare confidence and the assumptions it added, so a bad route or a plan
+# built on a wrong premise is visible at the gate instead of after execution. Fail-open: an
+# unreadable block returns "" and the Manager behaves exactly as before.
+CRITIC = _prompt("CRITIC_MODE")
+_CRITIC_BLOCK = ("\n\nHOW TO JUDGE (apply to your own answer):\n" + CRITIC) if CRITIC else ""
+
+# How long a run may sit in `new` before the sweep fails it. Generous on purpose: Process can
+# legitimately take minutes on a slow local model or a scraped research goal, and a false sweep
+# would kill real work. Anything past this is not slow, it is abandoned.
+STALL_MINUTES = int(os.environ.get("NOMAD_STALL_MINUTES", "45"))
+SWEEP_SECS = int(os.environ.get("NOMAD_SWEEP_SECS", "600"))
 
 # Where each tool writes a sink row (for log links). dispatch_build has no sink row.
 SINK = {"send_message": "outbox", "save_brief": "knowledge", "save_content": "content",
@@ -36,6 +49,22 @@ SINK = {"send_message": "outbox", "save_brief": "knowledge", "save_content": "co
 
 def _now():
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+
+def proposal_hash(proposal: dict) -> str:
+    """Fingerprint of exactly what would execute. A remote approver passes back the hash of what
+    they were shown; if the action or any arg changed since, the approval doesn't apply."""
+    import hashlib
+    body = json.dumps({"action": proposal.get("action"), "args": proposal.get("args", {})},
+                      sort_keys=True, default=str)
+    return hashlib.sha256(body.encode()).hexdigest()
+
+
+# Every resume path (cockpit /resume, the LISTEN push, the poller, the Zulip relay) runs in the one
+# engine process. The status check and the `executing` lock are two separate NocoDB calls, so
+# without this claim two concurrent approvals could both see awaiting-approval and both execute.
+_CLAIM = threading.Lock()
+_IN_FLIGHT: set = set()
 
 
 class Engine:
@@ -66,6 +95,20 @@ class Engine:
             "payload": json.dumps({"goal": goal_title}), "created_at": _now()})
         cid = comms["Id"]
 
+        # Everything from here to the gate can throw: the Manager call, the specialist's Process,
+        # a scraper timeout. Without this the comms row is simply left at `new` and no longer
+        # belongs to anyone — the run neither reaches the gate nor reports a failure. One did
+        # exactly that for two months. The sweep below is the backstop for the cases where no
+        # handler gets to run at all; this is the one that can say what actually went wrong.
+        try:
+            return self._route_and_propose(run_id, cid, gid, goal_title, task_ref)
+        except Exception as e:
+            self._fail(cid, {"goal": goal_title}, e)
+            self._log(run_id, "engine", "run failed before the gate", str(e)[:200],
+                      "failed", f"comms#{cid}")
+            raise
+
+    def _route_and_propose(self, run_id, cid, gid, goal_title, task_ref):
         # Clarify + Route (Manager) — classify the goal to a lane/specialist
         past = memory.recall(self.db, goal_title)        # 3C: provenance-aware routing
         context = (f"\n\nRELEVANT PAST WORK (use it to clarify/route consistently):\n{past}"
@@ -77,11 +120,20 @@ class Engine:
             "'support'=reply to a support request; 'ads'=write marketing copy; "
             "'dev'=a coding task in a repo. Fields: lane, intent (one line), target — "
             "comms/support → recipient email or 'operator'; research/ads → the topic; "
-            "dev → the project/repo name." + context,
+            "dev → the project/repo name. Also return: confidence (0-1, how sure you are this is "
+            "the right lane), and concern (one line naming what you assumed or what would make "
+            "this route wrong; null if genuinely none)." + _CRITIC_BLOCK + context,
             f"Goal: {goal_title}")
         lane = m.get("lane") if m.get("lane") in self.specialists else "comms"
         intent = (m.get("intent") or goal_title).strip()
         target = (m.get("target") or "operator").strip()
+        # Routing doubt is only useful if the human at the gate can see it, so it rides the payload
+        # into the gate view rather than sitting in a log nobody opens.
+        try:
+            confidence = float(m.get("confidence"))
+        except (TypeError, ValueError):
+            confidence = None
+        concern = (m.get("concern") or "").strip() or None
         # Deterministic override: a visual/image ask ALWAYS goes to the ads lane (which proposes
         # generate_image). Naming a destination project ("…save it in <project>") otherwise biases
         # the Manager toward 'dev'. Also ensure the intent keeps a visual word so the ads lane's
@@ -94,12 +146,18 @@ class Engine:
         self.db.update("goals", gid, {"status": "routed"})
         self.db.update("comms", cid, {"lane": lane, "assigned_agent": lane, "from_agent": "manager",
                                       "payload": json.dumps({"goal": goal_title, "intent": intent,
-                                                             "target": target})})
+                                                             "target": target,
+                                                             "route_confidence": confidence,
+                                                             "route_concern": concern})})
+        if concern or (confidence is not None and confidence < 0.6):
+            self._log(run_id, "manager", f"routed to {lane} with reservations",
+                      concern or "low confidence, no reason given",
+                      f"confidence={confidence}", f"comms#{cid}")
 
         # Process — the routed specialist drafts a proposal via its Skill (reversible, no side effect)
         proposal = specialist.propose(intent=intent, target=target, run_id=run_id)
 
-        # Image asks can name a destination project IN THE PROMPT ("…for project MyApp"). Thread the
+        # Image asks can name a destination project IN THE PROMPT ("…for project Civis"). Thread the
         # ORIGINAL goal text through as save_hint (faithful to what the operator typed, unlike the
         # Manager's paraphrased intent) so generate_image can save the file into that project folder.
         if proposal.get("action") == "generate_image":
@@ -116,8 +174,34 @@ class Engine:
                 "status": "awaiting-approval", "proposal": proposal}
 
     # ── resume after the gate ───────────────────────────────────────
-    def resume_run(self, run_id: str, decision: str) -> dict:
-        """Resume a paused run on the gate decision. Idempotent by run_id. decision ∈ approved/rejected."""
+    def resume_run(self, run_id: str, decision: str, expect_hash: str = None,
+                   *, db_origin: bool = False) -> dict:
+        """Resume a paused run on the gate decision. Idempotent by run_id, including under
+        concurrent calls (one claim per run at a time). decision ∈ approved/rejected.
+
+        An approval REQUIRES `expect_hash`, and only executes if it still matches the stored
+        proposal. This was optional, which made it a courtesy rather than a control: a caller
+        that skipped the field got the same execution as one that checked. Now an approver has
+        to name the exact proposal it is approving, so it cannot approve a run it never read,
+        and cannot approve text that changed after it was shown.
+
+        `db_origin` is for the paths where the operator flipped the row in NocoDB directly, so
+        the decision and the proposal are the same authoritative record and a hash of it would
+        only be checking the row against itself. It is keyword-only and set in-process, never
+        from a request body, because a client able to name it would have the bypass.
+        """
+        with _CLAIM:
+            if run_id in _IN_FLIGHT:
+                return {"run_id": run_id, "status": "executing", "note": "already being resolved"}
+            _IN_FLIGHT.add(run_id)
+        try:
+            return self._resume_claimed(run_id, decision, expect_hash, db_origin=db_origin)
+        finally:
+            with _CLAIM:
+                _IN_FLIGHT.discard(run_id)
+
+    def _resume_claimed(self, run_id: str, decision: str, expect_hash: str = None,
+                        *, db_origin: bool = False) -> dict:
         row = self.db.find("comms", "run_id", run_id)
         if not row:
             return {"run_id": run_id, "error": "run not found"}
@@ -129,6 +213,17 @@ class Engine:
             return {"run_id": run_id, "status": row["status"], "note": "already resolved (idempotent)"}
         proposal = json.loads(row.get("payload") or "{}")
         args = proposal.get("args", {})
+
+        if decision == "approved" and not db_origin:
+            if not expect_hash:
+                return {"run_id": run_id, "status": row.get("status"),
+                        "error": "expect_hash is required to approve. Read the proposal from "
+                                 "GET /run?id=<run_id>, which returns proposal_hash, and send "
+                                 "that back. Approving without naming the proposal is not "
+                                 "approving."}
+            if expect_hash != proposal_hash(proposal):
+                return {"run_id": run_id, "status": row.get("status"),
+                        "error": "proposal changed since it was shown; review it again before approving"}
 
         if decision == "approved":
             # Execute — dispatch the proposed action to its MCP tool (the one side-effecting call)
@@ -204,7 +299,10 @@ class Engine:
             "milestones, each with 1-4 tasks. Each task is ONE actionable unit assignable to a lane "
             "(comms=send a message; research=gather/answer; support=reply; ads=marketing copy; "
             "dev=a coding task in a repo). Return JSON only: "
-            '{"milestones":[{"title":"...","tasks":[{"title":"...","lane":"research"}]}]}',
+            '{"milestones":[{"title":"...","tasks":[{"title":"...","lane":"research"}]}],'
+            '"assumptions":["what you assumed that the operator did not say"],'
+            '"risk":"the one thing most likely to make this plan wrong"}'
+            + _CRITIC_BLOCK,
             f"Project: {title}\n{description}".strip())
         g = self.db.create("mc_goals", {"title": title, "description": description})
         gid = g["Id"]
@@ -221,11 +319,18 @@ class Engine:
                                                 "assigned_agent": lane, "milestone_ref": str(mrow["Id"])})
                 tasks.append({"task_id": trow["Id"], "title": ttitle, "lane": lane})
             out.append({"milestone_id": mrow["Id"], "title": mtitle, "tasks": tasks})
+        # A plan's assumptions are worth more than the plan: the operator can correct one they can
+        # see, and every task below inherits a premise nobody checked.
+        assumptions = [a for a in (plan.get("assumptions") or []) if str(a).strip()]
+        risk = (plan.get("risk") or "").strip()
         self._log(f"proj-{gid}", "manager", f"planned project: {title}",
-                  f"{len(out)} milestones", "decomposed into milestones+tasks", f"mc_goals#{gid}")
+                  "; ".join(str(a) for a in assumptions) or "no assumptions declared",
+                  f"{len(out)} milestones, {sum(len(m['tasks']) for m in out)} tasks"
+                  + (f" · biggest risk: {risk}" if risk else ""), f"mc_goals#{gid}")
         self._advance(gid)   # auto-start: queue the first task to the gate
         return {"goal_id": gid, "title": title, "milestones": out,
                 "task_count": sum(len(m["tasks"]) for m in out),
+                "assumptions": assumptions, "risk": risk or None,
                 "auto_advance": self.auto_advance}
 
     def _advance(self, goal_id):
@@ -301,6 +406,40 @@ class Engine:
         st = self.start_run(nxt["title"], task_ref=nxt["Id"])
         return {"task_id": nxt["Id"], "task_title": nxt["title"], **st}
 
+    BACKLOG_MAX = 5
+
+    def run_backlog(self, limit=3) -> dict:
+        """One backlog task from each project with work left, up to `limit`. The v2 answer to
+        crew's `/run-backlog`, which is what `nomadselfdevcron` fires at daily.
+
+        The difference that matters: crew's version ran the work and landed uncommitted edits by
+        itself. Every run started here stops at `awaiting-approval` like any other, so a cron firing
+        while nobody is awake queues proposals and executes nothing. That is the whole reason this
+        is safe to leave on a timer.
+
+        `limit` is clamped, because the thing on the other end of this is a scheduler. A bad payload
+        or a loop should not be able to fill the gate faster than an operator can read it. One task
+        per project rather than `limit` from the first one, so a long project cannot starve the rest.
+
+        A project that fails is reported and stepped over: one broken goal must not stop the sweep."""
+        n = max(1, min(int(limit or 1), self.BACKLOG_MAX))
+        started, skipped = [], []
+        for g in self.project_goals():
+            if len(started) >= n:
+                break
+            if g["total"] and g["done"] >= g["total"]:      # nothing left to pick up
+                continue
+            try:
+                r = self.run_next_task(g["goal_id"])
+            except Exception as e:
+                skipped.append({"goal_id": g["goal_id"], "error": str(e)[:200]})
+                continue
+            if r.get("done"):
+                continue
+            started.append({"goal_id": g["goal_id"], "project": g["title"], **r})
+        return {"started": len(started), "limit": n, "runs": started, "skipped": skipped,
+                "note": "each run is awaiting approval; nothing has executed"}
+
     @staticmethod
     def _resolved(status):
         return (status or "").lower() in ("done", "skipped")   # both count as progress
@@ -358,6 +497,46 @@ class Engine:
         self.db.update("comms", cid, {"status": "failed",
                                       "payload": json.dumps({**proposal, "error": str(error)[:300]})})
 
+    # ── stalled-run sweep ───────────────────────────────────────────
+    def sweep_stalled(self, max_age_min: int = STALL_MINUTES) -> list:
+        """Fail any run still in `new` past `max_age_min`, and return what was swept.
+
+        A run only reaches the gate at the END of start_run. Anything that kills the process
+        between Capture and the gate — a container restart, an OOM, a hung model call that
+        outlives the request — leaves the comms row at `new` with nobody waiting on it. The
+        try/except in start_run cannot help there, because no handler runs.
+
+        One such run sat in `new` from 2026-07-16 to 2026-09-22, counted forever as "in flight"
+        by the relay digest, and was found by hand. This is the backstop for that.
+        """
+        now = datetime.datetime.now(datetime.timezone.utc)
+        cutoff = now - datetime.timedelta(minutes=max_age_min)
+        swept = []
+        for row in self.db.list("comms", limit=200, where="(status,eq,new)") or []:
+            created = row.get("created_at")
+            if not created:
+                continue
+            try:
+                ts = datetime.datetime.fromisoformat(str(created).replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=datetime.timezone.utc)
+            if ts > cutoff:
+                continue
+            age = int((now - ts).total_seconds() // 60)
+            try:
+                payload = json.loads(row.get("payload") or "{}")
+            except (ValueError, TypeError):
+                payload = {}
+            self._fail(row["Id"], payload,
+                       f"stalled in 'new' for {age} min with no action; swept by sweep_stalled")
+            self._log(row.get("run_id") or "", "engine", "swept a stalled run",
+                      f"sat in 'new' for {age} min, past the {max_age_min} min limit",
+                      "failed", f"comms#{row['Id']}")
+            swept.append({"run_id": row.get("run_id"), "comms_id": row["Id"], "age_min": age})
+        return swept
+
     # ── Log & Learn ─────────────────────────────────────────────────
     def _log(self, run_id, agent, what, why, outcome, links):
         self.db.create("episodic", {"run_id": run_id, "agent": agent, "what": what,
@@ -369,4 +548,5 @@ if __name__ == "__main__":
     eng = Engine()
     st = eng.start_run("Send a short welcome note to the new operator")
     print("paused at gate:", json.dumps(st, indent=2)[:600])
-    print("resume(approved):", eng.resume_run(st["run_id"], "approved"))
+    print("resume(approved):", eng.resume_run(st["run_id"], "approved",
+                                              proposal_hash(st["proposal"])))

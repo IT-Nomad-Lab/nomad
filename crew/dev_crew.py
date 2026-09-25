@@ -18,6 +18,7 @@ import yaml
 from crewai import Agent, Crew, LLM, Process, Task
 
 from tools.dev_tools import DISPATCH
+from codex_review import codex_review, format_for_prompt
 
 from tools import (
     dispatch_plan,
@@ -113,20 +114,29 @@ def _review_tasks(agents, ctx):
     )
     review = Task(
         description=(
-            "Decide the verdict for \"{goal}\" in \"{project}\" using QA's assessment and the "
-            "AUTHORITATIVE VERIFICATION EVIDENCE below (real, already executed):\n\n"
+            "Decide the verdict for \"{goal}\" in \"{project}\" using QA's assessment, the "
+            "AUTHORITATIVE VERIFICATION EVIDENCE below (real, already executed), and the "
+            "CROSS-VENDOR REVIEW below (a different vendor's model, not another Claude pass):\n\n"
             "=== VERIFICATION EVIDENCE ===\n{evidence}\n=== END EVIDENCE ===\n\n"
+            "=== CROSS-VENDOR REVIEW ===\n{codex_review}\n=== END CROSS-VENDOR REVIEW ===\n\n"
             "Check NOMAD conventions (secrets only in .env, role aliases not raw models, "
-            "localhost-first, fail-open). Decide:\n"
+            "localhost-first, fail-open). If the cross-vendor review is FLAGGED, weigh each "
+            "issue against the diff yourself before deciding — it is a second opinion, not an "
+            "automatic veto, but a security or correctness issue it raises must be addressed or "
+            "explicitly argued against, not silently dropped. If it says it did not run, say so "
+            "in your summary; do not imply a second opinion you did not get. Decide:\n"
             "  • APPROVE-FOR-COMMIT when the evidence shows the change is additive/scoped "
-            "(git diff shows only intended files), compiles clean (PY_COMPILE_OK / rc=0), and the "
-            "intended behavior is present in the diff. Live-HTTP smoke is NOT required pre-commit.\n"
-            "  • CHANGES-REQUESTED ONLY when the evidence shows a concrete failure (cite the exact "
-            "diff line or non-zero rc). Do NOT block for missing proof — the evidence above is "
-            "authoritative; a tool error in your own session is not grounds to block.\n"
+            "(git diff shows only intended files), compiles clean (PY_COMPILE_OK / rc=0), the "
+            "intended behavior is present in the diff, and no unresolved cross-vendor issue "
+            "remains. Live-HTTP smoke is NOT required pre-commit.\n"
+            "  • CHANGES-REQUESTED when the evidence shows a concrete failure (cite the exact "
+            "diff line or non-zero rc), OR the cross-vendor review raised a [BUG] or [SECURITY] "
+            "issue you cannot dismiss with a specific reason. Do NOT block for missing proof — "
+            "the evidence above is authoritative; a tool error in your own session is not "
+            "grounds to block.\n"
             "The human makes the final commit decision on the uncommitted tree. State the verdict "
             "literally as 'APPROVE-FOR-COMMIT' or 'CHANGES-REQUESTED' and save a one-paragraph "
-            "summary to Knowledge."
+            "summary to Knowledge, including whether the cross-vendor review ran and what it found."
         ).format(**ctx),
         expected_output="The literal verdict APPROVE-FOR-COMMIT or CHANGES-REQUESTED + a Knowledge summary.",
         agent=agents["reviewer"],
@@ -138,8 +148,8 @@ def resolve_project(name):
     """Resolve a backlog item's [Project] tag against the dispatcher's Nomad.md registry.
     Returns {name, lane, repo} for the matched project, or a bare {name} fallback if the
     dispatcher is unreachable or the tag matches nothing (run_feature will surface a clear
-    'Unknown project' error in that case). Lets operators tag tasks loosely — `[MyApp]`,
-    `[myapp-poc]`, `[myapp]` all map to the right repo."""
+    'Unknown project' error in that case). Lets operators tag tasks loosely — `[Civis]`,
+    `[civis-poc]`, `[crypto]` all map to the right repo."""
     try:
         detail = requests.get(f"{DISPATCH}/projects", timeout=10).json().get("detail", [])
     except requests.RequestException:
@@ -194,13 +204,28 @@ def run_feature(goal: str, project: str) -> str:
     # Phase 1.5 — gather REAL verification evidence (not dependent on agent tool-calls).
     evidence = gather_evidence(project)
 
-    # Phase 2 — test + review against the authoritative evidence.
-    rctx = {**ctx, "evidence": evidence}
+    # Phase 1.6 — cross-vendor review: OpenAI Codex CLI (ChatGPT subscription) reads the
+    # diff before Claude's own Reviewer agent does, so the two sides don't share blind
+    # spots. Fails open, loudly — see codex_review.py's docstring for why disable_fallbacks
+    # and the served-model check both matter here.
+    codex_result = codex_review(project, goal, evidence)
+    codex_block = format_for_prompt(codex_result)
+    write_activity(
+        "Engineering Crew",
+        f"Cross-vendor review {'ran' if codex_result['ran'] else 'DID NOT RUN'}: {goal}",
+        f"served_by={codex_result.get('served_by')} verdict={codex_result.get('verdict')} "
+        f"note={codex_result.get('note')}",
+    )
+
+    # Phase 2 — test + review against the authoritative evidence + the cross-vendor pass.
+    rctx = {**ctx, "evidence": evidence, "codex_review": codex_block}
     review_crew = Crew(agents=[agents["qa_engineer"], agents["reviewer"]],
                        tasks=_review_tasks(agents, rctx), process=Process.sequential, verbose=True)
     review_out = str(review_crew.kickoff())
 
-    result = f"{build_out}\n\n=== VERIFICATION EVIDENCE ===\n{evidence}\n\n=== REVIEW ===\n{review_out}"
+    result = (f"{build_out}\n\n=== VERIFICATION EVIDENCE ===\n{evidence}\n\n"
+              f"=== CROSS-VENDOR REVIEW (Codex/OpenAI) ===\n{codex_block}\n\n"
+              f"=== REVIEW ===\n{review_out}")
     write_activity("Engineering Crew", f"Dev cycle complete: {goal}",
                    f"Target repo: {project}. See Knowledge for the review verdict.")
     write_knowledge(f"Dev cycle verdict — {goal}", result, kind="Decision",

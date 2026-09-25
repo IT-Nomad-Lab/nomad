@@ -1,0 +1,11 @@
+A 2025 study found that frequent AI use negatively correlates with critical thinking. They were not wrong. AI does not make you think less. Using it as a substitute for thinking does.
+
+The same research found that moderate AI use does not significantly affect critical thinking. Only excessive reliance does. A separate study from CHI 2025 showed that people who worked through a problem on their own first, then consulted AI, performed better on critical thinking tasks than those who used AI from the start. The sequence matters.
+
+In my teams, the critical thinking was already done before the AI tools came in. We used AI to review, to catch missed details, to accelerate delivery. The main work was human. What AI did was compress the time between what humans had already reasoned through and the final output.
+
+What we observed was simple: AI in the hands of a senior delivers senior-level work. AI in the hands of a junior delivers junior-level work. The tool amplifies what is already there. It does not replace what is not.
+
+This is not about AI making us think less. It is about learning to think in a new sequence. Think first. Deeply. Then bring the tool in.
+
+AI is a multiplier. The question is what you are multiplying.

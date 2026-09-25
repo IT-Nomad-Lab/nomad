@@ -1,0 +1,9 @@
+Most data engineering teams in 2026 have AI tools. Most do not have the foundations those tools need to work well.
+
+AI agents are creating 80% of databases on Databricks. The execution layer is being automated at speed. What is not being built at the same speed: data modeling, distributed systems, pipeline reliability, data quality and lineage, governance. The concepts that transfer across every stack and outlast every tool.
+
+AI is an amplifier. A well-modeled data layer with clean lineage moves fast with AI behind it. A poorly modeled one fails faster.
+
+I wrote about what this means for data engineers and the teams building around them. What fundamentals actually look like in practice. What breaks when AI generates pipelines that nobody can trace. And why the fundamentals-first hiring argument holds even more strongly now than it did before.
+
+Link in comments.

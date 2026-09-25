@@ -1,0 +1,14 @@
+**The Hidden Skills of Data Engineers: What the Interview Loop Misses**
+
+As a hiring manager for a data engineering team, I've come to realize that the traditional interview process can fall short in identifying the skills that truly matter for success in this role. While technical interviews and coding challenges can assess a candidate's programming skills and problem-solving abilities, they often overlook the nuances of data engineering.
+
+In my experience, the best data engineers are not just proficient in programming languages or data modeling techniques. They possess a unique blend of technical, business, and soft skills that enable them to effectively design, build, and maintain complex data systems.
+
+**Missing Skills:**
+
+*   **Domain expertise**: The ability to understand the business context and requirements of the data system is crucial. Data engineers need to be able to communicate effectively with stakeholders and translate business needs into technical solutions.
+*   **System thinking**: Data engineers must consider the broader architecture and implications of their work, rather than just focusing on individual components.
+*   **Collaboration**: Data engineers often work closely with cross-functional teams, including data scientists, analysts, and product managers. They must be able to effectively communicate and collaborate with these groups.
+*   **Adaptability**: Data systems are inherently dynamic and subject to change. Data engineers must be able to adapt quickly to new requirements and technologies.
+
+To truly assess a candidate's fit for a data engineering role, I recommend incorporating behavioral interviews, case studies, and skills assessments that focus on these key areas. By doing so, you'll be better equipped to identify top talent and set your team up for success.

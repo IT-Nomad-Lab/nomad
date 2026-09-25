@@ -1,0 +1,35 @@
+{
+  "Qwen/Qwen2.5-1.5B|Qwen/Qwen2.5-1.5B-Instruct": {
+    "accuracy": 0.9822,
+    "low_fpr": 0.9562,
+    "fit_accuracy": 0.3864,
+    "tpr_at_low_fpr": 0.2237,
+    "fpr_at_accuracy": 0.167,
+    "tpr_at_accuracy": 0.316,
+    "n_samples": 88,
+    "n_human": 12,
+    "n_ai": 76,
+    "human_mean": 1.0141,
+    "ai_mean": 1.0034,
+    "fitted": "2026-09-18",
+    "auc_by_source": {
+      "fast": 0.817,
+      "gpt": 0.983,
+      "opus": 0.367,
+      "published": 0.415
+    },
+    "blind_to": [
+      "opus",
+      "published"
+    ],
+    "style_auc_by_source": {
+      "fast": 0.996,
+      "gpt": 0.996,
+      "opus": 0.833,
+      "published": 0.516
+    },
+    "blind_to_both": [
+      "published"
+    ]
+  }
+}

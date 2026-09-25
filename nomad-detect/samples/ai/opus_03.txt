@@ -1,0 +1,9 @@
+The most expensive technical decision I ever made was choosing to keep a system I should have replaced.
+
+We had an ingestion service written in a language nobody on the team knew well. It worked. Replacing it would have cost a quarter of engineering time with no visible feature output, so I kept deferring it. Every deferral was individually rational.
+
+Two years later, that service had become the reason we could not add new data sources, could not onboard engineers quickly, and could not respond to a compliance request without a specialist who had since left the company. The cost was never a line item. It showed up as slowness everywhere else.
+
+Technical debt does not compound like financial debt. It compounds like organizational debt, which is worse, because the interest is paid in the ability of your team to do anything at all.
+
+The question is not whether the old system works. The question is what it prevents.

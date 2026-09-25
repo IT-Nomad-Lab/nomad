@@ -1,0 +1,18 @@
+{
+  "_doc": "Named image styles for generate_image(style=...). A style wraps the caller's SCENE prompt in a fixed prefix/suffix, swaps the {nomad} token for the recurring character, and pins the local model, size and negative. Read at call time, so edits apply without rebuilding the engine. Guide: content-creation/brand/VISUAL_STYLE.md",
+  "nomad-blueprint": {
+    "description": "Nomad Lab official LinkedIn style (adopted 2026-09-18): isometric technical line drawing, one orange accent.",
+    "model": "qwen",
+    "width": 1024,
+    "height": 1280,
+    "steps": 25,
+    "cfg": 2.5,
+    "timeout": 900,
+    "tokens": {
+      "{nomad}": "the Nomad, a small lean figure in a long plain WHITE coat drawn only in black ink outline with no fill color, short dark hair, carrying a large expedition backpack with a thin radio antenna sticking up from it"
+    },
+    "prefix": "Detailed isometric technical line illustration, like an architect's drawing: crisp black ink lines on a pure white background with a very faint pale blue grid. ",
+    "suffix": " Exactly ONE colored element in the whole image: the key object of the scene, filled flat vivid orange. Everything else, including every person and all their clothing, is black ink line art on white with no fill color. Tiny precise details, dimension lines and thin callout leader lines, clean vector style, simple hatching instead of shading, generous white space around the diorama, editorial infographic quality. Any callout labels use clean uppercase sans-serif lettering and spell exactly the words given in quotes, and there is no other text anywhere.",
+    "negative": "photorealistic, photograph, 3d render with lighting, perspective distortion, colored clothing, beige, brown, tan, blue objects, green, purple, many colors, gradients, gibberish text, misspelled words, random letters, watermark, signature, logo, blurry, lowres"
+  }
+}

@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# NOMAD pre-commit gate (roadmap T0.3).
+#
+# Versioned in the repo and activated with core.hooksPath, because .git/hooks is not
+# tracked and a guard nobody can reinstall is a guard that quietly disappears.
+# Install:  scripts/install-git-hooks.sh
+#
+# All it does is refuse to let a credential into a commit. It scans STAGED content only.
+set -uo pipefail
+
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+SCAN="$ROOT/.claude/hooks/secret_scan.py"
+
+if [ ! -f "$SCAN" ]; then
+  echo "pre-commit: $SCAN is missing -> commit blocked (fail-closed)." >&2
+  echo "Restore it from git, or bypass once with --no-verify." >&2
+  exit 1
+fi
+
+PY="$(command -v python3 || command -v python)" || {
+  echo "pre-commit: no python3 on PATH -> commit blocked (fail-closed)." >&2
+  exit 1
+}
+
+"$PY" "$SCAN"
+rc=$?
+[ $rc -eq 0 ] && exit 0
+exit 1

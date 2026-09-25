@@ -1,0 +1,17 @@
+[Unit]
+Description=NOMAD social — Instagram links → media, transcript, vision analysis, report
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/nomad/nomad-social
+EnvironmentFile=-%h/nomad/.env
+Environment=NOMAD_SOCIAL_PORT=8216
+Environment=NOMAD_SOCIAL_FFMPEG_DIR=/home/linuxbrew/.linuxbrew/bin
+Environment=PATH=/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/nomad/nomad-social/.venv/bin/python %h/nomad/nomad-social/server.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

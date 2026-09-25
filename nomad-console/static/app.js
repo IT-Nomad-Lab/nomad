@@ -4,20 +4,19 @@ async function getJSON(u){ try{ const r = await fetch(u); return await r.json();
 
 let alarms = { approvals:0, gpuTemp:0, down:0 };
 function refreshAlert(){
-  const red = alarms.approvals>0 || alarms.gpuTemp>=87 || alarms.down>0;
-  const a = $('#alert');
-  if(red){ a.className='alert red';
-    a.textContent = '◉ ' + (alarms.approvals>0 ? `${alarms.approvals} APPROVAL${alarms.approvals>1?'S':''} PENDING`
-                    : alarms.down>0 ? 'SERVICE OFFLINE' : 'GPU THERMAL'); }
-  else { a.className='alert nominal'; a.textContent='● NOMINAL'; }
+  const n = (alarms.approvals||0) + (alarms.down||0) + (alarms.gpuTemp>=87?1:0);
+  const b = $('#need'); if(!b) return;
+  if(n>0){ b.className='need alert';
+    b.textContent = '● ' + (alarms.approvals>0 ? `${alarms.approvals} NEED${alarms.approvals>1?'':'S'} YOU`
+                    : alarms.down>0 ? 'SERVICE DOWN' : 'GPU THERMAL'); }
+  else { b.className='need ok'; b.textContent='● ALL NOMINAL'; }
 }
 
 /* ── clock / stardate ── */
 function tick(){
   const now = new Date();
-  $('#clock').textContent = now.toISOString().slice(11,19);
-  const sd = 41000 + (now - Date.UTC(2026,0,1))/86400000 * 2.731;
-  $('#stardate').textContent = sd.toFixed(2);
+  const c = $('#clock'); if(c) c.textContent = now.toISOString().slice(11,19);
+  const sd = $('#stardate'); if(sd) sd.textContent = (41000 + (now - Date.UTC(2026,0,1))/86400000 * 2.731).toFixed(2);
 }
 setInterval(tick,1000); tick();
 
@@ -90,19 +89,68 @@ async function pollSystem(){
 }
 function fmtDur(s){ const h=Math.floor(s/3600),m=Math.floor(s%3600/60); return h?`${h}h${m}m`:`${m}m`; }
 
-/* ── projects ── */
-async function pollProjects(){
-  const d = await getJSON('/api/projects'); if(!d) return;
-  const box = $('#projects'); box.innerHTML='';
-  if(!d.projects.length){ box.innerHTML='<div class="muted">no projects yet — add Goals/Projects in Notion</div>'; return; }
+/* ── mission monitor: one row per project, sorted by what needs you ── */
+const expanded = new Set();
+function gitBadge(g){
+  if(!g || !g.repo) return '<span class="git muted">no repo</span>';
+  let s = `<span class="git" title="${g.last_commit||''}"><span class="br">${g.branch||'—'}</span>`;
+  if(g.dirty) s += ` <span class="dirty">✎${g.dirty}</span>`;
+  if(g.ahead) s += ` <span class="ahead">↑${g.ahead}</span>`;
+  if(g.behind) s += ` <span class="behind">↓${g.behind}</span>`;
+  if(!g.dirty && !g.ahead && !g.behind) s += ` <span class="clean">✓</span>`;
+  return s + '</span>';
+}
+function planBar(p){
+  if(!p || !p.total) return '<span class="plan muted">no plan</span>';
+  return `<span class="plan"><span class="pbar"><i style="width:${p.pct}%"></i></span>`+
+         `<span class="ppct">${p.pct}% <span class="muted">${p.done}/${p.total}</span></span></span>`;
+}
+async function loadTasks(goalId, sub){
+  const d = await getJSON('/api/project?goal_id='+goalId);
+  sub.innerHTML='';
+  const ms = (d && d.milestones) || [];
+  if(!ms.length){ sub.innerHTML='<div class="muted">plan has no milestones yet</div>'; return; }
+  ms.forEach(m=>{
+    sub.appendChild(el('div','ms', `<span class="mstitle">◈ ${m.title||'milestone'}</span><span class="mspct">${m.pct||0}%</span>`));
+    (m.tasks||[]).forEach(t=>{
+      const st=(t.status||'').toLowerCase();
+      const ic = ['done','executed','complete'].includes(st)?'✓'
+               : ['blocked','failed','declined'].includes(st)?'✗'
+               : ['in progress','executing'].includes(st)?'▸':'○';
+      sub.appendChild(el('div','tk '+(st.replace(/[^a-z]/g,'')||'todo'),
+        `<span class="tkic">${ic}</span><span class="tktitle">${t.title||''}</span><span class="tklane">${t.lane||''}</span>`));
+    });
+  });
+}
+async function pollMonitor(){
+  const d = await getJSON('/api/monitor'); if(!d) return;
+  const box = $('#monitor'); if(!box) return;
+  if(!d.projects.length){ box.innerHTML='<div class="muted">no Nomad.md projects found under the mounted roots</div>'; return; }
+  box.innerHTML='';
   d.projects.forEach(p=>{
-    const r = el('div','row proj-item');
-    r.title = 'Open an interactive workspace in this project';
-    r.appendChild(el('span','k', `▸ ${p.name}`));
-    const st = (p.status||'—').replace(/[^A-Za-z]/g,'');
-    r.appendChild(el('span','', `<span class="tag ${st}">${p.status}</span>`));
-    r.onclick = ()=>{ if(window.NomadWorkspace) window.NomadWorkspace.open(p.name); };
-    box.appendChild(r);
+    const row = el('div','mrow'+(p.score>=100?' hot':p.score>0?' warm':''));
+    const head = el('div','mhead');
+    const attn = p.gate>0 ? `<span class="flag gate">${p.gate} gate</span>`
+               : (p.git && (p.git.dirty||p.git.ahead)) ? '<span class="flag dirt">uncommitted</span>' : '';
+    head.innerHTML =
+      `<span class="mname">${p.plan&&p.plan.total?`<span class="caret">${expanded.has(p.name)?'▾':'▸'}</span>`:'<span class="caret ghost">·</span>'}${p.name}`+
+        `${p.status?`<span class="mstatus">${p.status}</span>`:''}</span>`+
+      `<span class="mcol">${gitBadge(p.git)}</span>`+
+      `<span class="mcol">${planBar(p.plan)}</span>`+
+      `<span class="mcol flags">${attn}</span>`;
+    const open = el('button','mopen','⌨'); open.title='open a terminal in this repo';
+    open.onclick=(e)=>{ e.stopPropagation(); if(window.NomadWorkspace) window.NomadWorkspace.open(p.name); };
+    head.appendChild(open);
+    head.onclick = ()=>{
+      if(p.plan && p.plan.total){ expanded.has(p.name)?expanded.delete(p.name):expanded.add(p.name); pollMonitor(); }
+      else if(window.NomadWorkspace) window.NomadWorkspace.open(p.name);
+    };
+    row.appendChild(head);
+    box.appendChild(row);
+    if(p.plan && p.plan.total && expanded.has(p.name)){
+      const sub = el('div','msub','<div class="muted">loading tasks…</div>');
+      box.appendChild(sub); loadTasks(p.plan.goal_id, sub);
+    }
   });
 }
 
@@ -121,46 +169,6 @@ function popover(anchor, title, lines){
 }
 function closePopover(){ const p = $('.popover'); if(p) p.remove(); }
 
-/* ── agents ── */
-async function pollAgents(){
-  const d = await getJSON('/api/agents'); const o = await getJSON('/api/ollama');
-  if(!d) return;
-  const box = $('#agents'); box.innerHTML='';
-  d.agents.forEach(a=>{
-    const r = el('div','row agent-item');
-    r.title = 'Recent activity';
-    r.appendChild(el('span','k',`${a.name}<span class="muted"> · ${a.model}</span>`));
-    r.appendChild(el('span','', `<span class="tag ${a.status==='ACTIVE'?'active':'standby'}">${a.status}</span>`));
-    r.onclick = async (ev)=>{
-      ev.stopPropagation();
-      const act = await getJSON('/api/activity'); const all = (act&&act.activity)||[];
-      const mine = all.filter(x=> (x.agent||'').toLowerCase().includes(a.name.toLowerCase())).slice(0,8);
-      popover(r, `${a.name} · recent`, mine.map(x=> `${x.ts?x.ts.slice(11,16):'--:--'}  ${x.action}`));
-    };
-    box.appendChild(r);
-  });
-  if(o && o.length){
-    const r = el('div','row');
-    r.appendChild(el('span','k','◇ loaded model'));
-    r.appendChild(el('span','v', o.map(m=>`${m.name} (${m.size_gb}G)`).join(', ')));
-    box.appendChild(r);
-  }
-}
-
-/* ── activity ── */
-async function pollActivity(){
-  const d = await getJSON('/api/activity'); if(!d) return;
-  const box = $('#activity'); box.innerHTML='';
-  if(!d.activity.length){ box.innerHTML='<div class="muted">no logged actions yet</div>'; return; }
-  d.activity.forEach(a=>{
-    const t = a.ts ? a.ts.slice(11,16) : '--:--';
-    const r = el('div','row');
-    r.appendChild(el('span','k',`<span class="muted">${t}</span> ${a.action}`));
-    r.appendChild(el('span','v',a.agent));
-    box.appendChild(r);
-  });
-}
-
 /* ── approvals (inline approve/reject → engine gate) ── */
 async function decide(runId, decision, btn){
   if(decision==='rejected' && !confirm('Reject this run?')) return;
@@ -172,6 +180,7 @@ async function decide(runId, decision, btn){
 async function pollApprovals(){
   const d = await getJSON('/api/approvals'); if(!d) return;
   alarms.approvals = d.approvals.length; refreshAlert();
+  const gc = $('#gate-count'); if(gc){ gc.textContent = d.approvals.length; gc.className = 'pill'+(d.approvals.length?' hot':''); }
   const box = $('#approvals'); box.innerHTML='';
   if(!d.approvals.length){ box.innerHTML='<div class="muted">queue clear — no pending approvals</div>'; return; }
   d.approvals.forEach(a=>{
@@ -188,38 +197,6 @@ async function pollApprovals(){
     box.appendChild(r);
     if(a.preview){ const pv = el('div','appr-pv', a.preview); box.appendChild(pv); }
   });
-}
-
-/* ── engineering crew (dev team) ── */
-let backlogBusy = false;
-async function runBacklog(btn){
-  if(backlogBusy) return; backlogBusy = true;
-  btn.disabled = true; const orig = btn.textContent; btn.textContent = 'QUEUING…';
-  try{
-    const r = await fetch('/api/devteam/run-backlog',{method:'POST'});
-    const j = await r.json().catch(()=>({}));
-    btn.textContent = j.queued!=null ? `QUEUED ${j.queued}` : (j.error ? 'ERR' : 'DONE');
-  }catch(e){ btn.textContent = 'ERR'; }
-  setTimeout(()=>{ btn.textContent = orig; btn.disabled = false; backlogBusy = false; }, 4000);
-}
-async function pollDevTeam(){
-  const d = await getJSON('/api/devteam'); if(!d) return;
-  const stat = $('#builder-stat');
-  if(stat){ stat.textContent = d.builder_online ? `BUILDER ONLINE · ${d.buildable} repos` : 'BUILDER OFFLINE';
-    stat.className = 'tag ' + (d.builder_online ? 'on' : 'off'); }
-  const box = $('#devteam'); if(!box) return; box.innerHTML='';
-  d.agents.forEach(a=>{
-    const r = el('div','row');
-    r.appendChild(el('span','k',`${a.name} <span class="muted">${a.role}</span>`));
-    r.appendChild(el('span','v',a.model));
-    box.appendChild(r);
-  });
-  const act = el('div','crew-act');
-  const b = el('button','crew-btn','▶ WORK BACKLOG');
-  b.title = d.builder_online ? 'Have the crew work its Notion backlog' : 'Builder offline';
-  if(!d.builder_online) b.disabled = true;
-  b.onclick = ()=>runBacklog(b);
-  act.appendChild(b); box.appendChild(act);
 }
 
 /* ── proactive briefing: NOMAD speaks up about new alerts ── */
@@ -562,10 +539,11 @@ const GREETING = 'NOMAD online. All stations linked. State your objective, Comma
 })();
 
 /* ── poll loops ── */
-function loopFast(){ pollSystem(); pollServices(); }
-function loopSlow(){ pollProjects(); pollAgents(); pollActivity(); pollApprovals(); pollDevTeam(); }
+function loopFast(){ pollSystem(); pollServices(); pollApprovals(); }
+function loopSlow(){ pollMonitor(); }
+const mr = $('#mon-refresh'); if(mr) mr.onclick = ()=>pollMonitor();
 loopFast(); loopSlow();
 setInterval(loopFast, 4000);
-setInterval(loopSlow, 12000);
+setInterval(loopSlow, 15000);
 /* proactive watch — NOMAD speaks up about new alerts */
 pollBriefing(); setInterval(pollBriefing, 20000);

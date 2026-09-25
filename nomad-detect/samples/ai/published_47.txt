@@ -1,0 +1,69 @@
+The pipeline was green. Every job ran. Every check passed. The data was still wrong, and nobody noticed until the report had already been used to make a decision.
+
+If you have run data platforms for any length of time, you have lived some version of that sentence. It is the most ordinary disaster in the field. Nothing broke. No alert fired. The dashboard was calm. And the number at the top of it was false, quietly, for long enough to matter.
+
+I want to sit with that, because it exposes something the current wave of tooling keeps papering over. We have gotten very good at building pipelines. We have gotten no better at trusting them. And the gap between those two things is now the whole job.
+
+**The green light only proves the pipeline ran**
+
+Go back to the wrong number. Trace it and you usually find the same shape. Nothing in the pipeline failed. The problem was upstream, at the source, where the data was never generated correctly in the first place. Everything downstream did its job perfectly. It just carried a bad number all the way to the top.
+
+A green pipeline is a statement about execution. Every step that was supposed to run, ran. That is all it says. It does not say the input was real. It does not say the number means what the report claims it means. It does not say a human being would recognize the figure as sane. It says the machine did what the machine was told.
+
+We treat that green light as if it were a verdict on the data. It is not. It is a receipt for the process. Confusing the two is how a false number sits at the top of a report for three weeks while every system involved reports perfect health.
+
+This is neither rare nor cheap. In a 2022 survey of data professionals, nearly half said business stakeholders were hit by data issues the team never caught, and 47% said bad data had reached at least a quarter of company revenue. It was run by a data-observability vendor, so weight it accordingly, but the direction matches what I have seen. Wrong data does not stay in the warehouse. It reaches the people who act on it.
+
+The industry's answer to this is real, and worth naming. Data quality is shifting left. Checks are moving to the moment data enters and the moment it changes, instead of a month-end audit that finds the mistake three weeks after it mattered. Catching a broken schema at ingestion beats catching it in a quarterly review. That shift helps.
+
+But tooling is only half of it. A check at ingestion catches a broken schema. It does not make anyone care. The other half of that original failure was quieter and has no vendor. The data had owners on paper. In practice nobody was really watching the final report, so the wrong number sat there until someone senior finally asked. A test can tell you a column went null. It cannot tell you the number is a lie that happens to be well formed. Someone still has to own it and actually look.
+
+**Easy to start is not easy to keep true**
+
+Here is the part that makes this urgent rather than eternal. The tools got dramatically better, and they got better at exactly the half that was never the hard part.
+
+A C-level client told me recently that data engineering is easy now. His words were that you watch a YouTube video and you are done. He is not entirely wrong, and that is what makes it dangerous. Someone can stand up a pipeline in an afternoon that used to take a team a month. The connectors exist. The transformation layer is a managed product. The orchestration is a few lines of config. That part is real, and it is worth celebrating.
+
+But easy to start is not the same as easy to do well. The video shows you the happy path. It does not show you what happens when the data is wrong at the source and the pipeline still runs green. It does not show you tracing a failure across five systems at two in the morning, or the moment the volume outgrows the tool that made it look simple. That is the job. Not writing the pipeline. Keeping it correct when reality hits it.
+
+So the tools did not shrink the job. They moved it. They automated the building and left the trusting untouched, which means the entire value of the role slid toward the part no tool hands you. Judgment. Understanding of the system, the data, and how it breaks. Anyone can build a pipeline from a video. Almost nobody can fix the one that is quietly wrong.
+
+This is also why I never split my data teams by function. The advice this year is to specialize. One person for ingestion, one for transformation, one for quality. I built it the other way on purpose. Everyone rotated, everyone came to understand the whole pipeline, not just their corner. It was harder at first and it paid off every time reality arrived, because there was always someone who could see the whole path a bad number traveled. You cannot trust a system no single person understands. Specialize the tasks all you want. Do not specialize the understanding.
+
+**A claim is not a check**
+
+If trust is the work, then the interesting question is how you prove it. And most organizations cannot.
+
+Ask to see a company's data governance and you will usually be handed a document. The policy exists. The standard was signed off. Almost nobody can show you, today, that any of it is actually being followed. That is not governance. It is a claim about governance.
+
+The shift worth paying attention to is governance becoming code. Lineage, access rules, quality checks, audit trails, written as things the system runs instead of things a committee agrees to. It matters more than it sounds. A written policy is a claim. Code is a check. A rule that cannot fail a test was never a rule. It was a wish. When your governance is executable, compliance stops being an annual event and becomes a query you can run right now, and the honest state of your data stops being a matter of opinion.
+
+I want to be careful here, because this is where tooling posts stop and the real work begins. Moving governance into code does not make it cheaper. It makes it visible. Naming owners, defining what good actually means for each number, writing the checks, keeping them true as the data changes underneath them. That is a lot of unglamorous work that almost nobody volunteers for. Governance as code does not do that work for you. It makes it impossible to pretend the work is done when it is not. That is the value, and it is also why it will still fail in plenty of places. Not because anyone disagrees with it. Because someone has to do it.
+
+**The newest data store nobody governs**
+
+If you think this is an old problem the field is slowly closing, look at where the newest data is going.
+
+AI assistants now carry persistent memory. They accumulate facts about your business across thousands of sessions, and they act on what they remember. That memory is a data store. Look at it as one and the picture is bleak. No owner. No lineage. No retention policy. No quality checks. No approver, and no diff to review. We would reject a production table with those properties in an afternoon, and we hand our operation to one and call it an assistant.
+
+It is not a hypothetical gap. Research this year showed that a single crafted email can make an assistant with inbox access quietly store a false fact, tell no one, and behave differently in every session after. The attacker steals nothing. They change what the system believes. The false record sits among the true ones, well formed, unremarkable, trusted. It is the green pipeline again, wearing newer clothes. Everything ran. Nothing looked wrong. The data was false.
+
+That is the tell. We keep inventing new places to put data faster than we invent ways to trust the data we put there. The build got easy again, at a new layer, and the trust problem walked right in behind it, unwatched, because it was never the part the tools were solving.
+
+**Trust is not a feature**
+
+Put the pieces together and the shape is clear. Execution is a solved problem. You can build, move, and store data with tools a motivated person learns from a video. What you cannot buy, download, or configure is the confidence that the number is true. That confidence is made of ownership, understanding, and checks that can actually fail. It is work, and it is work that shows up on no product page.
+
+The organizations that treat trust as work can tell. In a 2025 survey of 505 data and analytics leaders, 71% of those with a data governance program reported high trust in their own data, against 50% of those without one. It is a vendor survey, so weight it accordingly. But the gap points where you would expect. Trust is not evenly distributed. It follows the work.
+
+This is not a complaint about the tools. The tools are good and getting better, and I use them. It is a correction about where the value went. When the mechanical half of a job gets automated, the human half does not disappear. It becomes the entire job. The engineers and the teams that will matter over the next decade are not the ones who can build the most pipelines. They are the ones who can stand behind a number.
+
+Anyone can build it. Almost nobody can trust it. That gap is not a temporary state of the tooling. It is the job now. The sooner we treat trust as the deliverable instead of a green light we glance at, the sooner we stop making confident decisions on numbers that were never true.
+
+**Sources**
+
+1. Bad data reaching decision-makers (nearly half of teams affected by issues they never caught; 47% saying it hit a quarter of revenue): Monte Carlo, The State of Data Quality 2022, survey conducted by Wakefield Research, n=300. Vendor-sponsored. https://www.montecarlodata.com/blog-2022-data-quality-survey/
+
+2. Governance and trust (71% of organizations with a governance program report high trust in their data, versus 50% without): Drexel LeBow Center for Applied AI and Business Analytics with Precisely, State of Data Integrity and AI Readiness 2026, survey of 505 data and analytics leaders fielded in the second half of 2025. Vendor-sponsored, correlational. https://www.lebow.drexel.edu/sites/default/files/2026-01/lebow-precisely-state-data-integrity-ai-readiness-2026.pdf
+
+3. Memory injected by a single email: When Claws Remember but Do Not Tell: Stealthy Memory Injection in Persistent Personal Agents, arXiv:2607.05189, 2026. https://arxiv.org/abs/2607.05189

@@ -1,0 +1,11 @@
+Every data platform I have run ended up with a second system bolted on whose only job was to notice what changed in the first one. We paid to store the data, paid again to watch it, and paid a third time when the two disagreed.
+
+That third payment was always the worst. Tens of thousands lost in production data. Early morning calls about PII that had to be handled with care in a format that fought every delete. Long hours explaining why a report disagreed with its own source.
+
+And deletes had their own tax. Removing a few rows meant rewriting enormous files, so some of my most expensive compute went to making data go away.
+
+Iceberg v3 just went into Public Preview on Databricks, and the three features that matter are aimed at exactly those taxes. Row lineage: every row carries its own ID and change sequence, so the table notices its own changes. The bolt-on dies. Deletion vectors: a delete writes a small file instead of rewriting a huge one. VARIANT: semi-structured data gets a real column type instead of a string dump and a prayer.
+
+None of this will headline a keynote. The keynotes belong to v4, which you still cannot touch.
+
+Nobody puts a deletion vector on a slide. That is usually the sign it matters.

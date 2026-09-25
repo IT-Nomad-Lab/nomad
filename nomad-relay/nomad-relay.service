@@ -1,0 +1,48 @@
+[Unit]
+Description=NOMAD relay (engine activity ⇄ Zulip, ADR-008)
+After=default.target
+# relay.py exits 3 on repeated auth failures. One restart re-reads the zuliprc and heals a key
+# rotation; a key that is actually wrong burns through these in ~2 minutes and the unit lands in
+# `failed`, where systemctl shows it. Without this it would restart forever and look healthy,
+# which is the failure mode this whole change exists to remove.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory=/home/jdelimam/nomad/nomad-relay
+Environment=HOME=/home/jdelimam
+Environment=PYTHONUNBUFFERED=1
+Environment=NOMAD_ENGINE_URL=http://127.0.0.1:8099
+Environment=NOMAD_CONSOLE_URL=http://127.0.0.1:1701
+Environment=NOMAD_ZULIPRC=/home/jdelimam/.config/nomad/zulip-bot.zuliprc
+Environment=NOMAD_RELAY_DIGEST=07:30,19:00
+Environment=NOMAD_RELAY_TZ=America/New_York
+# Actions Zulip may approve; everything else is reject-only from the phone.
+Environment=NOMAD_RELAY_REMOTE_ACTIONS=send_message,save_brief,save_content,generate_image
+# T2.1 morning briefing / Friday review. Calendar reads through n8n's existing
+# googleCalendarOAuth2Api credential; mail reads through a gmail.readonly service account
+# (2026-09-23), because the old gmailOAuth2 credential fails Google client authentication
+# (invalid_client) and only a new OAuth client fixes it. The n8n webhook requires the
+# X-Nomad-Token header, whose value comes from relay.env below. `briefing` / `friday review`
+# (DM) work regardless, as a manual
+# read-only dry run. Armed by the operator on 2026-09-22 after both modes were dry-run and checked
+# by hand against the calendar, /project-goals and /runs. Set back to 0 to fall through to the
+# plain summary().
+Environment=NOMAD_N8N_URL=http://127.0.0.1:5678
+Environment=NOMAD_RELAY_BRIEFING_ARMED=1
+# Consecutive Zulip auth failures tolerated before exiting non-zero (see [Unit] above).
+Environment=NOMAD_RELAY_AUTH_FAIL_LIMIT=3
+# Touched after each successful engine sync, and read by nomad-watch. `is-active` cannot tell
+# a relay that is polling from one that is wedged; a file whose mtime stops moving can.
+Environment=NOMAD_RELAY_HEARTBEAT=/home/jdelimam/.local/state/nomad-watch/heartbeat/relay
+# NOMAD_ZULIP_OPERATOR and NOMAD_ZULIP_OPERATOR_ID, written by bootstrap.py
+EnvironmentFile=/home/jdelimam/.config/nomad/relay.env
+ExecStart=/home/jdelimam/nomad/nomad-relay/.venv/bin/python relay.py
+Restart=always
+UMask=0077
+NoNewPrivileges=true
+RestartSec=5
+
+[Install]
+WantedBy=default.target

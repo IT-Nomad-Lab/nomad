@@ -1,0 +1,13 @@
+"Can you just make this one lookup fast?" is how a data lake becomes three data stores.
+
+Spotify published how they handled that request. Exabytes in the lake, petabytes in an operational database, and query engines built for scans, not for finding one row. Instead of copying datasets into another system, they built an index beside the lake that maps a key straight to the file and the row. Some lookups now return in a single read of a few kilobytes.
+
+Most of us do not have that engineering budget, so we do the other thing. A copy into Postgres for the app team. A second copy for the API. Now three stores disagree about the same customer and nobody can say which one is right.
+
+A catalog does not save you here. Catalogs record what exists. Schemas, owners, lineage, freshness. They almost never record how the data is read. Point lookup or scan. Milliseconds or minutes. Called from a notebook, or from a product feature with a user waiting.
+
+That second list is what architecture actually depends on, and it is the list nobody maintains. So the design gets made by whoever files the next ticket, one exception at a time.
+
+Learn the read patterns before someone makes the copy decision for you.
+
+You cannot catalog your way out of an architecture you never chose.

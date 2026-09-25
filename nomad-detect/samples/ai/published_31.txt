@@ -1,0 +1,15 @@
+I was quiet here for the last two weeks. I moved apartments. And through the whole thing, packing, classifying, hauling boxes across town, I could not stop thinking about data migrations. Because it is the same project. Same phases, same failure modes, and the same lies we tell ourselves. Don't know if I'm sick, or my brain just works that way 😅.
+
+It starts with inventory shock. You think you know what you own until you have to put it all in boxes. Every migration I have seen started the same way: discovery finds far more pipelines, tables and dependencies than anyone had on paper. You do not know your estate. You know the parts you touched recently. I have too much sh*t...
+
+Then comes classification, and this is where moves and migrations are won or lost. Keep, donate, throw away. Migrate, archive, delete. It is slow, it is boring, and it is the actual work. Skip it and you are not migrating. You are paying professional movers to relocate your junk drawer. Lift-and-shift is exactly that: boxes that arrive at the new place and never get opened, except now the rent is a cloud bill.
+
+Labels matter more than you think. A box marked kitchen unpacks itself. A box marked misc is a small research project. That is your data catalog. Every undocumented table is a misc box someone else opens a year from now, in production, at the worst possible time.
+
+Order matters too. You set up the bed and the coffee machine first, not the decorations, priorities. Migrate the workloads the business needs on day one, not the ones that are easiest to carry.
+
+And you do not hand back the keys the moment the truck is empty. You walk through the old place one more time. You check every drawer. Run the old platform in parallel until reconciliation says nothing essential got left behind. The cutover is not the day you move in. It is the day you stop paying two rents and sleep fine.
+
+The movers, by the way, are the tooling. Strong, fast, worth every penny. But they carry whatever you put in front of them. No mover and no migration tool will ever decide for you what deserves to make the trip.
+
+A move is the one time life forces you to look at everything you own. A migration is that chance for your data. Most companies pack in a panic, then wonder why the new place fills up with the same old mess.

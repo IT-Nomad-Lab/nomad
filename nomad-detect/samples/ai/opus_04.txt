@@ -1,0 +1,9 @@
+Streaming is not a maturity level. It is a tradeoff, and most teams adopt it at exactly the wrong moment.
+
+I have seen a team migrate a nightly batch job to a streaming architecture because leadership wanted real-time reporting. The business decision that consumed the output was made once a week, in a meeting, on Thursday. The migration took five months and added three new failure modes.
+
+The honest question is not how fresh your data can be. It is how fresh it needs to be before the decision changes. If nobody acts differently at two minutes versus twelve hours, you have bought complexity and called it modernization.
+
+There are real cases for streaming. Fraud detection, operational alerting, anything where latency has a direct cost. Those cases justify the operational burden that comes with them.
+
+Match the architecture to the decision it serves. Everything else is a resume-driven migration.

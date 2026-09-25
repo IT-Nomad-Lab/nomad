@@ -1,2 +1,3 @@
-mcp>=1.0
+mcp>=1.0,<2   # 2.x renames FastMCP → MCPServer; every server here imports mcp.server.fastmcp
 requests>=2.31
+playwright>=1.55,<2   # nomad_penpot_nav; then: .venv/bin/python -m playwright install chromium

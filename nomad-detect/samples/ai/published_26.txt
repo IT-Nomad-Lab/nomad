@@ -1,0 +1,15 @@
+Iceberg v4 has been on every conference slide since April. There is still no v4 spec you can set on a table today.
+
+The stable line is 1.11, and it is firmly v3. Some of v4 is ratified spec text. Some of it is still being argued over on the dev mailing list. None of it is something you can run in production this quarter.
+
+That gap is not harmless. A roadmap on a slide puts your team at a fork, and both branches cost you.
+
+I have stood at that fork. A project of ours sat still, waiting on a vendor release that was supposed to fix the exact thing blocking us. So you decide. Build the fix yourself and risk throwing the work away when the release lands. Or park it, move the team to something else, and accept that it never restarts cleanly. Either way you paid for a feature you did not have.
+
+Nobody puts that fork on the slide.
+
+The vendors are not lying. v4 is real and it is coming. But "coming" is carrying a lot of weight in that sentence, and it is your quarter it spends, not theirs.
+
+The dev list tells you what is settled and what is still somebody's opinion. The keynote tells you what is exciting.
+
+Read where the arguments happen, not where the slides get made.

@@ -8,9 +8,13 @@ it works with full project context.
 Endpoints (native WSL service; the console reaches it at host.docker.internal:8090):
   POST /dispatch {project, task, mode}   mode = "plan" (read-only) | "build" (edits)
   GET  /projects                          discovered Nomad.md projects
-  GET  /health
+  GET  /health                            the only unauthenticated route
 
 GUARDRAILS:
+- Every route but /health requires the shared secret in an `X-Nomad-Token` header, the
+  same header the n8n gate uses. The token is auto-generated at ~/.config/nomad/dispatch-token
+  and read by the callers (containers mount that dir read-only). Without it this daemon
+  lets anything on the host edit code in any marked repo.
 - "build" runs with --permission-mode acceptEdits: Claude may EDIT files (reversible,
   uncommitted) but is instructed NEVER to git commit/push or run destructive commands.
 - "plan" runs read-only (--permission-mode plan): no file changes at all.
@@ -19,20 +23,51 @@ GUARDRAILS:
 Review the working-tree diff before committing/pushing — commit/push stay human-gated.
 """
 import base64
+import hmac
 import json
 import os
 import re
+import secrets
 import shutil
 import subprocess
+import sys
 import time
 from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HOST = os.environ.get("NOMAD_DISPATCH_HOST", "0.0.0.0")
 PORT = int(os.environ.get("NOMAD_DISPATCH_PORT", "8090"))
-ROOTS = os.environ.get("PROJECT_ROOTS", os.path.expanduser("~")).split(":")
+ROOTS = os.environ.get("PROJECT_ROOTS", "/home/jdelimam").split(":")
 CLAUDE = shutil.which("claude") or "/home/linuxbrew/.linuxbrew/bin/claude"
 TIMEOUT = int(os.environ.get("NOMAD_DISPATCH_TIMEOUT", "900"))
+TOKEN_PATH = os.path.expanduser("~/.config/nomad/dispatch-token")
+
+
+def _load_or_make_token():
+    """The shared secret gating every route but /health. Auto-generated on first start, so
+    there is nothing to configure; NOMAD_DISPATCH_TOKEN overrides it. Unlike termd this does
+    NOT fail open: a dispatcher with no token is a remote-code-edit daemon with no door, so
+    if we cannot establish one we exit and let systemd show the unit as failed."""
+    env = os.environ.get("NOMAD_DISPATCH_TOKEN")
+    if env:
+        return env
+    try:
+        if os.path.exists(TOKEN_PATH):
+            tok = open(TOKEN_PATH).read().strip()
+            if tok:
+                return tok
+        os.makedirs(os.path.dirname(TOKEN_PATH), exist_ok=True)
+        tok = secrets.token_urlsafe(24)
+        with open(TOKEN_PATH, "w") as f:
+            f.write(tok)
+        os.chmod(TOKEN_PATH, 0o600)
+        return tok
+    except Exception as e:
+        sys.exit(f"dispatcher: cannot read or create {TOKEN_PATH} ({type(e).__name__}: {e}). "
+                 "Refusing to serve unauthenticated — set NOMAD_DISPATCH_TOKEN or fix the path.")
+
+
+TOKEN = _load_or_make_token()
 
 GUARD = (
     "You are NOMAD's Builder agent, working directly inside this repository. "
@@ -67,13 +102,17 @@ def _frontmatter(d):
 
 
 def registry():
-    out = []
+    out, seen = [], set()
     for root in ROOTS:
         if not os.path.isdir(root):
             continue
         for nm in sorted(os.listdir(root)):
             d = os.path.join(root, nm)
+            real = os.path.realpath(d)
+            if real in seen:            # the same repo reached through two roots or a symlink
+                continue
             if os.path.isdir(d) and os.path.isfile(os.path.join(d, "Nomad.md")):
+                seen.add(real)
                 m = _frontmatter(d)
                 name = m.get("name") or nm
                 aliases = {name.lower(), nm.lower(), nm.split("-")[0].lower()}
@@ -85,11 +124,34 @@ def registry():
 
 
 def resolve(project):
+    """Find the one project a name refers to. Returns the row, or a dict with `ambiguous`
+    listing the candidates. Two marked repos can carry the same name (a mirror, a second
+    checkout), and this daemon EDITS code, so guessing between them writes changes into a
+    repo nobody asked about. Ambiguity is reported, never resolved by listing order.
+
+    Exact wins first. The loose tier matches short prefix aliases, so 'nomad' hits every
+    nomad-* repo; an exact name or directory match is the caller being specific and settles
+    it. Only a tie inside one tier is a real ambiguity."""
     p = (project or "").strip().lower()
-    for r in registry():
-        if p == r["name"].lower() or p in r["aliases"] or any(a in p for a in r["aliases"]):
-            return r
-    return None
+    reg = registry()
+    exact = [r for r in reg if p in (r["name"].lower(), os.path.basename(r["path"]).lower())]
+    loose = [r for r in reg if p in r["aliases"] or any(a in p for a in r["aliases"])]
+    hits = exact or loose
+    if not hits:
+        return None
+    if len(hits) > 1:
+        return {"ambiguous": [{"name": r["name"], "path": r["path"]} for r in hits]}
+    return hits[0]
+
+
+def _unresolved(project, proj):
+    """The error body for a name that matched nothing, or matched more than one repo."""
+    if proj and proj.get("ambiguous"):
+        where = ", ".join(f"{c['name']} at {c['path']}" for c in proj["ambiguous"])
+        return {"ok": False, "error": f"'{project}' matches {len(proj['ambiguous'])} projects "
+                f"({where}). Rename one Nomad.md marker, or ask for the exact directory name."}
+    return {"ok": False, "error": f"Unknown project '{project}'. "
+            f"Known: {[r['name'] for r in registry()]}"}
 
 
 def run_claude(path, task, mode):
@@ -149,8 +211,8 @@ def guard_command(cmd):
 def verify(project, command):
     """Run a read-only verification command inside a project repo, return rc + output."""
     proj = resolve(project)
-    if not proj:
-        return {"ok": False, "error": f"Unknown project '{project}'. Known: {[r['name'] for r in registry()]}"}
+    if not proj or proj.get("ambiguous"):
+        return _unresolved(project, proj)
     err = guard_command(command)
     if err:
         return {"ok": False, "error": err}
@@ -198,7 +260,7 @@ def new_project(name, description=""):
             f.write(body)
     git(path, "init", "-q")
     git(path, "add", "-A")
-    git(path, "-c", "user.email=nomad@example.com", "-c", "user.name=NOMAD",
+    git(path, "-c", "user.email=nomad@itnomadlab.com", "-c", "user.name=NOMAD",
         "commit", "-q", "-m", f"Scaffold {name} (NOMAD)")
     return {"ok": True, "name": name, "slug": slug, "path": path}
 
@@ -214,15 +276,19 @@ def resolve_from_text(text):
     """Find which known project is NAMED in free text. Matches ONLY the full project name or its
     directory slug (specific identifiers) — NOT the short prefix aliases used for `resolve()`, since
     those are generic words ('agent', 'crypto', 'content') that false-match prose. Longest match wins
-    (so 'crypto trading bot' beats 'crypto-trading-bot' ties cleanly). Returns the registry row or None."""
+    (so 'crypto trading bot' beats 'crypto-trading-bot' ties cleanly). Two different repos matching at
+    the same length is a real ambiguity, and saving into the wrong one is silent, so that returns None.
+    Returns the registry row or None."""
     t = (text or "").lower()
-    best = None
+    best, tied = None, False
     for r in registry():
         for cand in {r["name"].lower(), os.path.basename(r["path"]).lower()}:
             if len(cand) >= 3 and re.search(r"\b" + re.escape(cand) + r"\b", t):
                 if best is None or len(cand) > best[1]:
-                    best = (r, len(cand))
-    return best[0] if best else None
+                    best, tied = (r, len(cand)), False
+                elif len(cand) == best[1] and r["path"] != best[0]["path"]:
+                    tied = True
+    return None if (best is None or tied) else best[0]
 
 
 def _parse_subdir(text):
@@ -290,9 +356,19 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b)
 
+    def _authed(self):
+        """True if the caller presented the shared secret. /health is exempt so a liveness
+        probe never needs the token; everything else can edit code, so nothing else is."""
+        if hmac.compare_digest(self.headers.get("X-Nomad-Token", ""), TOKEN):
+            return True
+        self._send(401, {"ok": False, "error": "missing or wrong X-Nomad-Token"})
+        return False
+
     def do_GET(self):
         if self.path.rstrip("/") == "/health":
-            self._send(200, {"status": "ok"})
+            self._send(200, {"status": "ok", "auth": "token"})
+        elif not self._authed():
+            return
         elif self.path.rstrip("/") == "/projects":
             reg = registry()
             self._send(200, {"projects": [r["name"] for r in reg],
@@ -303,6 +379,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         route = self.path.rstrip("/")
+        if not self._authed():
+            return
         if route not in ("/dispatch", "/new-project", "/verify", "/save-image"):
             self._send(404, {"error": "not found"})
             return
@@ -321,9 +399,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             mode = "plan" if req.get("mode") == "plan" else "build"
             proj = resolve(req.get("project", ""))
-            if not proj:
-                self._send(200, {"ok": False, "error": f"Unknown project '{req.get('project')}'. "
-                                 f"Known: {[r['name'] for r in registry()]}"})
+            if not proj or proj.get("ambiguous"):
+                self._send(200, _unresolved(req.get("project", ""), proj))
                 return
             task = (req.get("task") or "").strip()
             if not task:
@@ -345,5 +422,6 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print(f"NOMAD dispatcher on http://{HOST}:{PORT} (claude={CLAUDE}, roots={ROOTS})", flush=True)
+    print(f"NOMAD dispatcher on http://{HOST}:{PORT} (claude={CLAUDE}, roots={ROOTS}, "
+          f"token={TOKEN_PATH}, {len(registry())} projects)", flush=True)
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()

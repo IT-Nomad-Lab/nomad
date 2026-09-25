@@ -1,0 +1,13 @@
+The pipeline was green. Every job ran. Every check passed. The data was still wrong, and nobody noticed until a decision had already been made on it.
+
+If you have run data platforms, you have lived that. Nothing broke. No alert fired. And the number at the top of the report was false.
+
+A green pipeline only proves the pipeline ran. It says nothing about whether the data is true.
+
+That gap used to be a corner of the job. Now it is the whole job. The tools got very good at the easy half, the building. Someone can stand up in an afternoon what used to take a team a month. What they cannot download is the confidence that the number is correct.
+
+So the value moved. Not to whoever builds the most pipelines. To whoever can stand behind a number.
+
+I wrote the full argument up, including where the newest ungoverned data store is quietly hiding. Here is a hint: it is probably reading your inbox right now.
+
+Anyone can build it. Almost nobody can trust it.

@@ -43,7 +43,30 @@ PROJECT_ROOTS = os.environ.get("PROJECT_ROOTS", "/host").split(":")
 # Only these docs are ever read from a project dir (never arbitrary files / secrets).
 DOC_FILES = ["CLAUDE.md", "claude.md", "Claude.md", "AGENTS.md", "README.md", "README.MD"]
 DISPATCH_BASE = os.environ.get("NOMAD_DISPATCH_URL", "http://host.docker.internal:8090")
+
+
+def _dispatch_token():
+    """Shared secret for the Builder dispatcher (auto-generated on the host at
+    ~/.config/nomad/dispatch-token). The dispatcher refuses every route but /health without
+    it. Candidates cover the container mounts and the host; '' means the call will 401."""
+    env = os.environ.get("NOMAD_DISPATCH_TOKEN")
+    if env:
+        return env
+    for cand in ("/term-secret/dispatch-token", "/host/.config/nomad/dispatch-token",
+                 os.path.expanduser("~/.config/nomad/dispatch-token")):
+        try:
+            return open(cand).read().strip()
+        except Exception:
+            continue
+    return ""
+
+
+DISPATCH_TOKEN = _dispatch_token()
+DISPATCH_HDR = {"X-Nomad-Token": DISPATCH_TOKEN}
 VOICE_BASE = os.environ.get("NOMAD_VOICE_URL", "http://nomad-voice:8200")
+# AI-text detector (host-native GPU sidecar). Bind it to 0.0.0.0 or set this to reach it from
+# the console container; it stays behind the console's own auth middleware either way.
+DETECT_BASE = os.environ.get("NOMAD_DETECT_URL", "http://host.docker.internal:8214")
 # Browser-reachable origin for the real-time WebRTC client embedded in the console. The console
 # proxies /tts /stt server-side (VOICE_BASE), but real-time media is peer-to-peer browser↔voice, so
 # the browser signals directly to the host-native voice service. Host-only → localhost by default.
@@ -558,7 +581,7 @@ async def api_devteam():
     builder_online, buildable = False, 0
     try:
         async with httpx.AsyncClient(timeout=4) as c:
-            r = await c.get(f"{DISPATCH_BASE}/projects")
+            r = await c.get(f"{DISPATCH_BASE}/projects", headers=DISPATCH_HDR)
             builder_online = r.status_code < 500
             buildable = len(r.json().get("projects", []))
     except Exception:
@@ -575,6 +598,25 @@ class ApprovalDecision(BaseModel):
     decision: str   # "approved" | "rejected"
 
 
+async def _resume_body(client, run_id: str, decision: str):
+    """Build the /resume body, reading the proposal hash back for an approval.
+
+    The engine refuses an approval that does not name the proposal it approves, so this reads
+    the run first. Returns None when the hash cannot be read, and the caller must then NOT
+    approve: failing open here would hand back exactly the blind approval the check exists to
+    stop.
+    """
+    body = {"run_id": run_id, "decision": decision}
+    if decision != "approved":
+        return body
+    r = await client.get(f"{ENGINE_URL}/run", params={"id": run_id})
+    phash = (r.json() or {}).get("proposal_hash")
+    if not phash:
+        return None
+    body["expect_hash"] = phash
+    return body
+
+
 @app.post("/api/approvals/decision")
 async def api_approval_decision(d: ApprovalDecision):
     """Approve/reject a pipeline run straight from the dashboard → engine resume (same gate path
@@ -583,8 +625,11 @@ async def api_approval_decision(d: ApprovalDecision):
         return JSONResponse({"error": "decision must be approved|rejected"}, status_code=400)
     try:
         async with httpx.AsyncClient(timeout=20) as c:
-            r = await c.post(f"{ENGINE_URL}/resume",
-                             json={"run_id": d.run_id, "decision": d.decision})
+            body = await _resume_body(c, d.run_id, d.decision)
+            if body is None:
+                return JSONResponse({"error": "could not read the proposal for that run; "
+                                              "not approving"}, status_code=409)
+            r = await c.post(f"{ENGINE_URL}/resume", json=body)
             return r.json()
     except Exception as e:
         return JSONResponse({"error": f"engine unreachable: {str(e)[:140]}"}, status_code=502)
@@ -703,6 +748,91 @@ def _registry():
     return reg
 
 
+def _git_state(path):
+    """Per-repo git signal read off the /host mount (read-only). safe.directory='*' because the
+    repos are owned by the host user, not the container; GIT_OPTIONAL_LOCKS=0 avoids index writes."""
+    env = {**os.environ, "GIT_OPTIONAL_LOCKS": "0", "HOME": "/tmp"}
+
+    def g(args):
+        try:
+            r = subprocess.run(["git", "-c", "safe.directory=*", "-C", path, *args],
+                               capture_output=True, text=True, timeout=5, env=env)
+            return r.stdout.strip() if r.returncode == 0 else ""
+        except Exception:
+            return ""
+
+    if not g(["rev-parse", "--is-inside-work-tree"]):
+        return {"repo": False}
+    out = {"repo": True, "branch": g(["rev-parse", "--abbrev-ref", "HEAD"])}
+    porcelain = g(["status", "--porcelain"])
+    out["dirty"] = len([ln for ln in porcelain.splitlines() if ln.strip()]) if porcelain else 0
+    lr = g(["rev-list", "--left-right", "--count", "@{u}...HEAD"]).split()
+    out["behind"], out["ahead"] = (int(lr[0]), int(lr[1])) if len(lr) == 2 else (0, 0)
+    out["last_commit"] = g(["log", "-1", "--format=%cr · %h · %s"])
+    return out
+
+
+@app.get("/api/monitor")
+async def api_monitor():
+    """The Mission Monitor feed: one row per Nomad.md project, enriched with git state, plan
+    progress (engine), and attributed gate items, sorted by needs-attention. Everything fail-soft."""
+    projs = _registry()
+    goals, runs = [], []
+    try:
+        async with httpx.AsyncClient(timeout=5) as c:
+            goals = (await c.get(f"{ENGINE_URL}/project-goals")).json().get("projects", [])
+            runs = (await c.get(f"{ENGINE_URL}/runs")).json().get("runs", [])
+    except Exception:
+        pass
+    pending = [r for r in runs if r.get("status") == "awaiting-approval"]
+    services = await api_services()
+    down = [s["name"] for s in services if not s["up"]]
+
+    def match_goal(name, aliases):
+        n, best = name.lower(), None
+        for gl in goals:
+            t = (gl.get("title") or "").lower()
+            if t == n or n in t or t in n or any(a in t for a in aliases):
+                if not best or len(t) > len(best.get("title") or ""):
+                    best = gl
+        return best
+
+    def gate_for(name, aliases):
+        cnt = 0
+        for r in pending:
+            p = r.get("proposal") or {}
+            blob = " ".join(str(x) for x in (p.get("target"), r.get("goal"), r.get("intent"),
+                                             p.get("action"), r.get("target"))).lower()
+            if name.lower() in blob or any(a in blob for a in aliases):
+                cnt += 1
+        return cnt
+
+    rows = []
+    for pr in projs:
+        git = await asyncio.to_thread(_git_state, pr["path"])
+        fm = _frontmatter(os.path.join(pr["path"], "Nomad.md"))
+        goal = match_goal(pr["name"], pr["aliases"])
+        gate = gate_for(pr["name"], pr["aliases"])
+        plan = ({"pct": goal.get("pct", 0), "done": goal.get("done", 0),
+                 "total": goal.get("total", 0), "goal_id": goal.get("goal_id")} if goal else None)
+        score = gate * 100 + (min(git.get("dirty", 0), 25) + git.get("ahead", 0) * 2 if git.get("repo") else 0)
+        rows.append({"name": pr["name"], "status": fm.get("status"), "lane": fm.get("lane"),
+                     "stack": fm.get("stack"), "git": git, "plan": plan, "gate": gate, "score": score})
+    rows.sort(key=lambda r: (r["score"], r["name"]), reverse=True)
+    return {"projects": rows, "gate_total": len(pending), "services_down": down,
+            "ts": datetime.now(timezone.utc).isoformat()}
+
+
+@app.get("/api/project")
+async def api_project(goal_id: int):
+    """Proxy the engine's project detail (milestones + tasks) for the monitor's expand row."""
+    try:
+        async with httpx.AsyncClient(timeout=6) as c:
+            return (await c.get(f"{ENGINE_URL}/project", params={"goal_id": goal_id})).json()
+    except Exception as e:
+        return {"error": str(e)[:120], "milestones": []}
+
+
 def _read_doc(path):
     for f in DOC_FILES:
         fp = os.path.join(path, f)
@@ -793,7 +923,14 @@ async def _handle_diagnostics():
 
 
 def _kb_save(title, body):
-    """File a research brief to the Notion Knowledge Base (title row + body blocks)."""
+    """File a research brief to the Notion Knowledge Base (title row + body blocks).
+
+    Refuses unless Notion is still the source of truth. Every read in this file has honored
+    NOMAD_SOURCE since the cutover but these writes did not, so "Notion is a read-only mirror by
+    disuse" was not literally true: this path kept writing to it. A mirror that is still being
+    written to is not a rollback source you can trust, which is the one job it has left."""
+    if NOMAD_SOURCE != "notion":
+        return False
     db = os.environ.get("NOTION_DB_KNOWLEDGE")
     if not (_notion and db):
         return False
@@ -827,11 +964,19 @@ async def _handle_research(topic):
     except Exception as e:
         return f"⚠ Researcher link error: {str(e)[:160]}"
     saved = _kb_save(f"Research: {topic}", brief)
-    tag = "Filed to the Knowledge Base. " if saved else ""
+    # Say when it was not filed. Silence would read as filed, and the brief is only in this reply.
+    tag = ("Filed to the Knowledge Base. " if saved else
+           "Not filed — Notion is no longer mission control, so this brief lives here only. "
+           if NOMAD_SOURCE != "notion" else "")
     return f"{tag}Here's the brief on **{topic}**:\n\n{brief}"
 
 
 def _project_row(name, status="Planning"):
+    """File a project on the Notion board. Refuses unless Notion is the source of truth, for the
+    same reason as `_kb_save`. The caller only claims the board when this returns True, so under
+    NocoDB the reply correctly stops saying the project is on it."""
+    if NOMAD_SOURCE != "notion":
+        return False
     db = os.environ.get("NOTION_DB_PROJECTS")
     if not (_notion and db):
         return False
@@ -853,7 +998,8 @@ async def _handle_start_project(name, request):
     try:
         async with httpx.AsyncClient(timeout=60) as c:
             r = await c.post(f"{DISPATCH_BASE}/new-project",
-                             json={"name": name, "description": request})
+                             json={"name": name, "description": request},
+                             headers=DISPATCH_HDR)
             res = r.json()
     except Exception as e:
         return f"⚠ Couldn't reach the dispatcher to scaffold the project: {str(e)[:160]}"
@@ -918,7 +1064,11 @@ async def _handle_gate_decision(decision, do_all):
             if not rid:
                 continue
             try:
-                r = await c.post(f"{ENGINE_URL}/resume", json={"run_id": rid, "decision": decision})
+                body = await _resume_body(c, rid, decision)
+                if body is None:
+                    done.append((a, {"error": "could not read the proposal; not approving"}))
+                    continue
+                r = await c.post(f"{ENGINE_URL}/resume", json=body)
                 done.append((a, r.json()))
             except Exception as e:
                 done.append((a, {"error": str(e)[:80]}))
@@ -965,10 +1115,19 @@ async def api_chat(req: Request):
         return {"reply": "Done — I've wiped this conversation from my memory. "
                          "Nothing from it will resurface in future recalls.", "model": model}
     if intent == "forget_last":
-        n = await memory.forget(session_id, scope="last")
-        store_this_turn = False  # don't store the "forget that" exchange itself
-        return {"reply": f"Forgotten — dropped the last {max(n, 0)} turn(s) from memory.",
-                "model": model}
+        # T2.2: content-addressed retraction, not positional. Store the retracting turn itself
+        # (it usually carries the CORRECTED value, e.g. "actually it's Wednesday, not Friday" —
+        # that correction is worth keeping) but never the canned system reply below. Then resolve
+        # and retract the SPECIFIC prior fact this utterance names, if any is found with
+        # confidence — see memory.forget()'s docstring for why a no-match case is a safe no-op,
+        # not a blind deletion.
+        await memory.remember(session_id, "user", last_user, sync_facts=True)
+        n = await memory.forget(session_id, scope="last", retracting_text=last_user)
+        msg = ("Updated — recorded the correction, and retracted the specific earlier note it "
+               "replaces." if n else
+               "Updated — recorded the correction. No specific earlier note matched closely "
+               "enough to retract, so nothing else was touched.")
+        return {"reply": msg, "model": model, "remembered": True}
     if intent == "off_record":
         store_this_turn = False  # answer normally, but persist nothing this turn
 
@@ -1022,6 +1181,27 @@ def api_voice_config():
     to the local Whisper listen-loop only if that can't start. (Picovoice/Porcupine retired.)"""
     return {"wake": "openwakeword", "label": os.environ.get("WAKE_LABEL", "Hey Jarvis"),
             "rt_url": VOICE_RT_URL}
+
+
+@app.post("/api/detect")
+async def api_detect(req: Request):
+    """Proxy to the local nomad-detect service: does this text read as AI-written?
+
+    Full check (statistical + style) by default; pass {"lint": true} for the instant style-only
+    pass. Everything runs on this box unless the caller explicitly asks for a paid provider."""
+    body = await req.json()
+    text = (body.get("text") or "").strip()
+    if not text:
+        return JSONResponse({"error": "no text"}, status_code=400)
+    path = "/lint" if body.get("lint") else "/detect"
+    payload = {"text": text} if body.get("lint") else {
+        "text": text, "external": bool(body.get("external"))}
+    try:
+        async with httpx.AsyncClient(timeout=180) as c:
+            r = await c.post(f"{DETECT_BASE}{path}", json=payload)
+        return JSONResponse(r.json(), status_code=r.status_code)
+    except Exception as e:
+        return JSONResponse({"error": f"detector unreachable: {str(e)[:160]}"}, status_code=503)
 
 
 @app.post("/api/tts")
@@ -1093,7 +1273,7 @@ async def api_dispatch(req: Request):
     body = await req.json()
     try:
         async with httpx.AsyncClient(timeout=920) as c:
-            r = await c.post(f"{DISPATCH_BASE}/dispatch", json=body)
+            r = await c.post(f"{DISPATCH_BASE}/dispatch", json=body, headers=DISPATCH_HDR)
             return r.json()
     except Exception as e:
         return JSONResponse({"ok": False, "error": f"dispatcher link error: {str(e)[:200]}"}, status_code=200)

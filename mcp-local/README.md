@@ -23,13 +23,53 @@ so arrows are routed and text never overflows (the fix for matplotlib diagrams /
   (data charts), + other Kroki types. `output_format`: `svg` (default) | `png` (mermaid → svg).
 - Claude writes the spec (Mermaid/DOT/Vega-Lite); Kroki renders it deterministically.
 
+**`nomad-image`** (`nomad_image.py`) — generate an image on the LOCAL GPU (ComfyUI/SDXL) and save
+it into the current project. Free, no quota — **the default** for image work:
+- `generate_image(prompt, subdir, filename)`.
+
+**`nomad-codex-image`** (`nomad_codex_image.py`) — generate an image with **OpenAI Codex** instead,
+on the ChatGPT subscription. Ask for it BY NAME; it is deliberately not a silent fallback in the
+`generate_image` chain, because it spends subscription quota:
+- `codex_image(prompt, subdir, filename)`.
+- Use it when prompt adherence matters. On the same brief SDXL gave a desktop chassis at dusk;
+  Codex gave the rack, the single amber LED and the rain-streaked window — and it renders legible
+  text, which SDXL does not.
+- It shells out to `codex exec -s workspace-write` in a scratch dir, NOT through `codex-bridge`
+  (:8089) — the bridge is `-s read-only` on purpose and generation has to write a file.
+
+**`nomad-audio`** (`nomad_audio.py`) — generate music on the LOCAL GPU (the nomad-audio service,
+:8220, ACE-Step v1, Apache-2.0) and save the WAV into the current project:
+- `generate_music(prompt, lyrics, duration, seed, subdir, filename)`.
+- `prompt` = style tags ("calm fantasy, celtic harp, soft flute, 80 bpm"); empty `lyrics` = an
+  instrumental; `duration` up to 240 s; a fixed `seed` reproduces the take byte for byte.
+- Never overwrites: an existing name gets `-2`, `-3`… so a game's live `bgm.wav` is safe.
+- Limits: text-only (no covers/remixes of a real melody), bpm is a hint, no seamless loops, not
+  for sub-second SFX. Needs `systemctl --user start nomad-audio` if the service is down.
+
+**`nomad-detect`** (`nomad_detect.py`) — check a draft for AI tells before it ships (the
+nomad-detect service, :8214):
+- `detect_ai(text)` — Binoculars score on the GPU + style linter + verdict.
+- `lint_style(text)` — style only, instant, returns the exact lines to fix.
+
+**`nomad-penpot-nav`** (`nomad_penpot_nav.py`) — lets the Penpot MCP (`penpot`) work on any file.
+Penpot's plugin API can't open another file, so this server keeps its own Chromium tab
+(Playwright, profile in `~/.config/nomad/penpot-nav-profile`) and moves it between files by URL;
+Penpot's bundled MCP plugin reconnects on each load.
+- `penpot_list_files(query)`, `penpot_open_file(file, page)`, `penpot_create_file(name, project)`,
+  `penpot_status()`. Open a file, then use the `penpot` tools as usual.
+- One-time login: `.venv/bin/python nomad_penpot_nav.py login` (a window opens; the session is
+  kept in the profile, no password stored). MCP must be enabled in Penpot → Integrations.
+- The Penpot MCP key allows one plugin connection: close Penpot files in your own browser while
+  automating. The window is visible via WSLg; `NOMAD_PENPOT_HEADLESS=1` hides it.
+
 These auto-detect their endpoint (Ollama on the Windows host; the scraper/Kroki containers on
 loopback or the host gateway), so they work whether Claude Code runs in WSL or natively. The
 `nomad-diagram` tool needs the `kroki` + `kroki-mermaid` compose services up
 (`docker compose up -d kroki kroki-mermaid`).
 
 ## Setup
-Deps live in `.venv` (gitignored): `python3 -m venv .venv && .venv/bin/pip install mcp requests`.
+Deps live in `.venv` (gitignored): `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`
+(plus `.venv/bin/python -m playwright install chromium` for `nomad-penpot-nav`).
 `.mcp.json` at the repo root points Claude Code at `.venv/bin/python` running each server.
 After it's created, **enable the servers when Claude Code prompts** (project MCP servers need
 approval), or reload the window.

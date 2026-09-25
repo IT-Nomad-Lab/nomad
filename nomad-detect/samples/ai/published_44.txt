@@ -1,0 +1,55 @@
+I run several projects at once. This content engine, data work, and the lab itself. For a while my setup was a browser full of tabs, one per AI tool, and no real idea which one was costing me what.
+
+Then I priced out running everything through the ChatGPT and Claude APIs at the volume I actually use. The number stopped me. So I asked a simple question. Why am I renting this when I have a machine at home that can do most of it.
+
+So I built NOMAD. One assistant, sitting in front of every model, that decides what runs where.
+
+The first reason was control. I wanted one place to see and steer everything I had running in parallel, instead of switching between tools and losing the thread halfway through. The cost was the second push. The two together were enough.
+
+I should be honest about one thing up front. This works because of the hardware. I have a beast of a machine, an RTX 5090 with 24 GB of VRAM and 64 GB of memory. That is what lets a strong local model run always on, fast, for free. Without it this would be a toy. With it, a large part of my daily work never leaves the laptop. I also built it for the challenge, because I wanted to see if I could. And because I believe getting the most out of AI tools, done properly and pointed at a goal, is where this is going. Not AI for its own sake. AI aimed at something.
+
+**One front door, many brains**
+
+The core idea is simple. You never talk to Claude, or GPT, or a local model directly. You talk to one assistant. Behind it, a router decides, per task, which brain answers, whether the work stays on the machine or goes to the cloud, and which tools fire. I think of it as a brain stem with many brains attached.
+
+There are five layers. The interface, how I reach it, by chat, voice, terminal, or phone. The orchestration layer, the router that unifies every model behind one endpoint. The model layer, local and cloud. The automation layer, the workflows and agents that actually take actions. And the memory layer, the per-project context it holds onto.
+
+**How it routes**
+
+The keystone is the gateway. Every model sits behind one endpoint, and every interface asks for a role, not a model name. Fast. Deep. Code. Private. Image. The gateway maps the role to the right brain, tracks the cost of every call, and falls back to another model if one is rate-limited or down. Swapping a model later is a config change, not a rewrite.
+
+The router chooses along four lines. By sensitivity, so anything private or confidential stays local and never leaves the machine. By cost, so high-volume simple work stays local and preserves cloud credits for what deserves them. By difficulty, so the hardest reasoning and long-form work goes to Claude, GPT, or Gemini. And by capability, so huge documents go to the model with the room for them, and images render locally on the GPU.
+
+The local layer does more than people expect. A small fast model stays loaded and always on for routing, quick answers, and high-volume drafting. A heavier model handles private or harder reasoning offline. A coding model handles development. The cloud gets called only when it is worth it.
+
+A real example makes it concrete. Ask it to summarize an email and the small local model answers in under a second, on the machine, for nothing. Ask it to draft the architecture for a new project and that goes to Claude, because the reasoning earns the spend. Ask it for a cover image and it renders on the GPU at home. Same front door for all three. I never pick the model. I ask for the outcome and the router picks.
+
+Underneath, the engine follows the same path for every request. Capture, clarify, route, process, human gate, execute, then log and learn. That gate in the middle is not an afterthought. It is the point.
+
+**From an assistant to a team**
+
+A router is useful on its own. But the real goal was projects that move without me watching them. So NOMAD is also a crew.
+
+A manager agent reads a goal and its milestones, breaks them into tasks, and hands each one to a specialist. A researcher, a builder, a writer, a reviewer. Each specialist runs on the model that fits its job. They work in parallel and log every action as they go.
+
+I did not switch the whole team on at once. I started with three. A manager, a researcher, and one doer, on a single real project, and only added specialists once I trusted what I already had. That restraint is most of why it works instead of collapsing under its own moving parts.
+
+Notion is mission control, the shared brain the agents and I both read and write. I live in the goals and the approvals. They live in the tasks and the logs. I set direction at the top and I sign off at the gates. Everything in between runs itself.
+
+**The gate is non-negotiable**
+
+Here is the rule that keeps me comfortable letting it run. Full autonomy on anything reversible. It can create and edit Notion items, research, write drafts, open code branches, all day, no approval needed. But anything it cannot undo stops and asks. Send an email outside my org. Merge to main. Publish something. Spend money. Delete anything. The agent writes exactly what it wants to do and why, pings me, and waits. I approve in one tap, or I do not. Nothing irreversible happens without that tap.
+
+This is the same thing I keep writing about here. Govern the action, not just the data. Keep a human on the decisions that actually bite. I did not bolt governance on at the end. I built the whole thing around it.
+
+**What keeps it sane, and what is already real**
+
+A few principles hold it together. One front door, so no model is ever wired straight into an app. Local first for the cheap and the private work. Everything in Docker, one file to bring the stack up or down. Secrets in a file, never in the code. Start narrow, then expand.
+
+And this is not a slide. It runs. The images in my last few posts were generated by NOMAD, locally, on that GPU, for free. It scrapes the web for my research. It serves local models to whatever I am building. Every module I added came from a need I was actually having at the time, not a feature list I was working through. That is why the pieces fit. Each one earned its place.
+
+This is part one, the idea and the shape of it. In the next pieces I will go module by module. The router. The local model layer. The agent crew. The approval gate. The memory. How each one works, what broke along the way, and what I would build differently now.
+
+If you would rather see how it is wired than take my word for it, the repo is here: github.com/IT-Nomad-Lab/nomad
+
+The future is not another AI subscription. It is getting the most out of the tools you already have, on your own terms, aimed at something that matters. That is the whole reason NOMAD exists.

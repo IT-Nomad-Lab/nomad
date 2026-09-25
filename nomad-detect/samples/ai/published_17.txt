@@ -1,0 +1,11 @@
+"Make it AI first. Put AI into as many features as we can." That was the mandate from the top. The ambition was real. The technology, at the time, was not always ready to match it.
+
+At Playtika, different groups were testing AI everywhere. Development. QA. Art generation. Art was the big bet. The plan was to use AI to multiply how much the team could produce.
+
+The output was not there yet. Hands with six fingers. Strange artifacts. Errors that were hard to fix with the same AI that created them.
+
+This is not a story about a bad decision. It is a pattern I have seen more than once. Decision makers at the top get pulled toward a trend before they fully understand it. The pressure to be AI first, like everyone else, is real. The detail of what the technology can actually do today tends to live closer to the work.
+
+From engineering, and data engineering in particular, we could see the limits. So we added AI where it genuinely helped and held back where it did not yet. Not slower because we were cautious. Slower because we were building from the reality, not the fantasy.
+
+The trend reaches the top first. The understanding lives closer to the code. The companies that get AI right are the ones where those two actually talk to each other.

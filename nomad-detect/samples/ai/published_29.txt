@@ -1,0 +1,11 @@
+Vibecoding makes the demo fast. It does not make production fast. The trouble starts when the business sees the demo and books the date.
+
+I have never met an R&D team that was not pushed to ship faster than its own estimate. The feature is always wanted yesterday. AI did not change that pressure. It armed it, because now the prototype takes a day and the deadline gets set by the prototype.
+
+What happens next is always the same, and it has never stopped being uncomfortable. The feature does not shrink to hit the date. The checks do. The MVP gets scaled down. QA stages get skipped because some issues "can be accepted." Every skipped step turns into tech debt, and that debt never gets paid, because the next feature is already due yesterday.
+
+Now the same reflex is reaching AI agents. In a survey of 1,505 finance leaders published this week, 71% said the pressure on agent deployments is about speed. Only 7% said their organization puts governance first.
+
+Skipped QA gives you a bug that waits to be found. Skipped governance gives you an agent that acts. The debt used to sit in the backlog. Now it makes decisions.
+
+The demo got faster. Production did not. Cutting the checks does not close that gap. It bills it to whoever is around when it lands.

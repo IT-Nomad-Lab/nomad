@@ -1,8 +1,12 @@
 [
   {
+    "updatedAt": "2026-09-23T07:58:33.000Z",
+    "createdAt": "2026-06-03T14:19:23.975Z",
     "id": "nomadv2send",
     "name": "NOMAD v2 Send",
-    "active": false,
+    "description": null,
+    "active": true,
+    "isArchived": false,
     "nodes": [
       {
         "id": "wh",
@@ -17,7 +21,14 @@
         "parameters": {
           "httpMethod": "POST",
           "path": "v2-send",
-          "responseMode": "onReceived"
+          "responseMode": "onReceived",
+          "authentication": "headerAuth"
+        },
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "WnokDH1EbjYdZiI1",
+            "name": "NOMAD webhook token"
+          }
         }
       },
       {
@@ -38,10 +49,11 @@
         },
         "credentials": {
           "gmailOAuth2": {
-            "id": "YOUR_GMAIL_CRED_ID",
+            "id": "xidYNnAY9GQTR97t",
             "name": "Gmail account"
           }
-        }
+        },
+        "webhookId": "b852ac63-dbb7-4be3-8218-e3b16902dc1a"
       }
     ],
     "connections": {
@@ -59,6 +71,37 @@
     },
     "settings": {
       "executionOrder": "v1"
+    },
+    "staticData": null,
+    "meta": null,
+    "pinData": null,
+    "versionId": "5fd869f6-17e7-4f53-87ab-0f02de4a87a6",
+    "activeVersionId": "5fd869f6-17e7-4f53-87ab-0f02de4a87a6",
+    "versionCounter": 2,
+    "triggerCount": 1,
+    "tags": [],
+    "shared": [
+      {
+        "updatedAt": "2026-06-03T14:19:23.978Z",
+        "createdAt": "2026-06-03T14:19:23.978Z",
+        "role": "workflow:owner",
+        "workflowId": "nomadv2send",
+        "projectId": "jkFKdcc0c38SAYQm",
+        "project": {
+          "updatedAt": "2026-05-31T10:26:57.550Z",
+          "createdAt": "2026-05-31T10:23:36.613Z",
+          "id": "jkFKdcc0c38SAYQm",
+          "name": "Josias De Lima <josias@itnomadlab.com>",
+          "type": "personal",
+          "icon": null,
+          "description": null,
+          "creatorId": "f2f82071-89aa-4534-9f62-331ca7a77df1"
+        }
+      }
+    ],
+    "versionMetadata": {
+      "name": null,
+      "description": null
     }
   }
 ]

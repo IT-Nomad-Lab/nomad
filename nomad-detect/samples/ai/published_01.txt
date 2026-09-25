@@ -1,0 +1,13 @@
+Every AI initiative I've seen stall traces back to the same place. Not the model. The data underneath it.
+
+I've watched teams spend months integrating AI tools on top of data sources that were never designed to be trusted. PDF files nobody has updated in two years. Wiki pages that are technically "current" but practically abandoned. Databases that haven't been refreshed since the last system migration.
+
+The AI tool does exactly what it's supposed to do. It reads the data, generates the output, and delivers confident answers based on garbage inputs.
+
+This week Informatica announced a unified agent and context catalog. Alation launched governance tooling for every AI model in your enterprise. The vendors have figured out the problem. Most buyers haven't.
+
+You don't have an AI problem. You have a data trust problem that your AI investment just made visible.
+
+Take care of your data first. Trust it. Then your AI tool has something real to work with.
+
+Shitty data generates shitty AI.

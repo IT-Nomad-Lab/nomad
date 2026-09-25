@@ -1,0 +1,13 @@
+We choose regions by where the clients are. The people building the capacity are choosing by where the electricity is. Those two maps are coming apart.
+
+New AI data centres planned in Europe for 2026 to 2028 sit on average 175 km from the major hubs. The ones delivered between 2022 and 2025 averaged 46. In London, Frankfurt, Amsterdam, Paris and Dublin, a new site now waits 7 to 10 years for a grid connection, and up to 13 in the worst markets.
+
+Every platform I have set up started with the same question. Where are the clients, and which ones matter most. Then you put the hardware as close to them as you can.
+
+We do not say the next part out loud. For most workloads, latency stopped being the reason years ago. We are arguing over milliseconds that no consumer notices. We keep placing close because it feels like taking the client seriously.
+
+That instinct is fine until the region you want has no capacity to sell you. Then proximity is not a design choice, it is a queue you are standing in.
+
+Worth checking now, not in 2028. Which of your placement rules are latency, which are law, and which are just habit wearing a technical argument.
+
+Compute used to follow the users. It follows the power now, and it is not asking us where our clients live.

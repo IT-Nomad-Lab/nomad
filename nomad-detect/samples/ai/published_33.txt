@@ -1,0 +1,13 @@
+A 16-year-old bug in the most deployed database on earth took Tailscale six months to find. I believe them. I have met that bug's cousins.
+
+The SQLite bug sat in the write-ahead log checkpointing since 2010, waiting for a rare combination of conditions to fire.
+
+Mine was quieter. Mid migration, pipeline after pipeline moving cleanly, until one batch refused to work. The cause was a transformation tool older than anyone on the team, running silently in the legacy platform, covering edge cases nobody had documented. The migration script did not detect it. The data catalog did not map it. The queries we used to plan the migration did not record it. We found it by reading pipeline configurations line by line.
+
+That is the pattern. Incident hunts start with the newest code. But estates run on components that predate everyone in the room. Trusted mostly means old enough that nobody remembers to suspect it.
+
+This is tech debt in its purest form. Left alone, it does not disappear. It goes quiet, waits, and collects with interest. This time it waited 16 years.
+
+We did the ending right. That silent edge case became a proper, documented tool on the new platform. That is what paying the debt looks like.
+
+The new code breaks loudly. The old code breaks once, and nobody knows where to look.

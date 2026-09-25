@@ -1,0 +1,11 @@
+"If it isn't broken, don't fix it." That sentence has protected more broken processes than any budget cut ever did. And it is exactly why AI keeps stalling.
+
+The pattern is always the same. The technology works. IT delivered. Then the value never shows up, because the business will not change how it works around it. The approval chain nobody will give up. The legacy process that still runs, badly, but familiarly. It is not broken enough to force a change, so it stays.
+
+In software you learn this early. You do not reopen working code for fun. You touch it when a real goal makes you. Business processes rarely get the same honesty. The one that is quietly broken stays, because naming it is somebody else's problem.
+
+AI walks straight into this. The story is that IT is not ready. In my experience it is the other way around. IT is usually ready. The business does not understand how to land it, because landing it properly means changing process and culture, not buying a tool.
+
+And the easy version is ending. The assumption that AI is cheap is breaking, and you can see it in the hardware bills. Once it stops being free to bolt on, companies will finally have to do the part they skipped.
+
+AI does not fail on the technology. It fails on a company that will not change how it works.

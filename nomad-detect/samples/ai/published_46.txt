@@ -1,0 +1,63 @@
+Part one of this series was the shape of NOMAD. Part two was the module that makes images. This one is the layer I use the most and talk about the least: the text models running on my own GPU.
+
+Most of what I ask NOMAD to do never leaves this machine. Not because I am precious about the cloud, but because for a large share of the work, local is simply the right answer. It is free, it is private, and it is already loaded.
+
+**Why a local layer at all**
+
+Three reasons, in the order they actually matter to me.
+
+Privacy. Some work should not go to someone else's server. Client data, internal documents, anything I would not paste into a public chat box. If the model runs on my hardware, that decision makes itself. Privacy stops being a philosophical position and becomes a routing rule. Anything touching client data asks for private, which means it runs on my own machine, and I can say with certainty that it never left. That is a much easier sentence to say to a client than a paragraph about somebody's data policy.
+
+Cost. High-volume, low-difficulty work is where cloud bills quietly grow. Summarize this. Classify that. Extract the fields. Draft the boring version. None of it needs a frontier model, and all of it adds up when you are paying per token.
+
+Speed. A small model that is always loaded answers in under a second. No network hop, no queue, no rate limit. For the quick work, local is not the compromise. It is the faster option.
+
+**You ask for a role, not a model**
+
+This is the part I would keep if I rebuilt everything else.
+
+Nothing in NOMAD asks for llama3.1 or deepseek. It asks for a role. Fast. Private. Code. Deep. Longdoc. The gateway maps that role to whatever model sits behind it today, and if I swap the model tomorrow, I change one line of config and nothing else in the system notices.
+
+That sounds like a small design choice. It is the difference between swapping a model in a minute and rewriting an integration. Model names drift constantly. Tags change. Better models ship every few months. If the name is wired into the app, every one of those becomes a migration.\n\nThe config gets one more thing right. Prompts do not live in the routing. Routing routes models. The house writing voice and the other named prompt blocks live in their own registry and get called by name. Two things that change for different reasons, kept apart.
+
+**What actually runs on the GPU**
+
+The machine is an RTX 5090 with 24 GB of VRAM. That budget decides everything.
+
+Fast is an 8B model. Small, always loaded, sub-second. It handles the routing decisions, the quick questions, the high-volume drafting. By count, this model does most of the work.
+
+Private is a 32B reasoning model. Heavier local thinking for anything sensitive or offline. Slower, but it never phones home.
+
+Code is a 32B coding model, for refactors and code reasoning.
+
+There is also a 70B on disk for the rare job that justifies the wait, and a small embedding model for memory. The big ones get swapped in on demand. The 8B stays resident, because that is where the value per gigabyte is.\n\nThe 24 GB is a hard ceiling, and it is only fair to say what that costs. The 8B fits with room to spare and never has to move. The 32Bs fit, but loading one evicts whatever was there. The 70B does not really fit at all, so it spills into system memory and crawls. Every model above the 8B is a decision to wait.
+
+The honest part is this. The original plan specified a different family of models entirely. When I went to install them, those tags did not exist. So the config still carries a note from the day I remapped every role to the models that were actually available. The architecture survived. The model names did not. Which is exactly the argument for roles.
+
+**Cloud conducts, local executes**\n\nThe pattern I use most is not local instead of cloud. It is cloud conducting and local executing. The expensive brain runs the hard thinking and hands the cheap, bulky, or private pieces down to the model on my GPU. Summarize these twenty pages. Classify this batch. Pull the fields out of that. One decides what needs doing, the other does the volume. That split is the whole reason to have both.\n\n**Cloud without the API bill**
+
+This is the piece I am most pleased with, and the least obvious.
+
+Deep and balanced are Claude. But they do not go to the Anthropic API. They route through a small local bridge to Claude Code, which I already pay for as a subscription. Same model, same reasoning, no per-token meter running while I work.
+
+Longdoc goes to Gemini, on a free tier that gives me a million tokens of context for the jobs that need to read something enormous. There is a GPT role too, as an alternate when I want its function calling.
+
+So the shape is this. Local models handle volume and privacy for nothing. Subscription models handle the deep reasoning for a flat fee. Metered APIs are the last resort, not the default. That ordering is most of the reason my AI costs are boring.
+
+A real example. When I research a topic for an article, the scraping and the first-pass summarizing run locally on fast, because that is bulk work over public pages. The synthesis and the actual writing go to deep, because that is where judgment lives. The images render on the same GPU. One task, three different brains, and only one of them is even capable of sending me a bill.
+
+**How I would make it better**
+
+Route automatically. Right now I pick the role. The obvious next step is for NOMAD to read the task and choose for itself: this is sensitive, keep it local. This is trivial, use fast. This one needs real reasoning, spend the deep call.
+
+Learn which brain wins. A quiet evaluation loop that records which role produced the better answer for which kind of task, so routing improves from evidence instead of my intuition.
+
+Manage memory properly. Swapping large models is where the time goes. Smarter loading and unloading would make the heavy end usable instead of something I avoid.
+
+Give the local layer a fallback. Right now, if the local server is not running, the local roles simply fail. A graceful degrade to a cloud role, with a clear note that it happened, would make the whole thing less brittle. I found this out the honest way while writing this piece.\n\nKeep the tags honest. Model names drift. A small check that flags when a configured tag no longer exists would have saved me the day I found out the plan's models were fiction.
+
+None of this is exotic. Same pattern as every other module. Start with something that works, then let each real need pull the next piece into place.
+
+The repo is here if you want to see the wiring: github.com/IT-Nomad-Lab/nomad
+
+Next in the series: the agent crew, and what happens when the models stop answering questions and start doing work.

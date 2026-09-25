@@ -20,8 +20,19 @@ Runs **headless** Claude Code in a repo so an agent (or the console) can impleme
 | `GET /health` | — | Liveness. |
 
 **Guardrails:**
+- **Token-gated.** Every route but `GET /health` requires `X-Nomad-Token`, the same convention the
+  n8n webhooks use. The secret is auto-generated at `~/.config/nomad/dispatch-token` (0600) on
+  first start, so there is nothing to configure; `NOMAD_DISPATCH_TOKEN` overrides it. Unlike
+  `termd`, this does **not** fail open: if the token cannot be read or created the process exits,
+  because a dispatcher with no token is a remote-code-edit daemon with no door. Containers read the
+  file through a read-only mount (`/term-secret/dispatch-token` in the engine and crew,
+  `/host/.config/nomad/dispatch-token` in the console).
 - `build` runs with `--permission-mode acceptEdits`: Claude may **edit** files (reversible,
   uncommitted) but is instructed to **never** `git commit`/`push` or run destructive commands.
+- **An ambiguous project name refuses.** This service edits code, so resolving "nomad" to whichever
+  repo `listdir` happened to return first is a way to silently write into the wrong one. An exact
+  name or directory match wins outright; only a tie *within* a tier is a real ambiguity, and that
+  returns the candidates instead of guessing.
 - `/verify` is **denylist-guarded** (`guard_command`): it only *runs* checks — it blocks
   `rm -rf`, git mutations, docker, sudo/systemctl, kill, external network (localhost curl
   allowed), `/dev` writes, fork bombs. It never mutates or reaches the network.
@@ -57,8 +68,9 @@ Typically run as systemd user services (`nomad-dispatch`, `nomad-term`) so they 
 
 | Var | Default | Meaning |
 |---|---|---|
-| `PROJECT_ROOTS` | `~` | Colon-separated roots scanned for `Nomad.md` projects. |
+| `PROJECT_ROOTS` | `~` | Colon-separated roots scanned for `Nomad.md` projects. A repo outside them (the Tauri shell on the Windows side) is **symlinked in** rather than added as a second root, because a second root that contains another checkout of an existing project creates two repos with one name. |
 | `NOMAD_DISPATCH_HOST` / `_PORT` | `0.0.0.0` / `8090` | Dispatcher bind. |
+| `NOMAD_DISPATCH_TOKEN` | auto | Shared secret for every route but `/health`; auto-generated at `~/.config/nomad/dispatch-token`. |
 | `NOMAD_DISPATCH_TIMEOUT` | `900` | Per-dispatch timeout (s). |
 | `NOMAD_TERM_PORT` | `8091` | Terminal daemon port. |
 | `NOMAD_TERM_CMD` | `claude` | What the PTY runs. |

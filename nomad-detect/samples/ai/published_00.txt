@@ -1,0 +1,15 @@
+Every time I see a company announce AI-driven layoffs, I wait. Six months. Twelve. They come back hiring.
+
+Klarna replaced 700 customer service agents with AI in 2023. Last year their CEO admitted it: "We focused too much on efficiency and cost. The result was lower quality." They're rehiring humans now.
+
+It's not just them. Forrester predicts half of AI-attributed layoffs will be quietly reversed. A February survey of 600 HR leaders who did AI layoffs found two-thirds already rehiring. Only 21% said the replacement worked without operational issues.
+
+I've watched this play out closer than I'd like. Design, QA, content, support. Areas where leadership decided "the tool can handle it." Then the tool couldn't. And the people who knew the work were already gone.
+
+AI is a strong tool. It triages first-line support before a human takes over. It drafts reports someone still needs to review. It gives my teams context faster than any process ever did. That's the win.
+
+What it doesn't do is replace the judgment of the person who's seen the edge case before.
+
+A friend who builds AI tools told me recently: "Sometimes I wonder what we're doing. Are we building the thing that replaces me?" She laughed. Then she didn't.
+
+Train your people to use the tools. Don't fire them because of the tools.

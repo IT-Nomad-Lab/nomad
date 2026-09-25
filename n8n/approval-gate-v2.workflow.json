@@ -1,6 +1,6 @@
 [
   {
-    "updatedAt": "2026-05-31T13:39:45.000Z",
+    "updatedAt": "2026-09-23T11:23:52.000Z",
     "createdAt": "2026-05-31T13:10:59.055Z",
     "id": "nomadgatev2clean",
     "name": "NOMAD Approval Gate v2",
@@ -13,7 +13,8 @@
           "httpMethod": "POST",
           "path": "approval",
           "responseMode": "responseNode",
-          "options": {}
+          "options": {},
+          "authentication": "headerAuth"
         },
         "id": "node-webhook",
         "name": "Approval request",
@@ -23,7 +24,13 @@
           -368,
           304
         ],
-        "webhookId": "nomad-approval"
+        "webhookId": "nomad-approval",
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "WnokDH1EbjYdZiI1",
+            "name": "NOMAD webhook token"
+          }
+        }
       },
       {
         "parameters": {
@@ -105,7 +112,7 @@
         "webhookId": "8857d6b4-e6bb-477c-a420-e7f7fa0c0885",
         "credentials": {
           "gmailOAuth2": {
-            "id": "YOUR_GMAIL_CRED_ID",
+            "id": "xidYNnAY9GQTR97t",
             "name": "Gmail account"
           }
         },
@@ -117,10 +124,6 @@
           "url": "=https://api.github.com/repos/{{ $('Approval request').item.json.body.owner }}/{{ $('Approval request').item.json.body.repo }}/pulls/{{ $('Approval request').item.json.body.pull_number }}/merge",
           "authentication": "predefinedCredentialType",
           "nodeCredentialType": "githubApi",
-          "sendBody": true,
-          "specifyBody": "json",
-          "jsonBody": "={{ JSON.stringify({ commit_title: ($('Approval request').item.json.body.action || 'Merged via NOMAD') }) }}",
-          "options": {},
           "sendHeaders": true,
           "headerParameters": {
             "parameters": [
@@ -133,7 +136,11 @@
                 "value": "NOMAD"
               }
             ]
-          }
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ commit_title: ($('Approval request').item.json.body.action || 'Merged via NOMAD') }) }}",
+          "options": {}
         },
         "id": "node-act-merge",
         "name": "Merge to main (GitHub)",
@@ -142,7 +149,13 @@
         "position": [
           800,
           -48
-        ]
+        ],
+        "credentials": {
+          "githubApi": {
+            "id": "SeKUXz1NEZTHHzxv",
+            "name": "GitHub account 2"
+          }
+        }
       },
       {
         "parameters": {
@@ -162,7 +175,13 @@
         "position": [
           800,
           48
-        ]
+        ],
+        "credentials": {
+          "googleCalendarOAuth2Api": {
+            "id": "4HRxQt5yUUWCb5WW",
+            "name": "Google Calendar account 2"
+          }
+        }
       },
       {
         "parameters": {
@@ -182,7 +201,13 @@
         "position": [
           800,
           128
-        ]
+        ],
+        "credentials": {
+          "googleDriveOAuth2Api": {
+            "id": "E1oTxylgtj6yFuSK",
+            "name": "Google Drive account 2"
+          }
+        }
       },
       {
         "parameters": {},
@@ -275,11 +300,8 @@
       },
       {
         "parameters": {
-          "resource": "message",
-          "operation": "send",
-          "sendTo": "you@example.com",
+          "sendTo": "josias@itnomadlab.com",
           "subject": "=NOMAD approval needed: {{ $('Approval request').item.json.body.action }}",
-          "emailType": "html",
           "message": "=<p><b>NOMAD needs your approval.</b></p><p><b>Action:</b> {{ $('Approval request').item.json.body.action }}<br><b>Type:</b> {{ $('Approval request').item.json.body.type }}<br><b>Requested by:</b> {{ $('Approval request').item.json.body.requested_by }}</p><pre>{{ $('Approval request').item.json.body.context }}</pre><p><a href=\"{{ $execution.resumeUrl }}&decision=approved\">&#9989; APPROVE</a> &nbsp;&nbsp;|&nbsp;&nbsp; <a href=\"{{ $execution.resumeUrl }}&decision=rejected\">&#10060; REJECT</a></p>",
           "options": {}
         },
@@ -288,17 +310,18 @@
         "type": "n8n-nodes-base.gmail",
         "typeVersion": 2.1,
         "position": [
-          -30,
-          470
+          -32,
+          480
         ],
         "notesInFlow": true,
-        "notes": "Emails the owner Approve/Reject links (signed resumeUrl). Runs before the Wait.",
+        "webhookId": "3380c033-2024-4075-9644-d5e15eff1db2",
         "credentials": {
           "gmailOAuth2": {
-            "id": "YOUR_GMAIL_CRED_ID",
+            "id": "xidYNnAY9GQTR97t",
             "name": "Gmail account"
           }
-        }
+        },
+        "notes": "Emails the owner Approve/Reject links (signed resumeUrl). Runs before the Wait."
       },
       {
         "parameters": {
@@ -316,12 +339,12 @@
         "type": "n8n-nodes-base.httpRequest",
         "typeVersion": 4.2,
         "position": [
-          400,
-          120
+          1060,
+          0
         ],
         "credentials": {
           "notionApi": {
-            "id": "YOUR_NOTION_CRED_ID",
+            "id": "VXhPJzMAoEDfQh0Y",
             "name": "Notion account"
           }
         }
@@ -334,7 +357,7 @@
           "nodeCredentialType": "notionApi",
           "sendBody": true,
           "specifyBody": "json",
-          "jsonBody": "={{ JSON.stringify({ parent: { database_id: 'YOUR_NOTION_DATABASE_ID' }, properties: {  Action: { title: [ { text: { content: ('Approved & executed: ' + ($('Approval request').item.json.body.action || 'action')).slice(0,200) } } ] },  Agent: { select: { name: ($('Approval request').item.json.body.requested_by || 'Comms') } },  Timestamp: { date: { start: $now.toISO() } },  Detail: { rich_text: [ { text: { content: ($('Approval request').item.json.body.context || '').slice(0,1900) } } ] } } }) }}",
+          "jsonBody": "={{ JSON.stringify({ parent: { database_id: '63e20555-76ad-4537-9c93-c46c8922477d' }, properties: {  Action: { title: [ { text: { content: ('Approved & executed: ' + ($('Approval request').item.json.body.action || 'action')).slice(0,200) } } ] },  Agent: { select: { name: ($('Approval request').item.json.body.requested_by || 'Comms') } },  Timestamp: { date: { start: $now.toISO() } },  Detail: { rich_text: [ { text: { content: ($('Approval request').item.json.body.context || '').slice(0,1900) } } ] } } }) }}",
           "options": {}
         },
         "id": "node-notion-log",
@@ -342,12 +365,12 @@
         "type": "n8n-nodes-base.httpRequest",
         "typeVersion": 4.2,
         "position": [
-          560,
-          120
+          1280,
+          0
         ],
         "credentials": {
           "notionApi": {
-            "id": "YOUR_NOTION_CRED_ID",
+            "id": "VXhPJzMAoEDfQh0Y",
             "name": "Notion account"
           }
         }
@@ -369,11 +392,11 @@
         "typeVersion": 4.2,
         "position": [
           400,
-          470
+          480
         ],
         "credentials": {
           "notionApi": {
-            "id": "YOUR_NOTION_CRED_ID",
+            "id": "VXhPJzMAoEDfQh0Y",
             "name": "Notion account"
           }
         }
@@ -417,7 +440,7 @@
         "main": [
           [
             {
-              "node": "Mark Approved (Notion)",
+              "node": "Route by action type",
               "type": "main",
               "index": 0
             }
@@ -508,13 +531,7 @@
       },
       "Log to Activity (Notion)": {
         "main": [
-          [
-            {
-              "node": "Route by action type",
-              "type": "main",
-              "index": 0
-            }
-          ]
+          []
         ]
       },
       "Mark Rejected (Notion)": {
@@ -522,6 +539,83 @@
           [
             {
               "node": "Rejected: no action taken",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Send Email (Gmail)": {
+        "main": [
+          [
+            {
+              "node": "Mark Approved (Notion)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Merge to main (GitHub)": {
+        "main": [
+          [
+            {
+              "node": "Mark Approved (Notion)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Create event / invite (Calendar)": {
+        "main": [
+          [
+            {
+              "node": "Mark Approved (Notion)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Share file (Drive)": {
+        "main": [
+          [
+            {
+              "node": "Mark Approved (Notion)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "TODO: Publish": {
+        "main": [
+          [
+            {
+              "node": "Mark Approved (Notion)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "TODO: Delete": {
+        "main": [
+          [
+            {
+              "node": "Mark Approved (Notion)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "TODO: Spend (e.g. Firefly)": {
+        "main": [
+          [
+            {
+              "node": "Mark Approved (Notion)",
               "type": "main",
               "index": 0
             }
@@ -541,9 +635,9 @@
       "templateCredsSetupCompleted": true
     },
     "pinData": {},
-    "versionId": "89a75dac-aa6c-4887-942f-2ed02816c41e",
-    "activeVersionId": "89a75dac-aa6c-4887-942f-2ed02816c41e",
-    "versionCounter": 6,
+    "versionId": "3ab3f01e-d365-4755-b050-e570bc9d882d",
+    "activeVersionId": "3ab3f01e-d365-4755-b050-e570bc9d882d",
+    "versionCounter": 15,
     "triggerCount": 1,
     "tags": [],
     "shared": [
@@ -557,7 +651,7 @@
           "updatedAt": "2026-05-31T10:26:57.550Z",
           "createdAt": "2026-05-31T10:23:36.613Z",
           "id": "jkFKdcc0c38SAYQm",
-          "name": "NOMAD operator",
+          "name": "Josias De Lima <josias@itnomadlab.com>",
           "type": "personal",
           "icon": null,
           "description": null,
@@ -566,8 +660,8 @@
       }
     ],
     "versionMetadata": {
-      "name": "Version 882c478d",
-      "description": ""
+      "name": null,
+      "description": null
     }
   }
 ]

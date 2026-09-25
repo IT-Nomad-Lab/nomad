@@ -1,0 +1,21 @@
+[Unit]
+Description=NOMAD Codex bridge (OpenAI-compatible shim serving the LiteLLM `codex` alias)
+After=default.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/jdelimam/nomad/codex-bridge
+# HOME for the ~/.codex subscription login; PATH so `codex` and node resolve; a
+# blank OPENAI_API_KEY forces subscription auth so this never bills API credits.
+Environment=HOME=/home/jdelimam
+Environment=PATH=/home/jdelimam/.local/bin:/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin
+Environment=OPENAI_API_KEY=
+# Pin a model here only on purpose; empty means the CLI's own default.
+Environment=CODEX_BRIDGE_MODEL=
+Environment=CODEX_BRIDGE_PORT=8089
+ExecStart=/usr/bin/python3 /home/jdelimam/nomad/codex-bridge/bridge.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

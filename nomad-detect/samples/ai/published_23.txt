@@ -1,0 +1,9 @@
+"Data engineering is easy now. With these tools, you watch a YouTube video and you are done." A C-level client told me that, and he meant it.
+
+He is not entirely wrong, and that is what makes it dangerous. Data engineering has changed enormously. The tools are genuinely good. Someone can stand up a pipeline in an afternoon that used to take a team a month. That part is real, and it is worth celebrating.
+
+But easy to start is not the same as easy to do well. The YouTube video shows you the happy path. It does not show you what happens when the data is wrong at the source and the pipeline still runs green. It does not show you tracing a failure across five systems at two in the morning, or the moment the volume outgrows the tool that made it look simple. That is the job. Not writing the pipeline. Keeping it correct when reality hits it.
+
+The better the tools get, the more the value moves to the part they cannot give you. The judgment. The understanding of the system, the data, and how it breaks.
+
+Anyone can build a pipeline from a video. Almost nobody can fix the one that is quietly wrong.

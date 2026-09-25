@@ -1,0 +1,14 @@
+Here's a LinkedIn post on how to determine if your ML model is truly in production:
+
+**"Beyond the Deploy Button: The Surprising Truth About ML Models in Production**
+
+As machine learning (ML) engineers, we often celebrate a major milestone when our models are finally deployed to production. However, I've come to realize that being "in production" is a nuanced concept. In my experience, just because a model is live, doesn't mean it's truly delivering value.
+
+So, how can you be sure your ML model is actually in production? Here are some signs to look out for:
+
+1. **Monitoring and Feedback**: Your model should be actively monitored for performance, and feedback should be incorporated into the model's development cycle. This means tracking metrics such as accuracy, latency, and data drift, and using that information to improve the model over time.
+2. **Integration with Business Processes**: Your model should be seamlessly integrated into business processes, streamlining operations and driving tangible business outcomes. This might involve automating decision-making, predicting outcomes, or providing recommendations.
+3. **Active Maintenance and Updates**: Your model should continue to evolve and improve over time, with regular updates and maintenance to ensure it remains relevant and accurate.
+4. **Clear ROI Measurement**: You should be able to measure the return on investment (ROI) of your model, demonstrating its value to the organization.
+
+If your ML model meets these criteria, you can be confident that it's truly in production. But if you're still relying on a static model that's been deployed without ongoing maintenance or monitoring, it's time to revisit your strategy. Remember, a model in production is not just a checkbox on a deployment checklist – it's a living, breathing part of your organization's operations."

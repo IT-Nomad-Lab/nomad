@@ -1,0 +1,13 @@
+AI tools will not move your delivery metrics. Not until enough people on the team are actually using them.
+
+I managed teams at Playtika going through AI adoption across different functions. Not everyone was convinced at first. Some tried it, some resisted, some waited to see what happened to others. That uneven adoption is exactly why org-level metrics look flat in the early months. The individual gains are real. They are just siloed.
+
+When adoption reached critical mass, the numbers moved. QA coverage jumped 87%, with a team already stretched thin and continuously shipping new features. Data engineers started delivering usable UIs on their own, which let us showcase features before full productization. Code moved faster. Documentation actually got updated.
+
+We were not replacing engineers. We were changing how they could work together.
+
+The companies staring at flat productivity dashboards after 12 months of AI investment are not measuring the wrong tool. They are measuring an unfinished adoption.
+
+Individual wins don't compound until the whole team is playing.
+
+What did AI adoption look like in your team, and where did the real gains show up?

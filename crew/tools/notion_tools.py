@@ -23,6 +23,10 @@ DB_ACTIVITY = os.environ.get("NOTION_DB_ACTIVITY")
 DB_APPROVALS = os.environ.get("NOTION_DB_APPROVALS")
 DB_KNOWLEDGE = os.environ.get("NOTION_DB_KNOWLEDGE")
 APPROVAL_WEBHOOK = os.environ.get("N8N_APPROVAL_WEBHOOK")
+# n8n publishes 5678 on 0.0.0.0 and a published docker port reaches the LAN here, so every
+# webhook requires this shared header (n8n credential "NOMAD webhook token", 2026-09-23).
+_GATE_HEADERS = ({"X-Nomad-Token": os.environ["N8N_WEBHOOK_TOKEN"]}
+                 if os.environ.get("N8N_WEBHOOK_TOKEN") else {})
 
 # Action types that must NEVER be executed by an agent directly.
 GATED_TYPES = {
@@ -203,7 +207,7 @@ def request_send_email(to: str, subject: str, body: str,
                 "approval_id": row_id, "type": "Send Email",
                 "action": f"Send email to {to}", "requested_by": requested_by,
                 "to": to, "subject": subject, "body": body, "context": context,
-            }, timeout=10)
+            }, headers=_GATE_HEADERS, timeout=10)
         except requests.RequestException as e:
             return f"Approval row created ({row_id}) but webhook ping failed: {e}"
     return (f"EMAIL APPROVAL REQUESTED (id={row_id}). NOT sent — pending your "
@@ -230,7 +234,7 @@ def _gate_request(action: str, action_type: str, requested_by: str,
             requests.post(APPROVAL_WEBHOOK, json={
                 "approval_id": row_id, "action": action, "type": action_type,
                 "context": context, "requested_by": requested_by, **fields,
-            }, timeout=10)
+            }, headers=_GATE_HEADERS, timeout=10)
         except requests.RequestException as e:
             return row_id, f" (webhook ping failed: {e})"
     return row_id, ""
@@ -307,7 +311,7 @@ def request_approval(action: str, action_type: str, context: str,
             requests.post(APPROVAL_WEBHOOK, json={
                 "approval_id": row_id, "action": action, "type": action_type,
                 "context": context, "requested_by": requested_by,
-            }, timeout=10)
+            }, headers=_GATE_HEADERS, timeout=10)
         except requests.RequestException as e:  # gate still holds; just note it
             return f"Approval row created ({row_id}) but webhook ping failed: {e}"
 

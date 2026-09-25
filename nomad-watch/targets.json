@@ -1,0 +1,134 @@
+{
+  "_note": [
+    "What nomad-watch checks. Order is roughly 'what hurts most when it dies quietly'.",
+    "type=heartbeat is the only kind that proves a service is still DOING its job; the rest prove",
+    "it is reachable, which is weaker. Add a heartbeat for anything whose failure is silent.",
+    "`hint` is printed inside the alert, so it should say the first thing to try, not describe",
+    "the problem again. Set enabled:false to mute a target without losing why it was here."
+  ],
+
+  "targets": [
+    {
+      "name": "relay loop",
+      "type": "heartbeat",
+      "path": "~/.local/state/nomad-watch/heartbeat/relay",
+      "max_age_s": 300,
+      "hint": "The relay is `active` but not polling the engine. `journalctl --user -u nomad-relay -n 50`; a Zulip key rotation exits 3 and self-heals, anything else does not."
+    },
+    {
+      "name": "engine stall sweep",
+      "type": "http",
+      "url": "http://127.0.0.1:8099/health",
+      "json_field": "sweep_age_s",
+      "json_max": 1800,
+      "hint": "The thread that fails runs abandoned in `new` has stopped, while the container stays up. Runs can sit in `new` forever with nobody waiting. `docker compose logs nomad-v2-engine | grep sweep`."
+    },
+    {
+      "name": "nomad-relay unit",
+      "type": "unit",
+      "unit": "nomad-relay",
+      "hint": "`systemctl --user status nomad-relay`. In `failed` after ~2 minutes means the Zulip key is wrong, not stale."
+    },
+    {
+      "name": "dispatcher",
+      "type": "http",
+      "url": "http://127.0.0.1:8090/health",
+      "hint": "`systemctl --user status nomad-dispatch`. It exits on purpose if it cannot read ~/.config/nomad/dispatch-token."
+    },
+    {
+      "name": "v2 engine",
+      "type": "http",
+      "url": "http://127.0.0.1:8099/health",
+      "hint": "The pipeline. `docker compose logs --tail=50 nomad-v2-engine`."
+    },
+    {
+      "name": "n8n gate webhook",
+      "type": "http",
+      "url": "http://127.0.0.1:5678/webhook/approval",
+      "method": "POST",
+      "body": {},
+      "status_ok": [200, 400, 401, 403],
+      "hint": "404 here means the Approval Gate workflow is DEACTIVATED, not that n8n is down. This is the outage that hid for three and a half months. `n8n update:workflow --active=true`."
+    },
+    {
+      "name": "n8n",
+      "type": "http",
+      "url": "http://127.0.0.1:5678/healthz",
+      "hint": "Owns the gate, the workflows and the credentials. `docker logs nomad-n8n-standalone --tail=50`."
+    },
+    {
+      "name": "LiteLLM gateway",
+      "type": "http",
+      "url": "http://127.0.0.1:4000/health/liveliness",
+      "hint": "Every model call goes through here. Recreate, never restart: `docker compose up -d --force-recreate litellm`."
+    },
+    {
+      "name": "NocoDB",
+      "type": "http",
+      "url": "http://127.0.0.1:8095/api/v1/health",
+      "hint": "v2 mission control. `docker logs nomad-nocodb --tail=50`."
+    },
+    {
+      "name": "console",
+      "type": "http",
+      "url": "http://127.0.0.1:1701/healthz",
+      "hint": "`docker compose logs --tail=50 nomad-console`."
+    },
+    {
+      "name": "Zulip",
+      "type": "http",
+      "url": "http://127.0.0.1:8096/health",
+      "hint": "If this is down the watchdog cannot report anything, so its own pass will fail too."
+    },
+    {
+      "name": "postgres",
+      "type": "container",
+      "container": "nomad-postgres",
+      "hint": "`nomad_v2` lives here. Everything v2 stops without it."
+    },
+    {
+      "name": "qdrant",
+      "type": "container",
+      "container": "nomad-qdrant",
+      "hint": "`nomad_memory`. Memory reads fail soft, so its death is silent."
+    },
+    {
+      "name": "termd",
+      "type": "http",
+      "url": "http://127.0.0.1:8091/health",
+      "hint": "`systemctl --user status nomad-term`."
+    },
+    {
+      "name": "nomad-voice",
+      "type": "http",
+      "url": "http://127.0.0.1:8200/health",
+      "hint": "`systemctl --user status nomad-voice`."
+    },
+    {
+      "name": "nomad-detect",
+      "type": "http",
+      "url": "http://127.0.0.1:8214/health",
+      "hint": "Keep it bound to localhost. `systemctl --user status nomad-detect`."
+    },
+    {
+      "name": "nomad-scraper",
+      "type": "http",
+      "url": "http://127.0.0.1:8210/health",
+      "hint": "Research lane grounding (ADR-007). `docker logs nomad-scraper --tail=50`."
+    },
+    {
+      "name": "OpenProject API",
+      "type": "http",
+      "url": "http://localhost:8097/api/v3",
+      "status_ok": [401],
+      "hint": "nomad-pm, the work tracker (ADR-011). 401 means it answered and wants a token. Otherwise `cd ~/nomad-pm && docker compose ps && docker compose logs --tail 50 openproject`. A 400 means the Host header is not in OPENPROJECT_ADDITIONAL__HOST__NAMES, which is why this uses localhost, not 127.0.0.1."
+    },
+    {
+      "name": "nomad-pm backup",
+      "type": "heartbeat",
+      "path": "~/.local/state/nomad-watch/heartbeat/nomad-pm-backup",
+      "max_age_s": 108000,
+      "hint": "The nightly OpenProject backup has not succeeded in 30 hours. `journalctl --user -u nomad-pm-backup -n 30`, then rerun with `systemctl --user start nomad-pm-backup`. Backups are in ~/backups/nomad-pm."
+    }
+  ]
+}

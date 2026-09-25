@@ -1,0 +1,13 @@
+The AI bill did not surprise anyone. Nobody did the math past the pilot.
+
+Companies are metering it now. Personal token budgets per engineer. Caps for non technical staff. Daily spend tracking. Cheaper models for the work that never needed the expensive one.
+
+I have seen usage optimization in every company I have worked with, sometimes from the first week. That part is not new. What is new is where it breaks. A POC is cheap. A pilot with a small client base is cheap. Then you scale that same solution across the business and the economics you validated stop existing. Nobody modeled that, because the decision was bought on the quick win.
+
+Cost is also only half the story. Plenty of limits going in right now are security limits, because nobody wants that data passing through that model. They land on the same invoice, so they get filed as a cost problem.
+
+The fix I like from the reporting is boring. Docusign cut token use in half by making their agents pull only the relevant context instead of the whole codebase. Not less AI. Less waste.
+
+That is the real work, and it is the work nobody budgets for at pilot stage.
+
+The pilot proved it works. It never proved you could afford it.

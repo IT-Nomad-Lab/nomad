@@ -1,0 +1,27 @@
+I do not usually get excited about hardware announcements. But NVIDIA had me paying close attention this week.
+
+Two things came out of GTC Taipei and Computex on June 1 that I think matter more than the headlines are giving them credit for.
+
+The first is the RTX Spark. An ARM-based chip co-developed with MediaTek and Microsoft. It combines CPU and GPU in one package and will power a new generation of AI PCs from Dell, HP, Lenovo, ASUS, Microsoft Surface and MSI launching this fall.
+
+For developers like me, what this means is simple: run AI models locally. No cloud dependency. No token costs. Always on. Private by default.
+
+This is not a small thing. One of the real barriers to wider AI adoption in development workflows right now is cost. Tokens add up fast when you are running multiple models across multiple tasks. Every call to the API has a price. The infrastructure cost for production AI is already running three to five times initial projections at most companies. Anything that moves meaningful workloads local and brings that cost down is not just convenient. It is a structural change.
+
+Lower cost means more experimentation. More experimentation means faster adoption. The cycle becomes virtuous instead of restrictive.
+
+The second announcement is less visible but equally important for enterprise developers.
+
+NVIDIA has now embedded OpenShell, their open source runtime for autonomous AI agents, directly into SAP Business AI Platform and ServiceNow. Governance controls built in. Security by default. Not as an add-on. As the foundation.
+
+SAP and ServiceNow are not niche tools. They run the back office of most large enterprises. If you work in enterprise technology, the odds are high that at least one of those systems is in your stack right now.
+
+At Playtika, we were building AI agents on top of our internal support and ticketing system. The goal was to reduce resolution time and surface the right context to the right people faster. Before I left, we were already working on the integration path toward ServiceNow. The problem we kept running into was governance. Who owns the agent? What data can it access? How do you audit what it did?
+
+That is exactly the gap these partnerships are designed to close. Not by adding governance as a layer on top. By building it into the runtime from the start.
+
+NVIDIA is no longer just a chip company. They are becoming the infrastructure layer that AI agents run on, are governed by, and scale through. That is a different company than the one selling GPUs to researchers five years ago.
+
+For developers, this week's announcements are a signal worth paying attention to. The tools are getting faster, cheaper, and more controlled at the same time.
+
+That combination does not happen often.

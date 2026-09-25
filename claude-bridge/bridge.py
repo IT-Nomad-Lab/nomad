@@ -25,7 +25,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 HOST = os.environ.get("CLAUDE_BRIDGE_HOST", "0.0.0.0")
 PORT = int(os.environ.get("CLAUDE_BRIDGE_PORT", "8088"))
 WORKDIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_workdir")
-CLAUDE = shutil.which("claude") or "/home/linuxbrew/.linuxbrew/bin/claude"
+CLAUDE = shutil.which("claude") or os.path.expanduser("~/.local/bin/claude")  # 2.x native
+#   installer path; the old linuxbrew location is gone. Keep `which` first so a
+#   future move is picked up without editing this line again.
 TIMEOUT = int(os.environ.get("CLAUDE_BRIDGE_TIMEOUT", "300"))
 
 BASE_SYSTEM = (

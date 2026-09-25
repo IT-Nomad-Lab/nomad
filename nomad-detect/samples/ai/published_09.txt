@@ -1,0 +1,11 @@
+The perfect data engineer does not exist. Most hiring managers have not figured this out yet.
+
+I have hired across different tech stacks, from Java, Spark, Scala, and Python, to experience with different databases, and full ecosystems like Cloudera distributions and the Databricks platform. The candidate who covers everything never shows up. What I found instead: Java developers with no interest in data pipelines, Spark experience on CVs with no real production hours behind it, strong relational database skills with no cloud storage exposure.
+
+Every project has a specific stack. Every stack eliminates most of the market before the first interview.
+
+What I learned to look for instead was simpler: basic concepts of data engineering, critical thinking and problem solving. If someone could reason through a problem they had not seen before, the technical gaps were fixable. I had strong developers on my teams who could teach the stack. The thinking, you cannot teach.
+
+The data engineering job description in 2026 asks for architecture skills, AI integration, governance experience, and platform engineering. That person exists, but not in the volume companies are trying to hire them. The alternative is to find the right raw material and grow it.
+
+If you do not grow skills internally, your projects in the long term are bound to fail.

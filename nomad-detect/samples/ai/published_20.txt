@@ -1,0 +1,11 @@
+There is always one. A shared admin account nobody should still have. A test credential left in the repo. An old login handed between developers until no one remembers who owned it. We never fixed that for humans. Now every AI agent is a new one.
+
+For years the machine-identity mess sat in the background. Service accounts with no owner. Passwords in config files. A manager's admin login passed to the team because that was faster than creating proper accounts and following the approval steps. It caused chaos, but it stayed small enough to survive.
+
+Agents remove the small. Gartner expects 40% of enterprise apps to embed task-specific agents this year, up from under 5% last year. Every one of them is a non-human identity with credentials and tool access, and the identity systems we run were never built for that.
+
+The numbers are already turning. Almost half of security leaders now call AI agents the top attack vector for 2026. Almost half also admit their identity governance is not ready for AI at all.
+
+We spent a decade locking down human access and still lost the machine part. Agents are that same failure, multiplied, moving faster than anyone is reviewing it.
+
+An agent does not need to phish anyone. You already handed it the keys.

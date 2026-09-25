@@ -1,0 +1,12 @@
+[Unit]
+Description=Run the NOMAD watchdog every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+# The pass must finish before the next one starts; a backlog of overlapping probes is noise.
+AccuracySec=30s
+Unit=nomad-watch.service
+
+[Install]
+WantedBy=timers.target

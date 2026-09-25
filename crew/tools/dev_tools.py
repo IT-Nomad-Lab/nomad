@@ -14,11 +14,30 @@ DISPATCH = os.environ.get("NOMAD_DISPATCH_URL", "http://host.docker.internal:809
 TIMEOUT = int(os.environ.get("NOMAD_DEV_TIMEOUT", "900"))
 
 
+def _dispatch_token():
+    """Shared secret for the Builder dispatcher (auto-generated on the host at
+    ~/.config/nomad/dispatch-token). The dispatcher refuses every route but /health without
+    it. Candidates cover the container mounts and the host; '' means the call will 401."""
+    env = os.environ.get("NOMAD_DISPATCH_TOKEN")
+    if env:
+        return env
+    for cand in ("/term-secret/dispatch-token", "/host/.config/nomad/dispatch-token",
+                 os.path.expanduser("~/.config/nomad/dispatch-token")):
+        try:
+            return open(cand).read().strip()
+        except Exception:
+            continue
+    return ""
+
+
+DISPATCH_TOKEN = _dispatch_token()
+
+
 def _dispatch(project, task, mode):
     try:
         r = requests.post(f"{DISPATCH}/dispatch",
                           json={"project": project, "task": task, "mode": mode},
-                          timeout=TIMEOUT)
+                          headers={"X-Nomad-Token": DISPATCH_TOKEN}, timeout=TIMEOUT)
         return r.json()
     except requests.RequestException as e:
         return {"ok": False, "error": f"dispatcher unreachable: {e}"}
@@ -53,7 +72,8 @@ def dispatch_build(project: str, task: str) -> str:
 def list_dev_projects() -> str:
     """List the repos the dev team can build in (NOMAD-marked projects)."""
     try:
-        r = requests.get(f"{DISPATCH}/projects", timeout=20)
+        r = requests.get(f"{DISPATCH}/projects",
+                         headers={"X-Nomad-Token": DISPATCH_TOKEN}, timeout=20)
         return "Buildable projects: " + ", ".join(r.json().get("projects", []))
     except requests.RequestException as e:
         return f"Could not reach dispatcher: {e}"

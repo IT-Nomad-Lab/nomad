@@ -1,0 +1,13 @@
+"No one wants to waste time training a junior. There is too much pressure to deliver." It's true. And then your seniors leave.
+
+I have heard that sentence in hiring discussions more than once, and I get where it comes from. The roadmap does not wait for someone to learn.
+
+My answer is always the same. Your mid-level and senior engineers will leave eventually, because people do. When they go, what do you have left? If nobody less experienced was given the chance to grow into those seats, the answer is an empty bench and a recruiter invoice.
+
+Fewer companies seem to be asking that question. Indeed's Q1 2026 data puts entry-level roles at 4.5% of US software development postings, against 69.3% for senior. And most of the growth in senior postings came at the expense of mid-level ones, the rung where juniors turn into seniors.
+
+AI tools have handed the old excuse a new argument. I see it every time I open LinkedIn or a job board: fewer junior positions than there used to be.
+
+Hiring only seniors is not a talent strategy. It is spending someone else's.
+
+Every senior you are trying to hire today was once a junior someone made time for.

@@ -1,0 +1,9 @@
+Everyone wants to talk about model selection. Very few people want to talk about who owns the customer table.
+
+I have now watched four organizations spend serious money on machine learning while their underlying data ownership stayed exactly as ambiguous as it was before. Every one of them shipped something. Every one of them discovered, months later, that the training set contained records nobody could explain.
+
+The pattern is consistent. Modeling work is visible, exciting, and easy to staff. Ownership work is invisible, tedious, and requires someone with organizational authority to say no. So the first happens and the second does not.
+
+There is a simple test. Pick your three most important tables and ask who is accountable when they are wrong. If the answer takes more than one sentence, or if it involves a team rather than a person, you do not have ownership. You have a shared hope.
+
+Fix that before you approve the next model. It costs less than the rework.

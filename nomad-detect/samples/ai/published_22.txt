@@ -1,0 +1,9 @@
+I used to call my data engineers Data Engineers on Steroids. Not because they specialized. Because every one of them could run the whole system.
+
+The advice this year is the opposite. Split the team. One person for ingestion, one for ETL, one for quality. I understand the appeal. I just built it the other way, on purpose.
+
+We were a small team. No one can know everything, but everyone could know a lot. So we shared the work, collaborated across the same feature, and rotated who owned what. Slowly, every engineer understood the whole pipeline, not just their corner of it. It was hard at first. It paid off every time someone got sick or left. There was always someone who could step in. No single point of failure. No "not my table."
+
+The honest part is that AI might change this. A generalist with good tools can now cover ground that used to need three specialists. For the first time, specializing the work without creating fragile silos looks possible. I am watching it closely.
+
+But I keep coming back to the same line. Specialize the tasks all you want. Do not specialize the understanding. The tools got better. The reason to know the whole system did not go away.

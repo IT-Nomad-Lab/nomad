@@ -1,0 +1,71 @@
+Every migration produces a list. Somewhere on that list is a row with no name next to it.
+
+That row is not an administrative gap to clean up later. It is the most useful thing the discovery process gave you, and almost every organisation reads it as noise. Nobody owns this table. Nobody owns this job. Nobody owns the transformation tool that has been running since before the current team was hired. The reflex is to write "TBD" in the owner column and keep moving, because the migration has a date and the owner question has no obvious answer.
+
+Then the default fires. Anything without an owner gets migrated, because nobody has the standing to say delete. That is where lift and shift actually comes from. Not laziness, and not bad engineering. It comes from an estate full of assets that no one is authorised to kill.
+
+I have written before that you cannot govern what you have not found. That is still true, and it is only the first half. Discovery hands you a list of systems. A migration is a list of decisions. And a decision needs a name attached to it.
+
+**What an owner actually is**
+
+Most catalogs have an owner field. Most owner fields are wrong, and the reason is that the field records who built the thing, or who last touched it, or which team's name was in the ticket. None of those is ownership.
+
+An owner is the person who can answer four questions and make the answer stick.
+
+What does this mean. Not the column type, the definition. What counts as an active customer, what a completed order is, which currency the number is in, what the row represents in the real world.
+
+Is it right, and who gets the call when it is not. Someone has to be woken up when the figure on the board deck is wrong. If that is whoever happens to notice, you do not have an owner.
+
+Who is allowed to see it. Access is a decision, not a ticket queue. Someone has to be accountable for granting it and for refusing.
+
+Can it be changed, retired or deleted, and on whose authority. This is the one that decides migrations, and it is the one almost nobody has assigned.
+
+If those four have four different answers, you have a contact list. If they have no answer, you have an orphan. The test I use is simple. Can this person say no, and does the no hold. Ownership without the authority to refuse is decoration.
+
+**Providers and consumers, and why the distinction does the work**
+
+The single most expensive mistake I see in data organisations is handing ownership of everything to the data team, on the logic that the data team touches everything.
+
+Data engineering owns the plumbing. It does not own the water.
+
+Split the estate into three roles and most of the confusion resolves itself.
+
+A data provider is the team whose system creates the data. They own its meaning and its contract. What the fields mean, when the schema changes, how fresh it is, what quality they guarantee, and how much notice they give before they break someone. The application team running the order system is a data provider whether or not anyone has ever told them so. That is the part worth sitting with. Providers usually do not know they are providers, and they are being held to a contract nobody has shown them.
+
+A data consumer is the team reading it and building on top. Their ownership obligation is smaller but real: declare the dependency. An unregistered consumer is invisible, and an invisible consumer is the reason migrations break things nobody predicted. Consumers do not get a vote on the definition. They get the right to be told before it changes, and they only earn that right by registering.
+
+The platform team owns movement and reliability. That the data lands, on time, complete, unaltered. Not whether it is correct at source, and not what it means.
+
+Once those three are separate, the routing problem solves itself. When a number is wrong, there are only three real questions. Is it late, is it wrong at source, or is it defined wrong. Late is the platform. Wrong at source is the provider. Defined wrong is the business owner. Most organisations escalate all three to data engineering, which is precisely why data engineering is permanently on fire and why nobody upstream ever changes their behaviour.
+
+**One pipeline, six owners**
+
+Take a shape almost every company has. An order system feeds a nightly extract. The extract lands in a raw table. A transformation job turns that into a curated orders table with business logic in it. An aggregate feeds a finance dashboard. A churn model reads the curated table on the side.
+
+Five hops. Here is who owns what, and why.
+
+The order system and the meaning of an order belong to the application team that runs it. They are the provider. They own the definition of order status, they own the schema, and they own giving notice before they change it. Not the data team. The data team can describe the field. Only the application team can say what it means and whether the meaning just changed.
+
+The extract job and the raw landing table belong to the platform team. Their commitment is narrow and absolute: it arrives, on schedule, complete, and unmodified. Raw stays raw. The moment someone corrects data in the landing zone, ownership blurs and you can no longer tell whether a discrepancy came from the source or from the fix.
+
+The curated orders table is the contested one, and it is contested because two different things live in the same object. The rule that says a completed order excludes returns and cancellations is a business rule. The code implementing that rule is engineering work. So it gets two names. The business domain owner owns the rule. The platform team owns that the code implements the rule correctly. Collapse those into one name and you get the failure everyone recognises: a definition quietly set by whichever engineer wrote the WHERE clause, defended for years because it is in production.
+
+The finance aggregate belongs to finance. This is the hop people miss. Finance started as a consumer, but the moment they define the revenue metric, they become a provider to everyone downstream of them. Consumers who define things turn into providers. If that transition is never acknowledged, you end up with a metric the whole company quotes and nobody maintains.
+
+The churn model is a registered consumer. It owns its own dependency and nothing else. It gets notified when the curated definition changes. It does not get to veto the change.
+
+Now run a real event through it. The order system adds a status value. The provider gives notice. The platform assesses impact. Registered consumers get told, and the churn model owner decides whether the model needs retraining. Every step has a name. Nothing routes through a group chat.
+
+Now run the migration question through the same map. Does the raw table move? Platform decides, because it can be re-derived from the source. Does the curated table move, and with which definition? The domain owner decides, and that is a business conversation, not a technical one. Does the finance aggregate move? Finance decides. Does the churn model move? Its owner decides, and if that person left two years ago you have just found an orphan, in the one week of the year when someone is actually looking.
+
+**What to do about the orphans**
+
+You will not get to full coverage. Anyone promising a fully owned estate is selling something. So the question is not how to eliminate orphans. It is what happens to an asset when nobody claims it, and that has to be decided in writing before the migration starts, not argued during it.
+
+A default that works: if an asset has no owner and no reads in a stated window, it is archived on a stated date and deleted on a later one, and the announcement of that is the last chance for someone to claim it. If it has no owner but does have active reads, then whoever is reading it inherits ownership or loses access. Those are not sophisticated policies. They just have to exist before the pressure arrives, because a default written under deadline is always the same default, and it is always migrate everything.
+
+The other half is how you get owners at all, and it is not a spreadsheet campaign. Ownership drives get signatures, not accountability. Attach ownership to the moment of change instead. Nothing new ships without a named owner. Nothing moves in a migration without one. The migration is the only forcing function most organisations ever get, which is why it is worth using rather than surviving.
+
+And expect the negotiation. I have run migrations off legacy processes that had been running for years, and the architecture was never what decided the timing. Every party at the table had something to protect, and about half the time their reason for slowing us down was a good one. Assigning ownership is the same argument, held earlier and in the open. Someone is being handed responsibility for a thing they did not build and do not want. That conversation does not get easier by being deferred, it just gets more expensive.
+
+"Nobody owns it" is not a blank in your inventory. It is the inventory telling you the truth. Everything else on that list is a system. That row is a decision no one in your company is currently able to make.

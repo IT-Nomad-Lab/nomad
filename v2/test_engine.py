@@ -9,7 +9,7 @@ import json
 import sys
 
 from nocodb import NocoDB
-from engine import Engine
+from engine import Engine, proposal_hash
 
 db = NocoDB()
 eng = Engine(db)
@@ -42,7 +42,7 @@ a = eng.start_run("Send a short welcome note to the new operator")
 track(a)
 ok &= check("gate pauses (status awaiting-approval)", a["status"] == "awaiting-approval")
 ok &= check("no outbox row before approval (gate holds)", len(outbox_for(a["run_id"])) == 0)
-ra = eng.resume_run(a["run_id"], "approved")
+ra = eng.resume_run(a["run_id"], "approved", proposal_hash(a["proposal"]))
 ob = outbox_for(a["run_id"]); ep = episodic_for(a["run_id"])
 created["outbox"] += [r["Id"] for r in ob]; created["episodic"] += [r["Id"] for r in ep]
 ok &= check("exactly one outbox row after approval", len(ob) == 1)

@@ -15,7 +15,9 @@ from mcp.server.fastmcp import FastMCP
 
 # Friendly role aliases → installed Ollama tags (mirrors the LiteLLM aliases). Pass a full tag
 # (anything with a ':') to use it directly; an unknown alias falls back to the first chat model.
-ALIASES = {"fast": "llama3.1:8b", "private": "deepseek-r1:32b", "code": "qwen2.5-coder:32b"}
+ALIASES = {"fast": "llama3.1:8b", "private": "qwen3.6:35b-a3b", "code": "qwen2.5-coder:32b"}
+# Per-model request overrides: qwen3.6 fits fully on the GPU only at 8k ctx, and thinking is off.
+_MODEL_OPTS = {"qwen3.6:35b-a3b": ({"num_ctx": 8192}, {"think": False})}
 
 _CANDIDATES = [c for c in (
     os.environ.get("OLLAMA_URL"),
@@ -65,14 +67,16 @@ def local_llm(prompt: str, system: str = "", model: str = "fast", max_tokens: in
 
     Use this to offload cheap, bulk, or PRIVATE sub-tasks you don't want to send to the cloud:
     summarizing, classifying, drafting, extracting, quick reasoning over local/sensitive data.
-    `model` is a role alias — 'fast' (llama3.1:8b, always-on workhorse), 'private' (deepseek-r1:32b,
+    `model` is a role alias — 'fast' (llama3.1:8b, always-on workhorse), 'private' (qwen3.6:35b-a3b,
     local reasoning), 'code' (qwen2.5-coder:32b) — or a full Ollama tag. Returns the text."""
     messages = ([{"role": "system", "content": system}] if system else []) + \
                [{"role": "user", "content": prompt}]
+    tag = _resolve(model)
+    opts, extra = _MODEL_OPTS.get(tag, ({}, {}))
     try:
         r = requests.post(_ollama() + "/api/chat", timeout=600, json={
-            "model": _resolve(model), "messages": messages, "stream": False,
-            "options": {"num_predict": max_tokens}})
+            "model": tag, "messages": messages, "stream": False,
+            "options": {"num_predict": max_tokens, **opts}, **extra})
         r.raise_for_status()
         return (r.json().get("message", {}) or {}).get("content", "").strip() or "[empty response]"
     except Exception as e:

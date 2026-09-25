@@ -104,9 +104,17 @@ class NocoDB:
         rows = self._req("GET", path).get("list", [])
         return rows[0] if rows else None
 
-    def list(self, table, limit=50):
+    def list(self, table, limit=50, where=None, sort=None):
+        """Records from `table`. NocoDB defaults to oldest-first, so a caller that wants the
+        newest N must say so with sort="-Id" — otherwise `limit` silently drops exactly the
+        rows it cares about."""
         self._auth()
-        return self._req("GET", f"/api/v2/tables/{self.table_id(table)}/records?limit={limit}").get("list", [])
+        path = f"/api/v2/tables/{self.table_id(table)}/records?limit={limit}"
+        if where:
+            path += f"&where={where}"          # NocoDB filter syntax, e.g. "(status,eq,new)"
+        if sort:
+            path += f"&sort={sort}"            # "-Id" = newest first
+        return self._req("GET", path).get("list", [])
 
     def delete(self, table, rid):
         self._auth()

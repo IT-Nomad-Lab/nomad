@@ -86,11 +86,14 @@ PORT = int(os.environ.get("NOMAD_VOICE_PORT", "8200"))
 SYSTEM = os.environ.get("NOMAD_VOICE_SYSTEM",
     "You are NOMAD, a calm, capable voice assistant. This is a spoken conversation, so keep replies "
     "short and natural — no lists, markdown, or emoji. Answer directly. It's fine to be interrupted.")
-# Route replies through NOMAD's brain (console /api/chat: memory + intent router + human gate).
-# host-native voice reaches the host-bound console at 127.0.0.1:1701. Set NOMAD_VOICE_BRAIN=0 to
-# bypass and talk straight to a LiteLLM model.
+# Route replies through NOMAD's brain (/api/chat: memory + live pipeline state + the human gate).
+# This is the v2 engine now, not the v1 console. Both speak the same endpoint, because the engine
+# grew a console-shaped /api/chat for exactly this, and the engine is the one that will still be
+# here: pointing voice at the console made a spoken conversation a v1 dependency. Host-native voice
+# reaches the host-bound engine at 127.0.0.1:8099; set NOMAD_BRAIN_URL back to http://127.0.0.1:1701
+# to fall back to the console. NOMAD_VOICE_BRAIN=0 bypasses both and talks straight to a model.
 USE_BRAIN = os.environ.get("NOMAD_VOICE_BRAIN", "1").lower() not in ("0", "false", "no", "off")
-BRAIN_URL = os.environ.get("NOMAD_BRAIN_URL", "http://127.0.0.1:1701").rstrip("/")
+BRAIN_URL = os.environ.get("NOMAD_BRAIN_URL", "http://127.0.0.1:8099").rstrip("/")
 # who may open the real-time client cross-origin (the LCARS console embeds it). "*" = any localhost origin.
 CORS_ORIGINS = [o.strip() for o in os.environ.get("NOMAD_VOICE_CORS", "*").split(",") if o.strip()]
 
