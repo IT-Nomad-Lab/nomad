@@ -23,6 +23,18 @@
       "args": [
         "mcp-local/nomad_diagram.py"
       ]
+    },
+    "nomad-detect": {
+      "command": "mcp-local/.venv/bin/python",
+      "args": [
+        "mcp-local/nomad_detect.py"
+      ]
+    },
+    "nomad-audio": {
+      "command": "mcp-local/.venv/bin/python",
+      "args": [
+        "mcp-local/nomad_audio.py"
+      ]
     }
   }
 }
