@@ -21,6 +21,9 @@ RUN pip install --no-cache-dir "mcp>=1.0,<2" "requests>=2.31" "psycopg2-binary>=
                   # at which point the tests quietly stop being runnable, which is how a suite dies.
 
 COPY *.py ./
+# Not run from in here. It ships so test_auth.py can check it: the suite runs inside this
+# image, and a test that reads a file the image does not have is a skip that never fires.
+COPY publish.sh ./
 COPY skills ./skills
 COPY static ./static
 

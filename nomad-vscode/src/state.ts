@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import * as path from "path";
-import { Api, Approval, ProjectDetail, ProjectGoal } from "./api";
+import { Api, Approval, ProjectDetail, ProjectGoal, Service } from "./api";
 import { GitState, gitState } from "./git";
 
 const MARKERS = ["Nomad.md", "nomad.md", "NOMAD.md"];
@@ -16,7 +16,12 @@ export interface NomadState {
   goal?: ProjectGoal;       // matched mission-control goal (if any)
   detail?: ProjectDetail;   // milestones + tasks (if a plan exists)
   approvals: Approval[];    // global pending gate (few; shown for quick action)
-  services: Array<{ name: string; up: boolean; ms: number }>;
+  services: Service[];
+  /** nomad-watch's readings are too old to believe. Kept separate from an empty list, because
+   *  "nothing to report" and "nobody has checked recently" look identical in a tree and mean
+   *  opposite things. */
+  servicesStale: boolean;
+  servicesNote?: string;
   loading: boolean;
 }
 
@@ -61,7 +66,7 @@ export async function collect(api: Api): Promise<NomadState> {
   const root = folder?.uri.fsPath;
   const st: NomadState = {
     root, name: root ? path.basename(root) : "—",
-    hasMarker: false, git: { isRepo: false }, approvals: [], services: [], loading: false,
+    hasMarker: false, git: { isRepo: false }, approvals: [], services: [], servicesStale: false, loading: false,
   };
   if (!root) return st;
 
@@ -81,7 +86,9 @@ export async function collect(api: Api): Promise<NomadState> {
   ]);
   st.git = git;
   st.approvals = approvalsResp.approvals || [];
-  st.services = services || [];
+  st.services = services.services;
+  st.servicesStale = services.stale;
+  st.servicesNote = services.error;
 
   st.goal = matchGoal(st.name, goalsResp.projects || []);
   if (st.goal) st.detail = await api.projectStatus(st.goal.goal_id);

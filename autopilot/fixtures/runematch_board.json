@@ -1,0 +1,3718 @@
+{
+ "recorded": "2026-09-28, nomad-pm board runematch, read-only (autopilot/tasks.py PMClient); descriptions kept only for the tasks whose description or comments decide selection",
+ "board": "runematch",
+ "lane_key": "customField4",
+ "closed_statuses": [
+  "Done",
+  "Done",
+  "Won't do",
+  "Duplicate"
+ ],
+ "work_packages": [
+  {
+   "id": 621,
+   "subject": "P1: the chain that ships, then G1",
+   "updatedAt": "2026-09-25T20:31:21.496Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/4",
+     "title": "Feature"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/7",
+     "title": "In Progress"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/621",
+     "title": "P1: the chain that ships, then G1"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/620",
+     "title": "RuneMatch demo"
+    }
+   }
+  },
+  {
+   "id": 622,
+   "subject": "Chain scoring calibration",
+   "updatedAt": "2026-09-25T20:31:21.824Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/5",
+     "title": "Epic"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/7",
+     "title": "In Progress"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/622",
+     "title": "Chain scoring calibration"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/621",
+     "title": "P1: the chain that ships, then G1"
+    }
+   }
+  },
+  {
+   "id": 625,
+   "subject": "Remove the legacy swap path after G1",
+   "updatedAt": "2026-09-25T20:31:22.744Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/27",
+     "title": "Blocked"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/625",
+     "title": "Remove the legacy swap path after G1"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/622",
+     "title": "Chain scoring calibration"
+    }
+   }
+  },
+  {
+   "id": 626,
+   "subject": "G1 stranger playtest (2D overworld)",
+   "updatedAt": "2026-09-25T20:31:22.942Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/5",
+     "title": "Epic"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/626",
+     "title": "G1 stranger playtest (2D overworld)"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/621",
+     "title": "P1: the chain that ships, then G1"
+    }
+   }
+  },
+  {
+   "id": 627,
+   "subject": "TUT-SETTINGS (S)",
+   "updatedAt": "2026-09-26T03:28:46.756Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/26",
+     "title": "In Review"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/627",
+     "title": "TUT-SETTINGS (S)"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/626",
+     "title": "G1 stranger playtest (2D overworld)"
+    }
+   }
+  },
+  {
+   "id": 628,
+   "subject": "Windows standalone playtest build",
+   "updatedAt": "2026-09-25T20:31:23.450Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/27",
+     "title": "Blocked"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/628",
+     "title": "Windows standalone playtest build"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/626",
+     "title": "G1 stranger playtest (2D overworld)"
+    }
+   }
+  },
+  {
+   "id": 630,
+   "subject": "Recruit ~10 strangers for observed PC session",
+   "updatedAt": "2026-09-25T20:31:23.871Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/24",
+     "title": "Ready"
+    },
+    "customField4": {
+     "title": "manager",
+     "href": "/api/v3/custom_options/12"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/630",
+     "title": "Recruit ~10 strangers for observed PC session"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/626",
+     "title": "G1 stranger playtest (2D overworld)"
+    }
+   }
+  },
+  {
+   "id": 631,
+   "subject": "Run G1: title, tutorial, 3 circles; score against 11a",
+   "updatedAt": "2026-09-25T22:53:10.976Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/9",
+     "title": "High"
+    },
+    "status": {
+     "href": "/api/v3/statuses/27",
+     "title": "Blocked"
+    },
+    "customField4": {
+     "title": "research",
+     "href": "/api/v3/custom_options/8"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/631",
+     "title": "Run G1: title, tutorial, 3 circles; score against 11a"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/626",
+     "title": "G1 stranger playtest (2D overworld)"
+    }
+   }
+  },
+  {
+   "id": 632,
+   "subject": "P2: the 3D world (spike/3d-overworld)",
+   "updatedAt": "2026-09-25T20:31:24.553Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/4",
+     "title": "Feature"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/7",
+     "title": "In Progress"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/632",
+     "title": "P2: the 3D world (spike/3d-overworld)"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/620",
+     "title": "RuneMatch demo"
+    }
+   }
+  },
+  {
+   "id": 633,
+   "subject": "3D core systems",
+   "updatedAt": "2026-09-25T20:31:24.907Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/5",
+     "title": "Epic"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/7",
+     "title": "In Progress"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/633",
+     "title": "3D core systems"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/632",
+     "title": "P2: the 3D world (spike/3d-overworld)"
+    }
+   }
+  },
+  {
+   "id": 635,
+   "subject": "3D routing + WorldInteractions service",
+   "updatedAt": "2026-09-26T02:20:09.856Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/26",
+     "title": "In Review"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/635",
+     "title": "3D routing + WorldInteractions service"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/633",
+     "title": "3D core systems"
+    }
+   }
+  },
+  {
+   "id": 636,
+   "subject": "3D save/load",
+   "updatedAt": "2026-09-26T02:20:09.925Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/26",
+     "title": "In Review"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/636",
+     "title": "3D save/load"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/633",
+     "title": "3D core systems"
+    }
+   }
+  },
+  {
+   "id": 638,
+   "subject": "3D NPCs",
+   "updatedAt": "2026-09-26T03:19:03.079Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/26",
+     "title": "In Review"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/638",
+     "title": "3D NPCs"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/633",
+     "title": "3D core systems"
+    }
+   }
+  },
+  {
+   "id": 639,
+   "subject": "3D interiors",
+   "updatedAt": "2026-09-26T15:32:51.910Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/26",
+     "title": "In Review"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/639",
+     "title": "3D interiors"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/633",
+     "title": "3D core systems"
+    }
+   }
+  },
+  {
+   "id": 640,
+   "subject": "3D camera",
+   "updatedAt": "2026-09-26T16:03:53.338Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/26",
+     "title": "In Review"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/640",
+     "title": "3D camera"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/633",
+     "title": "3D core systems"
+    }
+   }
+  },
+  {
+   "id": 641,
+   "subject": "World-to-board seam",
+   "updatedAt": "2026-09-26T15:31:40.069Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/26",
+     "title": "In Review"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/641",
+     "title": "World-to-board seam"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/633",
+     "title": "3D core systems"
+    }
+   }
+  },
+  {
+   "id": 642,
+   "subject": "PC input for the 3D world",
+   "updatedAt": "2026-09-26T01:41:31.482Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/26",
+     "title": "In Review"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/642",
+     "title": "PC input for the 3D world"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/633",
+     "title": "3D core systems"
+    }
+   }
+  },
+  {
+   "id": 643,
+   "subject": "Pay spike debt N2, N4-N7",
+   "updatedAt": "2026-09-26T14:59:01.689Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/26",
+     "title": "In Review"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/643",
+     "title": "Pay spike debt N2, N4-N7"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/633",
+     "title": "3D core systems"
+    }
+   }
+  },
+  {
+   "id": 644,
+   "subject": "3D assets, performance and cutover",
+   "updatedAt": "2026-09-25T20:31:27.114Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/5",
+     "title": "Epic"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/644",
+     "title": "3D assets, performance and cutover"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/632",
+     "title": "P2: the 3D world (spike/3d-overworld)"
+    }
+   }
+  },
+  {
+   "id": 645,
+   "subject": "VOXEL-ASSETS + VOXEL-AMEND",
+   "updatedAt": "2026-09-26T15:30:43.333Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/26",
+     "title": "In Review"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/645",
+     "title": "VOXEL-ASSETS + VOXEL-AMEND"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/644",
+     "title": "3D assets, performance and cutover"
+    }
+   }
+  },
+  {
+   "id": 646,
+   "subject": "Shadow budget",
+   "updatedAt": "2026-09-26T15:43:39.057Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/26",
+     "title": "In Review"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/646",
+     "title": "Shadow budget"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/644",
+     "title": "3D assets, performance and cutover"
+    }
+   }
+  },
+  {
+   "id": 647,
+   "subject": "3D capture tooling",
+   "updatedAt": "2026-09-26T18:09:27.601Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/25",
+     "title": "Awaiting approval"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/647",
+     "title": "3D capture tooling"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/644",
+     "title": "3D assets, performance and cutover"
+    }
+   }
+  },
+  {
+   "id": 648,
+   "subject": "PC performance pass",
+   "updatedAt": "2026-09-28T15:25:17.656Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/27",
+     "title": "Blocked"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/648",
+     "title": "PC performance pass"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/644",
+     "title": "3D assets, performance and cutover"
+    }
+   }
+  },
+  {
+   "id": 649,
+   "subject": "Switch the game to the 3D world",
+   "updatedAt": "2026-09-25T20:31:28.247Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/27",
+     "title": "Blocked"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/649",
+     "title": "Switch the game to the 3D world"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/644",
+     "title": "3D assets, performance and cutover"
+    }
+   }
+  },
+  {
+   "id": 650,
+   "subject": "Delete the 2D overworld",
+   "updatedAt": "2026-09-25T20:31:28.574Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/27",
+     "title": "Blocked"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/650",
+     "title": "Delete the 2D overworld"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/644",
+     "title": "3D assets, performance and cutover"
+    }
+   }
+  },
+  {
+   "id": 651,
+   "subject": "Demo content P3-P7",
+   "updatedAt": "2026-09-25T20:31:28.766Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/4",
+     "title": "Feature"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/651",
+     "title": "Demo content P3-P7"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/620",
+     "title": "RuneMatch demo"
+    }
+   }
+  },
+  {
+   "id": 652,
+   "subject": "P3: Wanderer, guides, peoples, canon copy",
+   "updatedAt": "2026-09-27T09:35:18.429Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/5",
+     "title": "Epic"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/652",
+     "title": "P3: Wanderer, guides, peoples, canon copy"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/651",
+     "title": "Demo content P3-P7"
+    }
+   }
+  },
+  {
+   "id": 653,
+   "subject": "WANDERER-PURGE",
+   "updatedAt": "2026-09-25T20:31:29.151Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/653",
+     "title": "WANDERER-PURGE"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/652",
+     "title": "P3: Wanderer, guides, peoples, canon copy"
+    }
+   }
+  },
+  {
+   "id": 654,
+   "subject": "WANDERER-FLOW, WANDERER-AFFINITY, WANDERER-HUD",
+   "updatedAt": "2026-09-25T20:31:29.335Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/654",
+     "title": "WANDERER-FLOW, WANDERER-AFFINITY, WANDERER-HUD"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/652",
+     "title": "P3: Wanderer, guides, peoples, canon copy"
+    }
+   }
+  },
+  {
+   "id": 655,
+   "subject": "DEMO-COPY: canon demo copy",
+   "updatedAt": "2026-09-25T20:31:29.523Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "comms",
+     "href": "/api/v3/custom_options/7"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/655",
+     "title": "DEMO-COPY: canon demo copy"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/652",
+     "title": "P3: Wanderer, guides, peoples, canon copy"
+    }
+   }
+  },
+  {
+   "id": 656,
+   "subject": "GUIDE-MIGRATE + AREA-GUIDE",
+   "updatedAt": "2026-09-26T01:59:21.845Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/656",
+     "title": "GUIDE-MIGRATE + AREA-GUIDE"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/652",
+     "title": "P3: Wanderer, guides, peoples, canon copy"
+    }
+   }
+  },
+  {
+   "id": 657,
+   "subject": "NPC-RACES + AREA-PEOPLES",
+   "updatedAt": "2026-09-26T01:59:21.754Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/657",
+     "title": "NPC-RACES + AREA-PEOPLES"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/652",
+     "title": "P3: Wanderer, guides, peoples, canon copy"
+    }
+   }
+  },
+  {
+   "id": 658,
+   "subject": "WANDERER-ART",
+   "updatedAt": "2026-09-25T20:31:30.145Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/658",
+     "title": "WANDERER-ART"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/652",
+     "title": "P3: Wanderer, guides, peoples, canon copy"
+    }
+   }
+  },
+  {
+   "id": 659,
+   "subject": "P4: MG-FRAME and the two minigames",
+   "updatedAt": "2026-09-25T20:31:30.347Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/5",
+     "title": "Epic"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/659",
+     "title": "P4: MG-FRAME and the two minigames"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/651",
+     "title": "Demo content P3-P7"
+    }
+   }
+  },
+  {
+   "id": 660,
+   "subject": "MG-FRAME minigame host (L)",
+   "updatedAt": "2026-09-25T20:31:30.536Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/660",
+     "title": "MG-FRAME minigame host (L)"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/659",
+     "title": "P4: MG-FRAME and the two minigames"
+    }
+   }
+  },
+  {
+   "id": 661,
+   "subject": "MG-MEMORY + MG-SHELLS minigames",
+   "updatedAt": "2026-09-25T20:31:30.724Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/661",
+     "title": "MG-MEMORY + MG-SHELLS minigames"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/659",
+     "title": "P4: MG-FRAME and the two minigames"
+    }
+   }
+  },
+  {
+   "id": 662,
+   "subject": "MG-FLIP-EV, TOTEM-TELL, MG-PAYOUT-EVIDENCE",
+   "updatedAt": "2026-09-25T20:31:30.911Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/662",
+     "title": "MG-FLIP-EV, TOTEM-TELL, MG-PAYOUT-EVIDENCE"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/659",
+     "title": "P4: MG-FRAME and the two minigames"
+    }
+   }
+  },
+  {
+   "id": 663,
+   "subject": "P5: specialization and abilities",
+   "updatedAt": "2026-09-25T20:31:31.111Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/5",
+     "title": "Epic"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/663",
+     "title": "P5: specialization and abilities"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/651",
+     "title": "Demo content P3-P7"
+    }
+   }
+  },
+  {
+   "id": 664,
+   "subject": "SPEC-LEAN",
+   "updatedAt": "2026-09-25T20:31:31.293Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/664",
+     "title": "SPEC-LEAN"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/663",
+     "title": "P5: specialization and abilities"
+    }
+   }
+  },
+  {
+   "id": 665,
+   "subject": "SPEC-CHOICE + SPEC-CHOICE-COPY",
+   "updatedAt": "2026-09-25T20:31:31.478Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/665",
+     "title": "SPEC-CHOICE + SPEC-CHOICE-COPY"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/663",
+     "title": "P5: specialization and abilities"
+    }
+   }
+  },
+  {
+   "id": 666,
+   "subject": "SPEC-SHRINE + SPEC-COMMIT",
+   "updatedAt": "2026-09-25T20:31:31.674Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/666",
+     "title": "SPEC-SHRINE + SPEC-COMMIT"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/663",
+     "title": "P5: specialization and abilities"
+    }
+   }
+  },
+  {
+   "id": 667,
+   "subject": "ABL-BOARD + ABL-MG abilities",
+   "updatedAt": "2026-09-25T20:31:31.856Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/667",
+     "title": "ABL-BOARD + ABL-MG abilities"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/663",
+     "title": "P5: specialization and abilities"
+    }
+   }
+  },
+  {
+   "id": 668,
+   "subject": "SPEC-ABILITY-WORLD + AREA-OBST",
+   "updatedAt": "2026-09-25T20:31:32.050Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/668",
+     "title": "SPEC-ABILITY-WORLD + AREA-OBST"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/663",
+     "title": "P5: specialization and abilities"
+    }
+   }
+  },
+  {
+   "id": 669,
+   "subject": "P6: teasers and the house",
+   "updatedAt": "2026-09-25T20:31:32.275Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/5",
+     "title": "Epic"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/669",
+     "title": "P6: teasers and the house"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/651",
+     "title": "Demo content P3-P7"
+    }
+   }
+  },
+  {
+   "id": 670,
+   "subject": "DEMO-TEASE-KIT + the 7 DEMO-TEASE beats",
+   "updatedAt": "2026-09-25T20:31:32.516Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/670",
+     "title": "DEMO-TEASE-KIT + the 7 DEMO-TEASE beats"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/669",
+     "title": "P6: teasers and the house"
+    }
+   }
+  },
+  {
+   "id": 671,
+   "subject": "HOUSE-GIVE, AREA-TEASE, BankRunes guard",
+   "updatedAt": "2026-09-25T20:31:32.731Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/671",
+     "title": "HOUSE-GIVE, AREA-TEASE, BankRunes guard"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/669",
+     "title": "P6: teasers and the house"
+    }
+   }
+  },
+  {
+   "id": 672,
+   "subject": "P7: demo content, tuning, end",
+   "updatedAt": "2026-09-25T20:31:32.926Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/5",
+     "title": "Epic"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/672",
+     "title": "P7: demo content, tuning, end"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/651",
+     "title": "Demo content P3-P7"
+    }
+   }
+  },
+  {
+   "id": 673,
+   "subject": "DEMO-BOSS: the Warden + boss/minion tuning",
+   "updatedAt": "2026-09-25T20:31:33.127Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/673",
+     "title": "DEMO-BOSS: the Warden + boss/minion tuning"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/672",
+     "title": "P7: demo content, tuning, end"
+    }
+   }
+  },
+  {
+   "id": 674,
+   "subject": "CIRC-TUNE Ember Vale + DEMO-TUNE",
+   "updatedAt": "2026-09-25T20:31:33.319Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/674",
+     "title": "CIRC-TUNE Ember Vale + DEMO-TUNE"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/672",
+     "title": "P7: demo content, tuning, end"
+    }
+   }
+  },
+  {
+   "id": 675,
+   "subject": "DEMO-FENCE + DEMO-BUILD",
+   "updatedAt": "2026-09-25T20:31:33.501Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/675",
+     "title": "DEMO-FENCE + DEMO-BUILD"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/672",
+     "title": "P7: demo content, tuning, end"
+    }
+   }
+  },
+  {
+   "id": 676,
+   "subject": "DEMO-EPILOGUE, DEMO-END, WELL-TEXT, LIB-BOOKS-EV",
+   "updatedAt": "2026-09-25T20:31:33.702Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/676",
+     "title": "DEMO-EPILOGUE, DEMO-END, WELL-TEXT, LIB-BOOKS-EV"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/672",
+     "title": "P7: demo content, tuning, end"
+    }
+   }
+  },
+  {
+   "id": 677,
+   "subject": "Pending Josias design decisions",
+   "updatedAt": "2026-09-25T20:31:34.166Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/5",
+     "title": "Epic"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/27",
+     "title": "Blocked"
+    },
+    "customField4": {
+     "title": "manager",
+     "href": "/api/v3/custom_options/12"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/677",
+     "title": "Pending Josias design decisions"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/651",
+     "title": "Demo content P3-P7"
+    }
+   }
+  },
+  {
+   "id": 683,
+   "subject": "DROPS-2: consumables enabling special moves",
+   "updatedAt": "2026-09-25T20:31:35.379Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "manager",
+     "href": "/api/v3/custom_options/12"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/683",
+     "title": "DROPS-2: consumables enabling special moves"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/677",
+     "title": "Pending Josias design decisions"
+    }
+   }
+  },
+  {
+   "id": 684,
+   "subject": "P8-P10: polish, playtest and ship the demo",
+   "updatedAt": "2026-09-25T20:31:35.603Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/4",
+     "title": "Feature"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/684",
+     "title": "P8-P10: polish, playtest and ship the demo"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/620",
+     "title": "RuneMatch demo"
+    }
+   }
+  },
+  {
+   "id": 685,
+   "subject": "P8: art, audio, polish",
+   "updatedAt": "2026-09-25T20:31:35.818Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/5",
+     "title": "Epic"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/685",
+     "title": "P8: art, audio, polish"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/684",
+     "title": "P8-P10: polish, playtest and ship the demo"
+    }
+   }
+  },
+  {
+   "id": 686,
+   "subject": "Audio pass (23 clips)",
+   "updatedAt": "2026-09-25T20:31:36.017Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/686",
+     "title": "Audio pass (23 clips)"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/685",
+     "title": "P8: art, audio, polish"
+    }
+   }
+  },
+  {
+   "id": 687,
+   "subject": "Confirm Josias' voxel art pipeline is ready and deliver",
+   "updatedAt": "2026-09-26T14:04:51.659Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/27",
+     "title": "Blocked"
+    },
+    "customField4": {
+     "title": "manager",
+     "href": "/api/v3/custom_options/12"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/687",
+     "title": "Confirm Josias' voxel art pipeline is ready and deliver"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/685",
+     "title": "P8: art, audio, polish"
+    }
+   }
+  },
+  {
+   "id": 688,
+   "subject": "2.5D art pass",
+   "updatedAt": "2026-09-25T20:31:36.404Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/688",
+     "title": "2.5D art pass"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/685",
+     "title": "P8: art, audio, polish"
+    }
+   }
+  },
+  {
+   "id": 690,
+   "subject": "P9: private playtest distribution",
+   "updatedAt": "2026-09-25T20:31:37.125Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/5",
+     "title": "Epic"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "manager",
+     "href": "/api/v3/custom_options/12"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/690",
+     "title": "P9: private playtest distribution"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/684",
+     "title": "P8-P10: polish, playtest and ship the demo"
+    }
+   }
+  },
+  {
+   "id": 691,
+   "subject": "Pick the playtest feedback form tool",
+   "updatedAt": "2026-09-25T20:31:37.437Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/24",
+     "title": "Ready"
+    },
+    "customField4": {
+     "title": "manager",
+     "href": "/api/v3/custom_options/12"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/691",
+     "title": "Pick the playtest feedback form tool"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/690",
+     "title": "P9: private playtest distribution"
+    }
+   }
+  },
+  {
+   "id": 692,
+   "subject": "Invite private playtesters",
+   "updatedAt": "2026-09-25T20:31:37.680Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "manager",
+     "href": "/api/v3/custom_options/12"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/692",
+     "title": "Invite private playtesters"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/690",
+     "title": "P9: private playtest distribution"
+    }
+   }
+  },
+  {
+   "id": 693,
+   "subject": "P10: release candidate and G4",
+   "updatedAt": "2026-09-25T20:31:37.901Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/5",
+     "title": "Epic"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/693",
+     "title": "P10: release candidate and G4"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/684",
+     "title": "P8-P10: polish, playtest and ship the demo"
+    }
+   }
+  },
+  {
+   "id": 694,
+   "subject": "Name a low-end test PC, then run low-end perf pass",
+   "updatedAt": "2026-09-25T20:31:38.215Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/27",
+     "title": "Blocked"
+    },
+    "customField4": {
+     "title": "manager",
+     "href": "/api/v3/custom_options/12"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/694",
+     "title": "Name a low-end test PC, then run low-end perf pass"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/693",
+     "title": "P10: release candidate and G4"
+    }
+   }
+  },
+  {
+   "id": 695,
+   "subject": "ART-BAR-CHECK",
+   "updatedAt": "2026-09-25T20:31:38.405Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/695",
+     "title": "ART-BAR-CHECK"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/693",
+     "title": "P10: release candidate and G4"
+    }
+   }
+  },
+  {
+   "id": 696,
+   "subject": "DEMO-RC release candidate",
+   "updatedAt": "2026-09-25T20:31:38.606Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/696",
+     "title": "DEMO-RC release candidate"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/693",
+     "title": "P10: release candidate and G4"
+    }
+   }
+  },
+  {
+   "id": 697,
+   "subject": "DEMO-PLAYTEST-2 (G4)",
+   "updatedAt": "2026-09-25T20:31:38.798Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "research",
+     "href": "/api/v3/custom_options/8"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/697",
+     "title": "DEMO-PLAYTEST-2 (G4)"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/693",
+     "title": "P10: release candidate and G4"
+    }
+   }
+  },
+  {
+   "id": 698,
+   "subject": "DEMO-SHIP to invited testers",
+   "updatedAt": "2026-09-25T20:31:38.983Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "manager",
+     "href": "/api/v3/custom_options/12"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/698",
+     "title": "DEMO-SHIP to invited testers"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/693",
+     "title": "P10: release candidate and G4"
+    }
+   }
+  },
+  {
+   "id": 699,
+   "subject": "Post-demo PD1-PD8 incl. Steam decision",
+   "updatedAt": "2026-09-25T20:31:39.177Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "manager",
+     "href": "/api/v3/custom_options/12"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/699",
+     "title": "Post-demo PD1-PD8 incl. Steam decision"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/693",
+     "title": "P10: release candidate and G4"
+    }
+   }
+  },
+  {
+   "id": 700,
+   "subject": "Android: REL-1 keystore + 3D-DEVICE",
+   "updatedAt": "2026-09-25T20:31:39.379Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "manager",
+     "href": "/api/v3/custom_options/12"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/700",
+     "title": "Android: REL-1 keystore + 3D-DEVICE"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/693",
+     "title": "P10: release candidate and G4"
+    }
+   }
+  },
+  {
+   "id": 763,
+   "subject": "Voice vs element ring silhouettes too alike (3D-AC-4 kind read, IoU 0.83)",
+   "updatedAt": "2026-09-26T01:39:33.881Z",
+   "description": {
+    "raw": "Found by #647 (3D-CAPTURE, test `AC4_KindsReadBySilhouetteNotColourAlone`, branch `feat/647-3d-capture`).\n\nThe ring-stone screen masks, taken from the default frame (hero 5.5 tiles south, yaw 0) with the glyph and hero hidden, give these IoU values:\n- `circle_ember_vale` (voice) vs `circle_water` (element): **0.827**. The threshold is < 0.8.\n- voice vs boss: 0.262.\n- water vs boss: 0.259.\n\nSo the voice and element placeholder rings (`gen_voxel_placeholders.ring_voice` / `ring_water`) read almost the same in silhouette. That is the SPIKE-3D Q5 regression (\"kind reads by colour alone\") that ROADMAP-DEMO §CIRCLE-READ says must be re-verified in 3D-CAPTURE.\n\nOwner: the voxel assets lane (Lane E, VOXEL-ASSETS §RingKey stone arrangement). The test currently reports as Skipped with the numbers, and turns green on its own once the kinds differ."
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/1",
+     "title": "New"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/763",
+     "title": "Voice vs element ring silhouettes too alike (3D-AC-4 kind read, IoU 0.83)"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/644",
+     "title": "3D assets, performance and cutover"
+    }
+   }
+  },
+  {
+   "id": 764,
+   "subject": "Circle breath nearly invisible in pixels (Open 3.1 LSB, Cleared 1.4 LSB)",
+   "updatedAt": "2026-09-26T01:39:34.390Z",
+   "description": {
+    "raw": "Found by #647 (3D-CAPTURE, test `AC4_FourStatesReadInAtLeastTwoChannels_InPixels`).\n\n**Measurement:** ember_vale/c2 in the shipped frame (bloom on, HDR pipeline), mean band luminance at breath phase bright vs dim.\n- Open (boost 3.0, breath 0.22): swing **3.1 LSB**.\n- Cleared (boost 1.8, breath 0.10): swing **1.4 LSB**, which is under the 2 LSB \"moves\" floor.\n\n**Effect on the rule:** the VOXEL-ASSETS §3.5 >=2-channel rule still holds for every pair without motion.\n\n| Pair | Silhouette | Tint (d) | Motion |\n|---|---|---|---|\n| Open vs Cleared | – | yes (31) | yes |\n| Open vs Mastered | yes | yes (17) | yes |\n| Cleared vs Mastered | yes | yes (48) | – |\n| Locked vs Open | yes | yes (140) | yes |\n| Locked vs Cleared | yes | yes (125) | – |\n| Locked vs Mastered | yes | yes (151) | – |\n\n**The finding:** on screen, \"motion\" is effectively absent as a channel. Cleared breathing looks still, and Open barely moves.\n\n**Design question for Josias:** is the breath meant to be perceptible? If yes, raise the breath amplitude or the dims, or tune tonemapping/bloom.\n\nThe test now asserts Open moves and Open > Cleared, and logs a warning for Cleared."
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/1",
+     "title": "New"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/764",
+     "title": "Circle breath nearly invisible in pixels (Open 3.1 LSB, Cleared 1.4 LSB)"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/644",
+     "title": "3D assets, performance and cutover"
+    }
+   }
+  },
+  {
+   "id": 766,
+   "subject": "Returning from a circle re-asks the circle prompt at once (2D and 3D)",
+   "updatedAt": "2026-09-26T18:50:50.967Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/27",
+     "title": "Blocked"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/766",
+     "title": "Returning from a circle re-asks the circle prompt at once (2D and 3D)"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/633",
+     "title": "3D core systems"
+    }
+   }
+  },
+  {
+   "id": 767,
+   "subject": "Spike debug HUD (area cycle keys / SwitchArea) bypasses WorldInteractions in routed mode",
+   "updatedAt": "2026-09-26T18:50:51.386Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/27",
+     "title": "Blocked"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/767",
+     "title": "Spike debug HUD (area cycle keys / SwitchArea) bypasses WorldInteractions in routed mode"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/633",
+     "title": "3D core systems"
+    }
+   }
+  },
+  {
+   "id": 769,
+   "subject": "3D-HUD: stop WorldHud's mouse drag-stick from clashing with PcInput3D",
+   "updatedAt": "2026-09-26T19:30:35.664Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/25",
+     "title": "Awaiting approval"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/769",
+     "title": "3D-HUD: stop WorldHud's mouse drag-stick from clashing with PcInput3D"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/633",
+     "title": "3D core systems"
+    }
+   }
+  },
+  {
+   "id": 771,
+   "subject": "2D walker sprites for guide_<realm> (realm keepers show a labeled box)",
+   "updatedAt": "2026-09-26T02:00:07.583Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/771",
+     "title": "2D walker sprites for guide_<realm> (realm keepers show a labeled box)"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/644",
+     "title": "3D assets, performance and cutover"
+    }
+   }
+  },
+  {
+   "id": 772,
+   "subject": "StandIns.StaffBox has a cyan emissive tip; VOXEL-AMEND allows only the lantern flame to glow",
+   "updatedAt": "2026-09-26T02:00:08.114Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/23",
+     "title": "Backlog"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/772",
+     "title": "StandIns.StaffBox has a cyan emissive tip; VOXEL-AMEND allows only the lantern flame to glow"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/644",
+     "title": "3D assets, performance and cutover"
+    }
+   }
+  },
+  {
+   "id": 832,
+   "subject": "GUIDES-VOX: people features, element palette keys, guide palette fixes (E1+E2+U11) (M)",
+   "updatedAt": "2026-09-26T16:27:42.945Z",
+   "description": {
+    "raw": "Spec: `specs/REALM-GUIDES.md` §6.1, §10.6 (E1, E2, U11). Ruled 2026-09-26 (#809). Generator only, on the feat/645 voxel pipeline. No dependency on #637.\n\n**Scope**\n- E1: per-people head parts driven by `race`: orc tusks, ears and `skin_orc` #6B8A4E; elf long ears; dwarf braided beard; humans get none.\n- E2: `el:<element>[:lit|:shade]` palette keys from `voxel_palettes/elements.json`. Named keys replace the ad-hoc `add_cue` hexes. Includes the NPC_LOOK fixes: Oska off Dorn's palette, Liss to water blue, Tobin's ochre into the beard, Rowan off `cold_dim`, the kite off red.\n- U11: Oska's ember is #FF7A1A as plain paint with emission 0 (Q4: no glow; E4 dropped). Add the stage-clearance rule to the realm area JSON.\n\n**Acceptance criteria**\n- Generator test: each people's head part has the listed extra voxels (at least 2 per feature); humans have none.\n- Generator test: no literal hex is left in `add_cue`, and each guide's main mass resolves to the hex given in its spec section.\n- Generator test: no guide part uses #FFC24A, and no `guide_*` part has emission > 0.\n- Area check: no `accent` or `accent3` prop sits within 2 tiles of `<realm>_keeper`.\n\nSize: M (3 × S)."
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/1",
+     "title": "New"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/832",
+     "title": "GUIDES-VOX: people features, element palette keys, guide palette fixes (E1+E2+U11) (M)"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/652",
+     "title": "P3: Wanderer, guides, peoples, canon copy"
+    }
+   }
+  },
+  {
+   "id": 833,
+   "subject": "GUIDES-IDLE: NpcIdle3D separate head and arm for guides (E3) (S)",
+   "updatedAt": "2026-09-28T15:41:04.309Z",
+   "description": {
+    "raw": "Spec: `specs/REALM-GUIDES.md` §6.1 E3, §10.6. Ruled Q7 (#809): separate head and arm, no whole-body-bob fallback.\n\n**Scope**\n- For `guide_*` roles only, `VoxCharacters.BuildNpc` keeps `head` and `arm_r` as separate child transforms.\n- New `Game/World3D/NpcIdle3D.cs`:\n  - head tilt of up to 8°, arm lift of up to 10°;\n  - random phase, with a 3–5 s period;\n  - pauses while the NPC is Held (`Npc3D`).\n\n**Acceptance criteria (PlayMode)**\n- A guide has separate head and arm transforms.\n- Their rotations change over 5 s.\n- They do not change while the NPC is Held.\n- A non-guide NPC is still one merged mesh.\n\nSize: S. Blocks GUIDES-BUST (U4)."
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/7",
+     "title": "In Progress"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/833",
+     "title": "GUIDES-IDLE: NpcIdle3D separate head and arm for guides (E3) (S)"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/652",
+     "title": "P3: Wanderer, guides, peoples, canon copy"
+    }
+   }
+  },
+  {
+   "id": 842,
+   "subject": "GUIDES-CAPTURE: guide captures and lit-contrast check (U12) (M)",
+   "updatedAt": "2026-09-26T16:28:20.554Z",
+   "description": {
+    "raw": "Spec: `specs/REALM-GUIDES.md` §10.6 U12. **Depends on #637 on `main`**, and on the 3D-CAPTURE harness (feat/647).\n\n**Scope**\n- For each guide, capture:\n  - the tag at default distance, at 8 yaws;\n  - the prompt;\n  - the dialogue.\n\n**Acceptance criteria**\n- The luminance ratio between the guide's main mass and the adjacent ground, both sampled from the lit capture, is at least 3:1 for each guide.\n- The tag never covers a ring's read box within 6 tiles.\n- The baselines are committed after review.\n\nSize: M. Run it last, after GUIDES-VOX, GUIDES-TAGS, GUIDES-PROMPT and GUIDES-DIALOGUE."
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/1",
+     "title": "New"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/842",
+     "title": "GUIDES-CAPTURE: guide captures and lit-contrast check (U12) (M)"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/652",
+     "title": "P3: Wanderer, guides, peoples, canon copy"
+    }
+   }
+  },
+  {
+   "id": 843,
+   "subject": "Warden rune-sequence weakness (PRD + build)",
+   "updatedAt": "2026-09-26T18:22:32.405Z",
+   "description": {
+    "raw": "Ruled by Josias, 2026-09-26 (REALM-GUIDES Q3, #809). The Warden's single-element weakness is replaced by a rune-sequence weakness. PRD: `docs/prd/warden-sequence.md`.\n\n**Core rules**\n- **Order.** The Warden names 3 distinct elements in order. The order is seeded, and it is always achievable: a step whose colour has no legal chain is shifted to one that does.\n- **Step.** A resolved chain of the current colour advances the order by 1 (an all-WILD chain counts).\n- **Miss.** A resolved chain of the wrong colour is a miss. It resets progress and makes a new order.\n- **Neutral.** Power taps and abilities neither advance nor miss.\n- **Completion.** Completing the order deals a crit (`sequenceCritDamage`, 20), then a new order is made. The crit adds no score, so stars and CV-5a are unchanged.\n- **Parry.** It needs any runes (`parryRuneCount` 18), and charge never doubles.\n- **Hint.** A 3-slot strip inside the right-rail boss block, never over the board. Each slot shows the glyph and the element NAME, and the current slot is marked \"NEXT\". A drag preview shows match or miss before release.\n\n**Acceptance criteria:** WSEQ-1..15 in the PRD §6.\n\nRelated to #673 (DEMO-BOSS): the Warden's HP, parry and crit tuning must meet PRD R13."
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/7",
+     "title": "In Progress"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/843",
+     "title": "Warden rune-sequence weakness (PRD + build)"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/672",
+     "title": "P7: demo content, tuning, end"
+    }
+   }
+  },
+  {
+   "id": 849,
+   "subject": "WSEQ-S6: tuning + balance-bot tests with DEMO-BOSS (M)",
+   "updatedAt": "2026-09-26T16:28:55.822Z",
+   "description": {
+    "raw": "PRD R13. Done together with #673.\n\n**Scope**\n- Add a sequence-pursuing policy to the balance bot.\n- Tune the Warden's `maxHp`, `chargeCapacity`, `parryRuneCount` and `sequenceCritDamage`.\n- Record the values in CNX-SCORE's boss row.\n\n**Acceptance criteria:** WSEQ-15.\n- Over at least 200 seeded runs:\n  - a bot that ignores the sequence reaches HP 0 at 90–100% of its moves;\n  - a bot that pursues it reaches HP 0 at 60–75%.\n- CV-5a still passes."
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/11",
+     "title": "Sub-task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/1",
+     "title": "New"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/849",
+     "title": "WSEQ-S6: tuning + balance-bot tests with DEMO-BOSS (M)"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/843",
+     "title": "Warden rune-sequence weakness (PRD + build)"
+    }
+   }
+  }
+ ],
+ "block_relations": [
+  [
+   643,
+   767
+  ],
+  [
+   635,
+   767
+  ],
+  [
+   635,
+   766
+  ],
+  [
+   843,
+   673
+  ],
+  [
+   637,
+   842
+  ],
+  [
+   698,
+   699
+  ],
+  [
+   697,
+   698
+  ],
+  [
+   692,
+   697
+  ],
+  [
+   696,
+   697
+  ],
+  [
+   695,
+   696
+  ],
+  [
+   694,
+   696
+  ],
+  [
+   685,
+   695
+  ],
+  [
+   685,
+   693
+  ],
+  [
+   672,
+   693
+  ],
+  [
+   691,
+   692
+  ],
+  [
+   673,
+   676
+  ],
+  [
+   624,
+   674
+  ],
+  [
+   649,
+   669
+  ],
+  [
+   649,
+   668
+  ],
+  [
+   660,
+   667
+  ],
+  [
+   665,
+   666
+  ],
+  [
+   664,
+   665
+  ],
+  [
+   660,
+   662
+  ],
+  [
+   660,
+   661
+  ],
+  [
+   641,
+   660
+  ],
+  [
+   624,
+   660
+  ],
+  [
+   641,
+   659
+  ],
+  [
+   624,
+   659
+  ],
+  [
+   638,
+   657
+  ],
+  [
+   634,
+   656
+  ],
+  [
+   634,
+   655
+  ],
+  [
+   653,
+   654
+  ],
+  [
+   634,
+   653
+  ],
+  [
+   634,
+   652
+  ],
+  [
+   631,
+   650
+  ],
+  [
+   649,
+   650
+  ],
+  [
+   642,
+   649
+  ],
+  [
+   641,
+   649
+  ],
+  [
+   637,
+   649
+  ],
+  [
+   636,
+   649
+  ],
+  [
+   635,
+   649
+  ],
+  [
+   634,
+   649
+  ],
+  [
+   630,
+   631
+  ],
+  [
+   629,
+   631
+  ],
+  [
+   628,
+   631
+  ],
+  [
+   627,
+   628
+  ],
+  [
+   624,
+   628
+  ],
+  [
+   624,
+   626
+  ],
+  [
+   631,
+   625
+  ]
+ ],
+ "other_work_packages": {
+  "637": {
+   "id": 637,
+   "subject": "3D HUD",
+   "updatedAt": "2026-09-26T18:09:27.205Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/28",
+     "title": "Done"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/637",
+     "title": "3D HUD"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/633",
+     "title": "3D core systems"
+    }
+   }
+  },
+  "624": {
+   "id": 624,
+   "subject": "CNX-SCORE fourth run, all four arms (M+)",
+   "updatedAt": "2026-09-26T13:49:24.487Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/9",
+     "title": "High"
+    },
+    "status": {
+     "href": "/api/v3/statuses/28",
+     "title": "Done"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/624",
+     "title": "CNX-SCORE fourth run, all four arms (M+)"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/622",
+     "title": "Chain scoring calibration"
+    }
+   }
+  },
+  "634": {
+   "id": 634,
+   "subject": "Merge spike/3d-overworld (63 ahead) into main",
+   "updatedAt": "2026-09-26T12:35:32.538Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/28",
+     "title": "Done"
+    },
+    "customField4": {
+     "title": "dev",
+     "href": "/api/v3/custom_options/11"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/634",
+     "title": "Merge spike/3d-overworld (63 ahead) into main"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/633",
+     "title": "3D core systems"
+    }
+   }
+  },
+  "629": {
+   "id": 629,
+   "subject": "G1 observation sheet",
+   "updatedAt": "2026-09-26T14:04:51.023Z",
+   "description": {
+    "raw": ""
+   },
+   "_links": {
+    "category": {
+     "href": null
+    },
+    "type": {
+     "href": "/api/v3/types/1",
+     "title": "Task"
+    },
+    "priority": {
+     "href": "/api/v3/priorities/8",
+     "title": "Normal"
+    },
+    "status": {
+     "href": "/api/v3/statuses/28",
+     "title": "Done"
+    },
+    "customField4": {
+     "title": "research",
+     "href": "/api/v3/custom_options/8"
+    },
+    "self": {
+     "href": "/api/v3/work_packages/629",
+     "title": "G1 observation sheet"
+    },
+    "project": {
+     "href": "/api/v3/projects/29",
+     "title": "RuneMatch"
+    },
+    "parent": {
+     "href": "/api/v3/work_packages/626",
+     "title": "G1 stranger playtest (2D overworld)"
+    }
+   }
+  }
+ },
+ "comments": {
+  "763": [],
+  "764": [],
+  "832": [],
+  "833": [
+   "autopilot: promoted. It has acceptance criteria, no open blocker, and Q7 (#809) already ruled the design, so it needs no reserved decision.",
+   "autopilot: started feat/833-guides-idle",
+   "autopilot: resume\n\n**Built and committed; not tested yet.** Commit `76ea720` is on `feat/833-guides-idle`. It is not merged and not pushed.\n\n**What's in it**\n- New `Game/World3D/NpcIdle3D.cs`. It tilts the head up to 8° and lifts the arm up to 10°, on a 3–5 s period seeded from the NPC id. `Held` freezes the pose.\n- `VoxCharacters.BuildNpc`: guides get `Head` and `ArmR` child transforms at their joints (3 draw calls). Non-guides are unchanged.\n- `StandIns.MeshChild` now accepts a null renderer list.\n- `BustStage3DTests.Head_MovesOverFiveSeconds` now asserts instead of calling `Assert.Ignore`, so the skip count should drop by 1. The test was renamed from `…_WhenIdleIsPresent`.\n- VPH18 now destroys the child meshes too.\n- New `NpcIdle3DTests`, E3_1..E3_5:\n  - E3_1: separate transforms, and no voxel is lost to the split;\n  - E3_2: building draws nothing from `Random.state`;\n  - E3_3: head and arm move over 5 s, within their limits;\n  - E3_4: Held freezes the pose;\n  - E3_5: a non-guide is still one mesh.\n\n**Tests**\n| Gate | Result |\n|---|---|\n| `unity.sh compile` | clean (`Logs/compile_20260928_173932.log`) |\n| PlayMode `NpcIdle3DTests`, `BustStage3DTests`, `Spike3D.VoxAssetsPlayModeTests`, `Hud3DTests` | **not run**: the session's permission mode denied `unity.sh test` for me and for the dev agent |\n| Full EditMode + PlayMode pre-merge | not run |\n\n**Left for the next cycle:** run the four fixtures above, then the full pre-merge gates, then merge. If the next run still can't run `unity.sh test`, this needs Josias to allow that command for autopilot runs. The compile command is allowed; the test command is not.\n\n**Delegated decisions** (also in `docs/DECISIONS.md` on this branch):\n- **Guide detection.** A guide is an NPC with a U3 presentation row, or with a `guide_*` role. The keepers still wear the `wanderer` role until #832.\n- **Idle phase and period.** They come from a hash of the NPC id, not `UnityEngine.Random`. This avoids the PAR-DETERMINISM leak class, since busts are built on demand in GameScene.\n- **`Held`.** There's no `Npc3D` class and no 3D talk path yet, so `Held` lives on `NpcIdle3D`. The 3D talk path has to set it.\n- **Motion shape.** The head nods about local x. The arm lifts forward. Both follow one shared sine.\n\nNote: `docs/DECISIONS.md` is also created on the unmerged `feat/648-pc-perf`, so whichever branch merges second will hit a trivial add/add conflict."
+  ],
+  "842": [],
+  "843": [
+   "_Updated automatically by changing values within child work package #844_\n",
+   "**PRD written:** `docs/prd/warden-sequence.md`, commit `70278f1` on `docs/warden-sequence`. It branches from `main`; not pushed, not merged.\n\n**Build Sub-tasks:** #844 (S1 core, M), #845 (S2 board hook, S), #846 (S3 strip UI, M), #847 (S4 audio, S), #848 (S5 tutorial and copy, S), #849 (S6 tuning with #673, M).\n\n**Relations:** this Task blocks #673 (DEMO-BOSS).\n\n**Open questions for Josias** (PRD §8), with the recommended defaults:\n- Q-A: Warden only? Default: yes.\n- Q-B: scale the length at low HP? Default: no, fixed at 3.\n- Q-C: soften the first miss? Default: no.\n- Q-D: do power taps count as a step? Default: no, they are neutral.\n- Q-E: does the crit add score? Default: no.\n- Q-F: does a crit resolve a windup? Default: no.\n- Q-G: parry element? Default: any runes, count 18.\n- Q-H: crit size? Default: 20.\n- Q-I: hint placement if 3D-D1 is read literally on the board scene? Default: the right-rail boss block.\n\nAwaiting Josias's approval of the PRD.",
+   "The PRD phase was worked on here (70278f1).",
+   "The PRD is written (70278f1). Awaiting Josias's approval of the PRD and his answers to Q-A to Q-I before the build starts.",
+   "**RULED by Josias, 2026-09-26:**\n- **Q-A: YES.** The sequence mechanic rolls out to every boss, not just the Warden. Each boss gets `sequenceLength` = 3 and `sequenceCritDamage` at 25% of its HP.\n- **Q-B to Q-I:** the PRD's recommended defaults are accepted.\n\nThe ruling is recorded in PRD §8 (d5c6735). The PRD is merged into `main` as 6111191; not pushed. The build sub-tasks #844–#849 can proceed. S1/S6 must cover all bosses in `bosses.json`.",
+   "Josias approved the build on 2026-09-26. The PRD `docs/prd/warden-sequence.md` is on main. Lane 1 has #844 → #845 → #847, and lane 2 has #846 → #848. #849 waits for #673 (DEMO-BOSS)."
+  ],
+  "849": []
+ }
+}

@@ -24,12 +24,12 @@ nomad-image/install_flux2.sh          # add FLUX.2 [dev]  (~35GB fp8-mixed: DiT 
 nomad-image/install_qwen.sh           # add Qwen-Image    (Apache-2.0, best in-image text)
 nomad-image/install_service.sh        # optional: run ComfyUI on boot (systemd user unit, :8188)
 # manual start instead of the service:
-~/ComfyUI/venv/bin/python ~/ComfyUI/main.py --listen 0.0.0.0 --port 8188
+~/ComfyUI/venv/bin/python ~/ComfyUI/main.py --listen 127.0.0.1 --port 8188
 ```
 
-ComfyUI listens on `0.0.0.0:8188` so the v2 engine **container** can reach it via
-`host.docker.internal:8188`. WSL2 is NAT'd (not on the LAN) and ComfyUI has no auth — keep this box's
-Windows firewall closed to inbound 8188.
+ComfyUI listens on `127.0.0.1:8188` only: it has no auth, and on `0.0.0.0` it answered in plain HTTP
+on the tailnet IP (#821). The v2 engine **container** still reaches it via `host.docker.internal:8188`,
+because Docker Desktop's gateway lands on the host loopback.
 
 ### Switching the local model
 Set `COMFYUI_MODEL` in `.env` / the engine service env:

@@ -26,7 +26,7 @@ from moshi.models import LMGen, loaders
 
 HF_REPO = os.environ.get("KYUTAI_STT_REPO", "kyutai/stt-1b-en_fr")   # 1B, ~0.5s delay, en/fr
 DEVICE = os.environ.get("KYUTAI_DEVICE", "cuda")
-HOST = os.environ.get("NOMAD_STT_HOST", "0.0.0.0")
+HOST = os.environ.get("NOMAD_STT_HOST", "127.0.0.1")   # loopback only (#821); only nomad-voice calls it
 PORT = int(os.environ.get("NOMAD_STT_PORT", "8212"))   # 8200 voice · 8210 scraper · 8212 stt
 _SKIP = (0, 3)   # pad / special text tokens — never spoken
 

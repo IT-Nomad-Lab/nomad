@@ -21,6 +21,7 @@ class FakeEngine:
         self.tasks = {}
         self.alerts = []
         self.posts = []
+        self.pm = {"boot": "b1", "events": []}
 
     def add(self, rid, status, lane="comms", **detail):
         self.runs[rid] = {"run_id": rid, "lane": lane, "status": status, "goal": f"goal {rid}",
@@ -38,6 +39,9 @@ class FakeEngine:
             return {"projects": self.projects}
         if path == "/project":
             return {"milestones": [{"tasks": self.tasks.get(str(p["goal_id"]), [])}]}
+        if path == "/pm-events":
+            after = p["after"] if p["boot"] == self.pm["boot"] else 0
+            return {"boot": self.pm["boot"], "events": [e for e in self.pm["events"] if e["seq"] > after]}
         raise KeyError(path)
 
     def post(self, path, body, timeout=None):
@@ -61,7 +65,7 @@ class FakeEngine:
 
 class FakeChat:
     def __init__(self):
-        self.sent, self.dms, self.resolved = [], [], []
+        self.sent, self.dms, self.resolved, self.reactions = [], [], [], []
         self.members = [OP]
         self.n = 0
 
@@ -76,6 +80,9 @@ class FakeChat:
 
     def resolve(self, mid, topic):
         self.resolved.append((mid, topic))
+
+    def react(self, mid, name):
+        self.reactions.append((mid, name))
 
     def raw_content(self, mid):
         return next(s[3] for s in self.sent if s[0] == mid)
@@ -256,6 +263,79 @@ def test_every_argument_is_shown(tmp_path):
     assert "cc: boss@corp.com" in g[3]
 
 
+# ── #776: which project a request is for ─────────────────────────────────────────────────────
+WP = {"wp_id": 812, "wp_url": "https://pm.example/work_packages/812", "wp_subject": "Fix the gate",
+      "board": "nomad-work", "project_name": "NOMAD work"}
+
+
+def test_a_gate_for_a_project_task_names_the_board_and_links_the_task(tmp_path):
+    r, eng, chat = make(tmp_path)
+    g = gate(r, eng, chat, project=WP)
+    head = g[3].splitlines()[1]
+    assert head.startswith("**Project:** `nomad-work` (NOMAD work)")
+    assert "[#812 Fix the gate](https://pm.example/work_packages/812)" in head
+    assert g[2] == "nomad-work · run g1"
+    runs = chat.on("runs")[-1]
+    assert runs[2] == g[2] and "`nomad-work`" in runs[3]
+
+
+def test_a_gate_with_no_project_says_so(tmp_path):
+    r, eng, chat = make(tmp_path)
+    g = gate(r, eng, chat)
+    assert g[3].splitlines()[1] == "**Project:** no project"
+    assert g[2] == "run g1"
+
+
+def test_a_dev_run_names_its_repo_in_the_message_but_not_the_topic(tmp_path):
+    """The repo comes from the Manager reading the goal, so it is untrusted text and stays out of
+    the topic, which shows on the lock screen."""
+    r, eng, chat = make(tmp_path)
+    g = gate(r, eng, chat, lane="dev", project={"repo": "secret-deal"})
+    assert "repo `secret-deal`" in g[3] and g[2] == "run g1"
+
+
+def test_a_board_that_is_not_a_plain_identifier_stays_out_of_the_topic():
+    d = {"run_id": "abc", "project": {"board": "Launch **now** @all"}}
+    assert R.run_topic(d) == "run abc"
+    assert R.run_topic({"run_id": "abc", "project": {"board": "x" * 41}}) == "run abc"
+
+
+def test_project_text_is_escaped():
+    line = R.project_line({"project": {"wp_id": 5, "wp_subject": "[click](http://evil) @all",
+                                       "wp_url": "https://pm.example/work_packages/5"}})
+    assert "\\[click\\]" in line and "@​all" in line
+
+
+def test_the_board_being_down_still_posts_the_gate(tmp_path):
+    r, eng, chat = make(tmp_path)
+    g = gate(r, eng, chat, project={"wp_id": 9, "wp_url": "https://pm.example/work_packages/9",
+                                    "pm_error": "OpenProject unreachable"})
+    assert "[#9](https://pm.example/work_packages/9) · board did not answer" in g[3]
+    assert g[2] == "run g1"
+
+
+def test_an_old_mission_control_task_is_named(tmp_path):
+    r, eng, chat = make(tmp_path)
+    g = gate(r, eng, chat, project={"task_ref": 44})
+    assert "mission-control task `44`" in g[3]
+
+
+def test_approving_in_a_project_topic_still_works(tmp_path):
+    r, eng, chat = make(tmp_path)
+    g = gate(r, eng, chat, project=WP)
+    r.handle_event(react(g[0], "2705"))
+    assert approved(eng) == ["g1"]
+
+
+def test_a_failure_alert_names_the_project(tmp_path):
+    r, eng, chat = make(tmp_path)
+    r.st.d["seeded"] = True
+    eng.add("f1", "failed", project=WP, error="boom")
+    r.sync_runs()
+    alert = chat.on("alerts")[-1]
+    assert "`nomad-work`" in alert[3] and alert[2] == "nomad-work · run f1"
+
+
 def test_cockpit_only_action_cannot_be_approved_remotely(tmp_path):
     r, eng, chat = make(tmp_path)
     g = gate(r, eng, chat, action="dispatch_build", args={"project": "nomad", "task": "rm stuff"})
@@ -264,6 +344,17 @@ def test_cockpit_only_action_cannot_be_approved_remotely(tmp_path):
     assert approved(eng) == [] and "cockpit" in chat.sent[-1][3]
     r.handle_event(react(g[0], "274c"))                  # rejecting is always allowed
     assert eng.runs["g1"]["status"] == "declined"
+
+
+def test_an_unresolved_build_project_is_named_at_the_gate():
+    """#851: the engine's project warning reaches the Zulip gate message, escaped."""
+    d = {"run_id": "g1", "lane": "dev", "goal": "fix it", "action": "dispatch_build",
+         "args": {"project": "claude-bridge", "task": "t"},
+         "project_warning": "Project 'claude-bridge' is not a project in the dispatcher's "
+                            "registry, so this build fails if approved. Candidates: nomad, nomad-crm."}
+    msg = R.gate_message(d, remote_ok=False)
+    assert "Project not resolved" in msg and "Candidates: nomad, nomad-crm" in msg
+    assert "Project not resolved" not in R.gate_message({**d, "project_warning": ""}, False)
 
 
 def test_truncated_proposal_cannot_be_approved_remotely(tmp_path):
@@ -381,3 +472,167 @@ def test_transient_errors_retry_forever(monkeypatch, tmp_path):
     c = _Client("Bad Gateway", fails=relay.AUTH_FAIL_LIMIT + 4)
     assert _run_event_loop(monkeypatch, tmp_path, c) == 0      # reached get_events → recovered
     assert c.calls == relay.AUTH_FAIL_LIMIT + 5
+
+
+# ── PM-01 P4: OpenProject events → Zulip, replies → comments ────────────────────────────────────
+def pm_ev(eng, wp_id=112, **kw):
+    ev = {"seq": len(eng.pm["events"]) + 1, "wp_id": wp_id, "subject": "Wire the API", "type": "Task",
+          "project": "Work", "status": "Blocked", "lane": "dev", "action": "updated", "from": "Ready",
+          "to": "Blocked", "blocked": True, "comment": "no key yet", "author": "Dev (agent)",
+          "by_agent": True, "by_operator": False, "mention": False, "watched": False,
+          "origin": "openproject", "url": f"http://localhost:8097/work_packages/{wp_id}/activity", **kw}
+    eng.pm["events"].append(ev)
+    return ev
+
+
+def stream(channel, topic, content, sender=OP, mid=500):
+    return {"type": "message", "message": {"id": mid, "type": "stream", "sender_id": sender,
+                                           "display_recipient": channel, "subject": topic, "content": content}}
+
+
+def test_pm_blocked_goes_to_alerts_and_watched_to_its_own_topic(tmp_path):
+    r, eng, chat = make(tmp_path)
+    pm_ev(eng)                                              # blocked, not watched
+    r.sync_pm()
+    ((_, ch, topic, text),) = chat.sent
+    assert (ch, topic) == ("alerts", "wp 112") and "⛔ Blocked" in text and "no key yet" in text
+    assert "`dev`" in text
+    pm_ev(eng, **{"from": "Blocked"}, to="Ready", blocked=False, status="Ready", watched=True, comment="")
+    r.sync_pm()
+    assert chat.sent[-1][1:3] == ("projects", "wp 112") and "Blocked → **Ready**" in chat.sent[-1][3]
+    assert r.st.d["pm_blocked"] == []                      # unblocked: a new block alerts again
+    r.sync_pm()                                            # the cursor held: nothing twice
+    assert len(chat.sent) == 2
+
+
+def test_pm_block_is_alerted_once_across_both_paths(tmp_path):
+    """The engine's own board tasks are also watched by sync_projects; one alert, not two."""
+    r, eng, chat = make(tmp_path)
+    pm_ev(eng, wp_id=61)
+    r.sync_pm()
+    eng.projects = [{"goal_id": 8, "title": "NOMAD", "done": 0, "total": 3, "pct": 0}]
+    r.st.d["projects_seeded"] = True
+    eng.tasks["8"] = [{"task_id": 61, "title": "Wire the API", "status": "Blocked", "lane": "dev"}]
+    r.sync_projects()
+    assert len(chat.on("alerts")) == 1
+    r2, eng2, chat2 = make(tmp_path / "other")
+    (tmp_path / "other").mkdir(exist_ok=True)
+    eng2.projects, eng2.tasks = eng.projects, eng.tasks
+    r2.st.d["projects_seeded"] = True
+    r2.sync_projects()                                     # the poll saw it first this time
+    pm_ev(eng2, wp_id=61)
+    r2.sync_pm()
+    assert len(chat2.on("alerts")) == 1
+
+
+def test_pm_mention_skips_and_boot(tmp_path):
+    r, eng, chat = make(tmp_path)
+    pm_ev(eng, to=None, blocked=False, mention=True, comment="@Admin can you look?")
+    pm_ev(eng, by_operator=True, watched=True)                              # they did it
+    pm_ev(eng, origin="zulip", to=None, blocked=False, watched=True)       # their reply, echoed
+    r.sync_pm()
+    assert [(c, t) for _, c, t, _ in chat.sent] == [("projects", "wp 112"), ("alerts", "wp 112")]
+    # the comment sits in a code block, where a mention cannot ping anyone
+    assert "mentioned you" in chat.sent[1][3] and "```text\n@Admin can you look?\n```" in chat.sent[1][3]
+    eng.pm = {"boot": "b2", "events": []}                  # the engine restarted
+    pm_ev(eng, wp_id=7, watched=True, blocked=False, to=None)
+    r.sync_pm()
+    assert chat.sent[-1][2] == "wp 7"
+
+
+def test_reply_in_a_wp_topic_is_a_comment(tmp_path):
+    r, eng, chat = make(tmp_path)
+    pm_ev(eng, watched=True)
+    r.sync_pm()
+    r.handle_event(stream("projects", "wp 112", "use the staging key", mid=501))
+    assert ("/pm-comment", {"wp_id": 112, "text": "use the staging key"}) in eng.posts
+    assert chat.reactions == [(501, "check")]
+    r.handle_event(stream("alerts", "✔ wp 112", "retry", mid=502))       # a word is a comment here
+    assert eng.posts[-1] == ("/pm-comment", {"wp_id": 112, "text": "retry"})
+    r.handle_event(stream("projects", "wp 112", "not me", sender=STRANGER))
+    r.handle_event(react(chat.sent[0][0], "1f501"))                    # reactions do nothing on wp
+    assert len(eng.posts) == 2
+    r.st.d["locked"] = True
+    r.handle_event(stream("projects", "wp 112", "hello", mid=503))
+    assert len(eng.posts) == 2 and "Locked down" in chat.sent[-1][3]
+
+
+def test_pm_events_absent_on_an_old_engine(tmp_path):
+    import requests
+    r, eng, chat = make(tmp_path)
+    resp = requests.Response()
+    resp.status_code = 404
+
+    def get(path, **p):
+        raise requests.HTTPError("404", response=resp)
+    eng.get = get
+    r.sync_pm()                                            # quiet, no exception
+    assert chat.sent == []
+
+
+# ── #800: every gate, #runs and failure message links to the run page ───────────────────────
+TAILNET = "https://nomad.tail1234.ts.net:8449"
+PAGE = f"{TAILNET}/cockpit/run/g1"
+
+
+def linked(tmp_path):
+    r, eng, chat = make(tmp_path)
+    r.cockpit = TAILNET
+    return r, eng, chat
+
+
+def test_an_approvable_gate_links_to_the_run_page_and_still_approves(tmp_path):
+    """The link is in the text the relay hashed as shown, so a ✅ still passes the edit check."""
+    r, eng, chat = linked(tmp_path)
+    g = gate(r, eng, chat)
+    assert g[3].splitlines()[-1] == f"Open in cockpit: {PAGE}"
+    r.handle_event(react(g[0], "2705"))
+    assert approved(eng) == ["g1"]
+
+
+def test_a_cockpit_only_gate_says_where_to_approve_it(tmp_path):
+    r, eng, chat = linked(tmp_path)
+    g = gate(r, eng, chat, action="dispatch_build", args={"project": "nomad", "task": "x"})
+    assert g[3].splitlines()[-1].endswith(f"approve it in the cockpit: {PAGE}")
+    r.handle_event(react(g[0], "2705"))
+    assert approved(eng) == [] and chat.sent[-1][3].endswith(f"approved in the cockpit: {PAGE}")
+
+
+def test_a_gate_too_long_for_zulip_links_to_the_page_with_all_of_it(tmp_path):
+    r, eng, chat = linked(tmp_path)
+    g = gate(r, eng, chat, args={"to": "a@b.c", "body": "x" * 5000})
+    assert g[3].splitlines()[-1].endswith(f"approve it in the cockpit: {PAGE}")
+
+
+def test_every_runs_message_links_to_the_run_page(tmp_path):
+    r, eng, chat = linked(tmp_path)
+    gate(r, eng, chat)
+    eng.runs["g1"]["status"] = "executed"
+    r.sync_runs()
+    posts = chat.on("runs")
+    assert len(posts) == 2
+    assert all(p[3].splitlines()[0].endswith(f"[open in cockpit]({PAGE})") for p in posts)
+
+
+def test_a_failure_alert_links_to_the_run_page(tmp_path):
+    r, eng, chat = linked(tmp_path)
+    r.st.d["seeded"] = True
+    eng.add("f1", "failed", error="boom")
+    r.sync_runs()
+    assert chat.on("alerts")[-1][3].splitlines()[-1] == f"Open in cockpit: {TAILNET}/cockpit/run/f1"
+
+
+def test_without_a_cockpit_address_the_messages_read_as_before(tmp_path):
+    r, eng, chat = make(tmp_path)
+    r.cockpit = ""                                       # NOMAD_TAILNET_ORIGIN unset
+    g = gate(r, eng, chat, action="dispatch_build", args={"project": "nomad", "task": "x"})
+    assert "/cockpit/run/" not in g[3]
+    assert g[3].splitlines()[-1].endswith("approve it in the cockpit.")
+    assert "/cockpit/run/" not in chat.on("runs")[-1][3]
+    r.handle_event(react(g[0], "2705"))
+    assert chat.sent[-1][3].endswith("can only be approved in the cockpit.")
+
+
+def test_the_run_id_is_quoted_in_the_link():
+    assert R.run_url(TAILNET + "/", "a/b c") == f"{TAILNET}/cockpit/run/a%2Fb%20c"
+    assert R.run_url("", "g1") is None and R.run_url(TAILNET, "") is None

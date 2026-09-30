@@ -62,6 +62,23 @@ Penpot's bundled MCP plugin reconnects on each load.
 - The Penpot MCP key allows one plugin connection: close Penpot files in your own browser while
   automating. The window is visible via WSLg; `NOMAD_PENPOT_HEADLESS=1` hides it.
 
+**`nomad-pm`** (`nomad_pm.py`): the OpenProject work tracker (ADR-011, `~/nomad-pm`, :8097).
+Each call acts as the agent user in `NOMAD_PM_AS` (default `nomad-dev`) with its token from
+`~/.config/nomad/openproject-tokens.json`, so comments carry that lane's name.
+- Read: `projects()`, `search(text, project, type, status, lane, assignee, open_only)`, `get(id)`
+  (parent, children, relations, watchers, next statuses, last comments), `tree(id | project, depth)`.
+- Write: `create(project, type, subject, parent, …)`, `create_plan(project, plan, parent)` for a
+  whole tree with `blocked_by` links, `update_fields(id, …)`, `transition(id, status, comment)`.
+- Around the work: `comment`, `watch`, `relate`, `unrelate`.
+- What to do next: `my_queue()`, `ready(project, lane)`, `blocked(project)`, `project_summary(project)`.
+- OpenProject does not enforce type levels, so this server does: a parent sits exactly one level
+  up, a Sub-task needs one, and Initiatives live in `nomad-portfolio`. `create_plan` checks the
+  whole tree before creating anything.
+- `transition` reads the workflow first and fails with the allowed statuses. There is no delete
+  tool, and the Member role cannot delete either.
+- Test: `~/nomad-pm/tests/fixture.sh setup`, then `.venv/bin/python tests/test_nomad_pm.py`,
+  then `fixture.sh teardown`. It drives the server over MCP stdio as two agents.
+
 These auto-detect their endpoint (Ollama on the Windows host; the scraper/Kroki containers on
 loopback or the host gateway), so they work whether Claude Code runs in WSL or natively. The
 `nomad-diagram` tool needs the `kroki` + `kroki-mermaid` compose services up

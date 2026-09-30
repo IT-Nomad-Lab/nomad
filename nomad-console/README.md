@@ -30,7 +30,7 @@ human watches and drives the system without living in a terminal.
 | `server.py` | FastAPI backend: telemetry, services, projects/agents/activity/approvals, chat proxy, voice proxy, terminal proxy, conditional Basic Auth. |
 | `intents.py` | Pure, pattern-based natural-language → action classifier (zero added latency). |
 | `memory.py` | Long-term conversational memory over Qdrant + Ollama (httpx-only, fail-open). |
-| `sync_projects.py` | Upserts `Nomad.md` project markers into mission control (NocoDB or Notion). |
+| `sync_projects.py` | Upserts the `projects.yaml` projects' `Nomad.md` metadata into mission control (NocoDB or Notion). |
 | `static/` | The LCARS UI (`index.html`, `lcars.css`, `app.js`), PWA manifest/icons, vendored xterm.js, voice assets. |
 | `publish.sh` | Opens an auth-protected Cloudflare quick tunnel over the internal docker network. |
 

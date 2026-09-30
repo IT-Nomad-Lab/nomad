@@ -138,5 +138,5 @@ async def music(req: Request):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host=os.environ.get("NOMAD_AUDIO_HOST", "0.0.0.0"),
+    uvicorn.run(app, host=os.environ.get("NOMAD_AUDIO_HOST", "127.0.0.1"),   # loopback only (#821)
                 port=int(os.environ.get("NOMAD_AUDIO_PORT", "8220")))

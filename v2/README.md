@@ -41,6 +41,9 @@ still gates).
 | `runtime.py` | Pluggable specialist runtime — **Claude Agent SDK** native (default) with automatic **LiteLLM** fallback. |
 | `llm.py` | LiteLLM gateway helper (role aliases only). |
 | `nocodb.py` | Minimal stdlib NocoDB client (the source of truth). |
+| `pm_openproject.py` | OpenProject API v3 client for `NOMAD_PM=openproject` (PM-01 P3). |
+| `pm_follow.py` | OpenProject webhook → events for the relay, and Zulip replies → comments (PM-01 P4). |
+| `pm_board.py` | The board in numbers for the cockpit panel and the briefing (PM-01 P4). |
 | `memory.py` / `memory_chat.py` | Episodic recall — closes the learn-loop. |
 | `scraper.py` | Thin client for the `nomad-scraper` service (research-lane grounding). |
 | `mcp_*.py` | MCP tool servers per lane (`comms`, `content`, `dev`, `research`, `image`). |
@@ -61,6 +64,10 @@ still gates).
 | `GET /events` | SSE push for live cockpit refresh. |
 | `POST /generate-image` | Gated image generation (ComfyUI → OpenAI → Firefly fallback chain). |
 | `POST /plan-project` · `/run-next-task` · `/task-action` | Project orchestration. |
+| `POST /pm-hook` | OpenProject's webhook (PM-01 P4). Checks `X-OP-Signature`: 503 with no secret, 401 when it does not match. |
+| `GET /pm-events?after=&boot=` | Queued OpenProject events for the relay. A new `boot` means the engine restarted and the queue is new. |
+| `POST /pm-comment {wp_id, text}` | A Zulip reply as a comment, by nomad-manager with an "Operator, via Zulip" byline. |
+| `GET /pm-summary?project=&fresh=` | The board in numbers (`pm_board.py`): open by status and type, blocked chain, WIP, cycle time, throughput, burnup. Cached 60 s. |
 
 ## Run it
 
@@ -90,6 +97,16 @@ python3 test_2a.py              # multi-specialist routing + research-lane gate
 python3 test_3c.py              # Phase-3 checks
 ```
 
+The OpenProject board (PM-01 P3) has an offline test and a live one. The live one writes into the
+scratch project `pm-test-a`, so set up the fixture first and tear it down after:
+
+```bash
+python3 -m pytest test_pm_engine.py test_pm_follow.py -q      # offline, fake board
+~/nomad-pm/tests/fixture.sh setup
+NOMAD_PM_LIVE=1 python3 -m pytest test_pm_live.py -q          # real OpenProject
+~/nomad-pm/tests/fixture.sh teardown
+```
+
 ## Key environment variables
 
 | Var | Default | Meaning |
@@ -98,6 +115,12 @@ python3 test_3c.py              # Phase-3 checks
 | `NOMAD_V2_GATE_POLL` | `3` | Gate poll interval (s) — the fail-open backup to push. |
 | `NOMAD_RUNTIME` | `sdk` if available | Force the runtime path: `sdk` or `litellm`. |
 | `NOMAD_AUTO_ADVANCE` | `1` | Auto-queue the next task in a project (still gates). |
+| `NOMAD_PM` | `nocodb` | Where projects live: `nocodb` (mc_goals, milestones, tasks) or `openproject` (Feature > Epic > Task). Reversible. |
+| `NOMAD_PM_URL` / `NOMAD_PM_PROJECT` | `localhost:8097` / `nomad-work` | The OpenProject instance and the project the engine plans into. A task on any other board the manager can read runs, moves and closes on its own board. Lane tokens come from `openproject-tokens.json`. |
+| `NOMAD_PM_OPERATOR_ID` | `4` in compose | The operator's OpenProject user id: their watches and @mentions reach Zulip, their own edits are skipped. Unset, nothing is watched. |
+| `NOMAD_PM_PUBLIC_URL` | `http://localhost:8097` | Base of the OpenProject links posted to Zulip and the cockpit. |
+| `NOMAD_PM_HOOK_SECRET_FILE` | `/term-secret/openproject-webhook.secret` | The webhook secret, made by `~/nomad-pm/seed.sh`. |
+| `NOMAD_COCKPIT_URL` | `http://localhost:8099` | Base of the run link written into a task's Cockpit link field. |
 | `NC_BASE_URL` | `http://localhost:8095` | NocoDB base. |
 | `LITELLM_BASE_URL` / `LITELLM_MASTER_KEY` | — | Model gateway. |
 | `NOMAD_VOICE_URL` / `NOMAD_SCRAPER_URL` / `NOMAD_DISPATCH_URL` | service hosts | Companion services. |

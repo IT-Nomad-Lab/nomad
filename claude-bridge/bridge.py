@@ -22,7 +22,7 @@ import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-HOST = os.environ.get("CLAUDE_BRIDGE_HOST", "0.0.0.0")
+HOST = os.environ.get("CLAUDE_BRIDGE_HOST", "127.0.0.1")   # loopback only (#821); LiteLLM reaches it via host.docker.internal
 PORT = int(os.environ.get("CLAUDE_BRIDGE_PORT", "8088"))
 WORKDIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_workdir")
 CLAUDE = shutil.which("claude") or os.path.expanduser("~/.local/bin/claude")  # 2.x native

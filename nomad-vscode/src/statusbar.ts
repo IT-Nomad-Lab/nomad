@@ -17,15 +17,19 @@ export class StatusBar {
     const n = s.approvals.length;
     if (n) parts.push(`$(warning) ${n}`);
     this.item.text = parts.join(" · ");
-    const down = s.services.filter((x) => !x.up).length;
+    // `up === null` is unknown, not down. Counting it as down would put a red badge on the bar
+    // every time nomad-watch's timer slipped, which trains you to ignore the badge.
+    const down = s.services.filter((x) => x.up === false).length;
+    const unknown = s.servicesStale ? s.services.length : 0;
     this.item.tooltip = new vscode.MarkdownString(
       [`**NOMAD** — ${s.name}`,
        s.git.isRepo && `${s.git.branch || "(detached)"}${s.git.dirty ? ` · ✎${s.git.dirty}` : ""}`,
        s.detail && s.detail.total ? `tasks ${s.detail.done}/${s.detail.total}` : "no task plan",
        n ? `**${n} awaiting approval**` : "gate clear",
-       down ? `**${down} service(s) offline**` : "platform nominal",
+       down ? `**${down} service(s) offline**` : (unknown ? "" : "platform nominal"),
+       unknown ? `**service health is stale** — nomad-watch has not reported` : "",
        "\n\nClick for actions"].filter(Boolean).join("  ·  "));
-    this.item.backgroundColor = (n || down)
+    this.item.backgroundColor = (n || down || unknown)
       ? new vscode.ThemeColor("statusBarItem.warningBackground") : undefined;
     this.item.show();
   }

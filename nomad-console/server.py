@@ -728,22 +728,62 @@ def _frontmatter(path):
     return meta
 
 
+def _listed_projects(roots):
+    """nomad/projects.yaml as [(id, abs path, extra aliases)] for dispatchable entries whose
+    folder exists here, or None when there is no registry (then the caller scans the roots).
+    Same rules as dispatcher/dispatch.py registry(); paths are relative to the folder that
+    holds nomad/, so /host/nomad/projects.yaml resolves under /host."""
+    f = next((os.path.join(r, "nomad", "projects.yaml") for r in roots
+              if os.path.isfile(os.path.join(r, "nomad", "projects.yaml"))), None)
+    if not f:
+        return None
+    try:
+        import yaml
+        data = yaml.safe_load(open(f, encoding="utf-8")) or {}
+    except Exception:
+        return None
+    base = os.path.dirname(os.path.dirname(f))
+    out = []
+    for e in data.get("projects") or []:
+        if not isinstance(e, dict) or not e.get("id") or not e.get("path"):
+            continue
+        d = os.path.join(base, str(e["path"]))
+        if e.get("dispatch", True) is False or not os.path.isdir(d):
+            continue
+        out.append((str(e["id"]), d, {str(a).lower() for a in e.get("aliases") or []}))
+    return out
+
+
 def _registry():
-    """Projects = dirs under PROJECT_ROOTS containing Nomad.md. Cached 60s."""
+    """Projects = nomad/projects.yaml when present, else dirs under PROJECT_ROOTS containing
+    Nomad.md. Cached 60s."""
     if time.time() - _reg["ts"] < 60 and _reg["data"]:
         return _reg["data"]
+    listed = _listed_projects(PROJECT_ROOTS)
+    if listed is None:
+        listed = []
+        for root in PROJECT_ROOTS:
+            if not os.path.isdir(root):
+                continue
+            # A root nested inside another root is a product group (/host/civis): its repos are
+            # named `<group>-<dir>` ('civis-poc'), since bare dir names ('site') false-match text.
+            parent = os.path.dirname(os.path.normpath(root))
+            group = os.path.basename(os.path.normpath(root)) if any(
+                os.path.normpath(r) == parent for r in PROJECT_ROOTS) else ""
+            for nm in sorted(os.listdir(root)):
+                d = os.path.join(root, nm)
+                if os.path.isdir(d) and os.path.isfile(os.path.join(d, "Nomad.md")):
+                    listed.append((f"{group}-{nm}" if group else nm, d, set()))
     reg = []
-    for root in PROJECT_ROOTS:
-        if not os.path.isdir(root):
-            continue
-        for nm in sorted(os.listdir(root)):
-            d = os.path.join(root, nm)
-            if os.path.isdir(d) and os.path.isfile(os.path.join(d, "Nomad.md")):
-                name = _frontmatter(os.path.join(d, "Nomad.md")).get("name") or nm
-                aliases = {name.lower(), nm.lower(), nm.split("-")[0].lower()}
-                aliases |= {w for w in name.lower().split() if len(w) >= 4}
-                reg.append({"name": name, "path": d,
-                            "aliases": {a for a in aliases if len(a) >= 4}})
+    for slug, d, extra in listed:
+        fm = _frontmatter(os.path.join(d, "Nomad.md"))
+        name = fm.get("name") or slug
+        also = {a.strip().strip("'\"").lower() for a in
+                fm.get("aliases", "").strip("[] ").split(",") if a.strip()}
+        aliases = {name.lower(), slug.lower(), slug.split("-")[0].lower(), *also, *extra}
+        aliases |= {w for w in name.lower().split() if len(w) >= 4}
+        reg.append({"name": name, "path": d,
+                    "aliases": {a for a in aliases if len(a) >= 4}})
     _reg.update(ts=time.time(), data=reg)
     return reg
 

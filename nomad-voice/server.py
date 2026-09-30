@@ -81,7 +81,7 @@ WAKE_THRESHOLD = float(os.environ.get("WAKE_THRESHOLD", "0.5"))
 LITELLM_BASE = os.environ.get("LITELLM_BASE_URL", "http://127.0.0.1:4000").rstrip("/")
 LITELLM_KEY = os.environ.get("LITELLM_MASTER_KEY", "sk-noop")
 NOMAD_MODEL = os.environ.get("NOMAD_VOICE_MODEL", "fast")   # low-latency local default
-HOST = os.environ.get("NOMAD_VOICE_HOST", "0.0.0.0")
+HOST = os.environ.get("NOMAD_VOICE_HOST", "127.0.0.1")   # loopback only (#821); containers still reach it via host.docker.internal
 PORT = int(os.environ.get("NOMAD_VOICE_PORT", "8200"))
 SYSTEM = os.environ.get("NOMAD_VOICE_SYSTEM",
     "You are NOMAD, a calm, capable voice assistant. This is a spoken conversation, so keep replies "

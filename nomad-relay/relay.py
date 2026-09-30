@@ -36,6 +36,9 @@ OPERATOR_ID = os.environ.get("NOMAD_ZULIP_OPERATOR_ID", "")
 # Actions Zulip may approve. The rest (dispatch_build edits a repo) can only be rejected from here.
 REMOTE_ACTIONS = {a.strip() for a in os.environ.get(
     "NOMAD_RELAY_REMOTE_ACTIONS", "send_message,save_brief,save_content,generate_image").split(",") if a.strip()}
+# The cockpit's tailnet origin (#795), the same value the engine checks writes against. With it set,
+# gate, #runs and failure messages link to the run page (#800); unset, they read as before.
+COCKPIT = os.environ.get("NOMAD_TAILNET_ORIGIN", "").strip().rstrip("/")
 STATE_PATH = os.path.expanduser(os.environ.get("NOMAD_RELAY_STATE", "~/.local/state/nomad-relay/state.json"))
 POLL = float(os.environ.get("NOMAD_RELAY_POLL", "60"))
 DIGEST_AT = [s.strip() for s in os.environ.get("NOMAD_RELAY_DIGEST", "07:30,19:00").split(",") if s.strip()]
@@ -169,6 +172,12 @@ class Chat:
         if res.get("result") != "success":          # permissions vary by realm; cosmetic only
             log("resolve topic skipped:", res.get("msg"))
 
+    def react(self, message_id, emoji_name):
+        with self.lock:
+            res = self.c.add_reaction({"message_id": message_id, "emoji_name": emoji_name})
+        if res.get("result") != "success":          # an acknowledgement only; never fail on it
+            log("reaction skipped:", res.get("msg"))
+
     def raw_content(self, message_id):
         with self.lock:
             res = self.c.call_endpoint(url=f"messages/{message_id}", method="GET",
@@ -199,7 +208,8 @@ class State:
         self.path = path
         self.lock = threading.RLock()
         self.d = {"seeded": False, "runs": {}, "msgs": {}, "topics": {}, "projects": {},
-                  "blocked": {}, "alerts": {}, "digest_last": "", "locked": False}
+                  "blocked": {}, "alerts": {}, "digest_last": "", "locked": False,
+                  "pm": {"boot": "", "after": 0}, "pm_blocked": []}
         try:
             with open(path) as f:
                 self.d.update(json.load(f))
@@ -242,6 +252,7 @@ class Relay:
         self.sync_lock = threading.Lock()
         self.pool = ThreadPoolExecutor(max_workers=4)
         self.remote_actions = REMOTE_ACTIONS
+        self.cockpit = COCKPIT
         self.in_flight, self.flight_lock = set(), threading.Lock()
         self.strangers = []                               # other humans in the org → act on nothing
 
@@ -270,7 +281,7 @@ class Relay:
         entry = {"status": status, "topic": topic, "gate_msg": known.get("gate_msg")}
         if status == "awaiting-approval":
             remote_ok = d.get("action") in self.remote_actions and bool(d.get("proposal_hash"))
-            content, approvable = R.gate_view(d, remote_ok=remote_ok)
+            content, approvable = R.gate_view(d, remote_ok=remote_ok, cockpit=self.cockpit)
             mid = self.chat.send(R.GATE, topic, content)
             # Pin what was shown: the engine refuses if the proposal hash moved, and the relay refuses
             # if the Zulip message no longer says what it posted.
@@ -280,12 +291,12 @@ class Relay:
             entry["gate_msg"] = mid
         self.st.d["runs"][rid] = entry                   # recorded before the optional posts below
         try:
-            self.chat.send(R.RUNS, topic, R.status_message(d, status))
+            self.chat.send(R.RUNS, topic, R.status_message(d, status, cockpit=self.cockpit))
         except Exception as e:                           # the lifecycle feed is nice-to-have
             log("runs feed post failed:", e)
         if status != "awaiting-approval":
             if status == "failed":
-                mid = self.chat.send(R.ALERTS, topic, R.failed_alert(d))
+                mid = self.chat.send(R.ALERTS, topic, R.failed_alert(d, cockpit=self.cockpit))
                 self.st.link(mid, R.ALERTS, topic, {"kind": "failed", "run_id": rid})
             if entry.get("gate_msg") and status in ("executing", "executed", "failed", "declined"):
                 self.chat.send(R.GATE, topic, f"Resolved: {R.STATUS_LINE.get(status, status)}.")
@@ -316,11 +327,65 @@ class Relay:
                if t.get("status") == "Blocked"}
         seen = self.st.d["blocked"].get(gid, [])
         for tid, t in now.items():
-            if post and tid not in seen:
+            # A board task may already have been alerted from its OpenProject webhook (sync_pm).
+            if post and tid not in seen and tid not in self.st.d["pm_blocked"]:
                 topic = R.project_topic(gid)
                 mid = self.chat.send(R.ALERTS, topic, R.blocked_alert(title, t))
                 self.st.link(mid, R.ALERTS, topic, {"kind": "blocked", "task_id": tid})
         self.st.d["blocked"][gid] = list(now)
+
+    # outbound: OpenProject (PM-01 P4) ───────────────────────────────────────────────────────
+    def sync_pm(self):
+        """Webhook events the engine turned into facts → Zulip. A watched work package gets its own
+        topic in #projects; becoming Blocked or mentioning the operator also goes to #alerts, which
+        pushes to the phone. Replies in either topic go back as comments (comment_wp)."""
+        pm = self.st.d["pm"]
+        try:
+            d = self.eng.get("/pm-events", after=pm["after"], boot=pm["boot"])
+        except requests.HTTPError as e:
+            if e.response is not None and e.response.status_code == 404:
+                return                                   # an engine without P4
+            raise
+        if d.get("boot") != pm["boot"]:
+            pm["after"] = 0                              # the engine restarted: its queue is new
+        for ev in d.get("events", []):
+            if ev["seq"] <= pm["after"]:
+                continue
+            self._pm_event(ev)
+            pm["after"] = ev["seq"]
+        pm["boot"] = d.get("boot", "")
+        self.st.save()
+
+    def _pm_event(self, ev):
+        if ev.get("by_operator"):
+            return                                       # they know; they did it
+        if ev.get("origin") == "zulip" and not ev.get("to"):
+            return                                       # the operator's own reply, echoed back
+        wid = str(ev["wp_id"])
+        topic, ref = R.wp_topic(wid), {"kind": "wp", "wp_id": wid}
+        if ev.get("watched") or ev.get("mention"):
+            mid = self.chat.send(R.PROJECTS, topic, R.pm_event_message(ev))
+            self.st.link(mid, R.PROJECTS, topic, ref)
+        known = wid in self.st.d["pm_blocked"] or any(wid in v for v in self.st.d["blocked"].values())
+        if ev.get("blocked") and not known:
+            mid = self.chat.send(R.ALERTS, topic, R.pm_alert(ev, "blocked"))
+            self.st.link(mid, R.ALERTS, topic, ref)
+            self.st.d["pm_blocked"] = (self.st.d["pm_blocked"] + [wid])[-KEEP:]
+        elif ev.get("mention"):
+            mid = self.chat.send(R.ALERTS, topic, R.pm_alert(ev, "mention"))
+            self.st.link(mid, R.ALERTS, topic, ref)
+        if ev.get("to") and ev["to"] != "Blocked" and wid in self.st.d["pm_blocked"]:
+            self.st.d["pm_blocked"].remove(wid)          # unblocked: a later block alerts again
+
+    def comment_wp(self, ref, msg, where):
+        """The operator's reply in a work package topic → an OpenProject comment, through the
+        engine. ✅ on their message says it landed; a failure comes back as a DM (_guard)."""
+        why = self.refusal()
+        if why:
+            self._reply(where, why)
+            return
+        self.eng.post("/pm-comment", {"wp_id": int(ref["wp_id"]), "text": msg.get("content", "")}, timeout=30)
+        self.chat.react(msg.get("id"), "check")
 
     # outbound: console alerts ────────────────────────────────────────────────────────────────
     def sync_alerts(self):
@@ -380,7 +445,7 @@ class Relay:
         except Exception:
             projects = []
         sections = [R.calendar_section(data, tz=TZ), R.mail_section(data),
-                    R.open_tasks_section(projects), R.gate_queue_section(pending)]
+                    R.open_tasks_section(projects), self._board_section(mode), R.gate_queue_section(pending)]
         if mode == "friday":
             cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=7)
 
@@ -396,6 +461,16 @@ class Relay:
                                      "calendar/mail lines above are that failure, not an empty day.")
         generated = data.get("generated_at") or dt.datetime.now(TZ).isoformat()
         return R.briefing_message(mode, generated, sections, note)
+
+    def _board_section(self, mode):
+        try:
+            return R.board_section(self.eng.get("/pm-summary"), friday=mode == "friday")
+        except requests.HTTPError as e:
+            if e.response is not None and e.response.status_code == 404:
+                return None                              # an engine without P4: leave it out
+            return R.board_section(None, error=str(e))
+        except Exception as e:
+            return R.board_section(None, error=str(e))
 
     def summary(self, hours=None, title="Status"):
         runs = self.eng.get("/runs").get("runs", [])
@@ -454,6 +529,10 @@ class Relay:
                 self.pool.submit(self._guard, self.command, msg.get("content", ""))
             elif msg.get("type") == "stream":
                 ref = self.st.by_topic(msg.get("display_recipient"), msg.get("subject", ""))
+                if ref and ref.get("kind") == "wp":
+                    self.pool.submit(self._guard, self.comment_wp, ref, msg,
+                                     (msg.get("display_recipient"), msg.get("subject")))
+                    return
                 intent = R.topic_reply_intent(msg.get("content"))
                 if ref and intent:
                     self._submit(intent, ref, (msg.get("display_recipient"), msg.get("subject")))
@@ -517,6 +596,8 @@ class Relay:
         return (ref, mid) if ref and ref.get("kind") == "gate" else (None, None)
 
     def _act(self, intent, ref, where):
+        if ref.get("kind") == "wp":
+            return                                       # work package topics take replies, not reactions
         if ref.get("kind") == "blocked" or ref.get("task_id"):
             if intent not in ("retry", "skip"):
                 return
@@ -537,13 +618,15 @@ class Relay:
                 # the whole proposal, for an action allowed remotely.
                 gate, mid = (ref, ref.get("message_id")) if ref.get("kind") == "gate" else self._gate_ref(rid)
                 if not gate or not mid:
-                    self._reply(where, f"Run `{rid}` has no gate message here; approve it in the cockpit.")
+                    self._reply(where, f"Run `{rid}` has no gate message here; approve it in the cockpit"
+                                       + self._at(rid))
                     return
                 if not gate.get("approvable") or not gate.get("proposal_hash"):
-                    self._reply(where, f"🔒 Run `{rid}` can only be approved in the cockpit.")
+                    self._reply(where, f"🔒 Run `{rid}` can only be approved in the cockpit" + self._at(rid))
                     return
                 if _sha(self.chat.raw_content(mid)) != gate.get("shown"):
-                    self._reply(where, f"🔒 The gate message for `{rid}` was edited; approve it in the cockpit.")
+                    self._reply(where, f"🔒 The gate message for `{rid}` was edited; approve it in the cockpit"
+                                       + self._at(rid))
                     return
                 body = {"run_id": rid, "decision": "approved", "expect_hash": gate["proposal_hash"]}
             decision = body["decision"]
@@ -561,6 +644,11 @@ class Relay:
             r = self.eng.post("/retry", {"run_id": rid}, timeout=60)
             self._reply(where, f"🔁 Back at the gate: `{r.get('status') or r.get('error')}`. Watch #gate.")
         self.wake.set()
+
+    def _at(self, rid):
+        """": <run page>" to end an "approve it in the cockpit" reply, or "." without a cockpit."""
+        url = R.run_url(self.cockpit, rid)
+        return f": {url}" if url else "."
 
     def _run_by_prefix(self, prefix):
         hits = [rid for rid in self.st.d["runs"] if rid.startswith(prefix)]
@@ -640,6 +728,10 @@ class Relay:
             except Exception as e:
                 log("runs sync failed:", e)
                 time.sleep(5)
+            try:
+                self.sync_pm()
+            except Exception as e:
+                log("pm sync failed:", e)
 
     def check_org(self):
         """Fail closed if anyone besides the operator can log in to this org."""

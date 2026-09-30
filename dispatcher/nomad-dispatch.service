@@ -11,13 +11,14 @@ StartLimitBurst=5
 Type=simple
 WorkingDirectory=/home/jdelimam/nomad/dispatcher
 Environment=HOME=/home/jdelimam
-Environment=PATH=/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin
+# ~/.local/bin first: the native claude installer puts `claude` there (#861).
+Environment=PATH=/home/jdelimam/.local/bin:/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin
 Environment=ANTHROPIC_API_KEY=
 # Projects are any child of a root carrying a Nomad.md marker. Repos that live outside this
 # tree (the Tauri shell, on the Windows filesystem) are reached by symlinking them in here —
 # adding /mnt/c/... as a second root would surface a second RuneMatch checkout under the same
 # name, and the dispatcher would then refuse both rather than guess.
-Environment=PROJECT_ROOTS=/home/jdelimam
+Environment=PROJECT_ROOTS=/home/jdelimam:/home/jdelimam/content-creation:/home/jdelimam/civis
 ExecStart=/usr/bin/python3 /home/jdelimam/nomad/dispatcher/dispatch.py
 Restart=always
 RestartSec=3

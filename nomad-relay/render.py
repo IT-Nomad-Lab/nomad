@@ -6,6 +6,7 @@ without Zulip or the engine running.
 import datetime as _dt
 import json
 import re
+import urllib.parse
 
 # Channels. #gate and #alerts push to the phone; the rest are read on demand (set by bootstrap.py).
 GATE, ALERTS, RUNS, PROJECTS, DIGEST = "gate", "alerts", "runs", "projects", "digest"
@@ -46,13 +47,45 @@ def clip(text, n):
 
 
 # Topics carry ids only. Goal and project titles come from untrusted input (email, web pages) and
-# topic names are visible in lock-screen previews and the channel list.
+# topic names are visible in lock-screen previews and the channel list. The one name allowed in is
+# the OpenProject board identifier, which the operator chose when making the board (#776). A dev
+# run's repo is not: the Manager writes it from the goal text, so it stays inside the message.
+_BOARD = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
+
+
 def run_topic(detail: dict) -> str:
-    return f"run {(detail.get('run_id') or '?')[:12]}"
+    rid = f"run {(detail.get('run_id') or '?')[:12]}"
+    board = ((detail.get("project") or {}).get("board") or "")
+    return f"{board} · {rid}" if _BOARD.match(board) else rid
+
+
+def project_line(d: dict) -> str:
+    """Which project a run is for, as the engine's /run reports it. Says "no project" when there is
+    none, so a missing line never reads as a relay that forgot to say."""
+    p = d.get("project") or {}
+    bits = []
+    if p.get("board") or p.get("project_name"):
+        bits.append(code(p.get("board") or "?", 40)
+                    + (f" ({esc(p['project_name'], 60)})" if p.get("project_name") else ""))
+    if p.get("wp_id"):
+        wp = f"#{int(p['wp_id'])}" + (f" {esc(p['wp_subject'], 120)}" if p.get("wp_subject") else "")
+        bits.append(f"[{wp}]({p['wp_url']})" if p.get("wp_url") else wp)
+        if p.get("pm_error"):
+            bits.append("board did not answer")
+    elif p.get("task_ref"):
+        bits.append(f"mission-control task {code(p['task_ref'], 20)}")
+    if p.get("repo"):
+        bits.append(f"repo {code(p['repo'], 60)}")
+    return "**Project:** " + (" · ".join(bits) if bits else "no project")
 
 
 def project_topic(goal_id) -> str:
     return f"project {goal_id}"
+
+
+def wp_topic(wp_id) -> str:
+    """One topic per OpenProject work package, in #projects and in #alerts (PM-01 P4)."""
+    return f"wp {wp_id}"
 
 
 _ZWSP = "\u200b"
@@ -89,12 +122,28 @@ def _arg_text(v) -> str:
     return v if isinstance(v, str) else json.dumps(v, ensure_ascii=False, default=str)
 
 
-def gate_view(d: dict, remote_ok: bool = True, limit: int = 1500, arg_limit: int = 300):
+def run_url(cockpit: str | None, run_id) -> str | None:
+    """The run page in the cockpit (#799, #800), or None when the relay has no cockpit address.
+
+    `cockpit` is the cockpit's tailnet origin, so the link opens on the phone. The run id is the
+    engine's own, but it is quoted anyway: it ends up in a link the operator taps."""
+    if not cockpit or not run_id:
+        return None
+    return f"{cockpit.rstrip('/')}/cockpit/run/{urllib.parse.quote(str(run_id), safe='')}"
+
+
+def gate_view(d: dict, remote_ok: bool = True, limit: int = 1500, arg_limit: int = 300,
+              cockpit: str | None = None):
     """→ (message, complete). `complete` is False when anything the engine would execute had to be
-    cut to fit; the relay then refuses remote approval, because you'd be approving text you didn't see."""
+    cut to fit; the relay then refuses remote approval, because you'd be approving text you didn't see.
+
+    With `cockpit` set, the message ends with the run page's link (R6), on every gate message, the
+    ones Zulip can approve too. The link is part of the text the relay hashes as "shown", so it
+    does not weaken the edit check. The URL stays last on its line so no punctuation joins it."""
     a = d.get("args") or {}
     complete = True
     lines = [f"**🛂 Approval needed** · {code(d.get('lane'), 20)} · run `{d.get('run_id')}`",
+             project_line(d),
              f"**Action:** {code(d.get('action'), 40)}",
              "**Goal:**", _fence(clip(d.get("goal") or d.get("intent"), 300))]
     body_key = next((k for k in PREVIEW_KEYS if a.get(k)), None)
@@ -113,6 +162,10 @@ def gate_view(d: dict, remote_ok: bool = True, limit: int = 1500, arg_limit: int
             complete = False
             body = body[:limit].rstrip() + "\n…(truncated)"
         lines += [f"**{body_key.capitalize()}:**", _fence(body)]
+    # The engine's own verdict on a build's project (#851): named here, before the approval, instead
+    # of surfacing as "Unknown project" after it.
+    if d.get("project_warning"):
+        lines.append("⚠️ **Project not resolved:** " + esc(d["project_warning"], 600))
     det = d.get("detector") or {}
     if det.get("checked"):
         bits = [f"verdict **{det.get('verdict')}**"]
@@ -123,17 +176,22 @@ def gate_view(d: dict, remote_ok: bool = True, limit: int = 1500, arg_limit: int
         if det.get("rewritten"):
             bits.append("rewritten once")
         lines.append("**AI-text check:** " + " · ".join(bits))
+    url = run_url(cockpit, d.get("run_id"))
     if not remote_ok:
-        lines.append(f"🔒 {code(d.get('action'), 40)} is cockpit-only. React ❌ to reject; approve it in the cockpit.")
+        lines.append(f"🔒 {code(d.get('action'), 40)} is cockpit-only. React ❌ to reject; "
+                     + (f"approve it in the cockpit: {url}" if url else "approve it in the cockpit."))
     elif not complete:
-        lines.append("🔒 Too long to show in full, so approve it in the cockpit. React ❌ to reject.")
+        lines.append(f"🔒 Too long to show in full. React ❌ to reject, or approve it in the cockpit: {url}"
+                     if url else "🔒 Too long to show in full, so approve it in the cockpit. React ❌ to reject.")
     else:
         lines.append("React ✅ to approve or ❌ to reject, or reply `approve` / `reject` here.")
+        if url:
+            lines.append(f"Open in cockpit: {url}")
     return "\n".join(lines), complete and remote_ok
 
 
-def gate_message(d: dict, remote_ok: bool = True, limit: int = 1500) -> str:
-    return gate_view(d, remote_ok, limit)[0]
+def gate_message(d: dict, remote_ok: bool = True, limit: int = 1500, cockpit: str | None = None) -> str:
+    return gate_view(d, remote_ok, limit, cockpit=cockpit)[0]
 
 
 STATUS_LINE = {
@@ -146,18 +204,26 @@ STATUS_LINE = {
 }
 
 
-def status_message(d: dict, status: str) -> str:
+def status_message(d: dict, status: str, cockpit: str | None = None) -> str:
     line = STATUS_LINE.get(status, f"status → `{status}`")
+    url = run_url(cockpit, d.get("run_id"))
+    if url:                                  # on the status line itself, so every #runs post has it
+        line += f" · [open in cockpit]({url})"
+    if status == "awaiting-approval":       # once per run is enough; the topic carries the rest
+        line += "\n" + project_line(d)
     if status == "failed" and d.get("error"):
         line += f"\n{_fence(clip(d['error'], 800))}"
     return line
 
 
-def failed_alert(d: dict) -> str:
+def failed_alert(d: dict, cockpit: str | None = None) -> str:
+    url = run_url(cockpit, d.get("run_id"))
     return (f"**💥 Run failed** · {code(d.get('lane'), 20)} · run `{d.get('run_id')}`\n"
+            f"{project_line(d)}\n"
             f"**Action:** {code(d.get('action'), 40)}\n"
             f"{_fence(clip(d.get('error') or 'no error text recorded', 800))}\n"
-            "React 🔁 to put it back at the gate, or reply `retry`.")
+            "React 🔁 to put it back at the gate, or reply `retry`."
+            + (f"\nOpen in cockpit: {url}" if url else ""))
 
 
 def blocked_alert(project: str, task: dict) -> str:
@@ -172,6 +238,68 @@ def progress_message(p: dict, prev: dict | None) -> str:
         return f"🏁 **Complete**: all {p['total']} tasks done."
     was = f" (was {prev.get('done')}/{prev.get('total')})" if prev else ""
     return f"📈 {p.get('done')}/{p.get('total')} tasks done, {p.get('pct')}%{was}"
+
+
+# ── OpenProject follow (PM-01 P4): one engine event → one Zulip line ────────────────────────────
+def _wp_head(ev: dict) -> str:
+    return f"{esc(ev.get('type') or 'Work package', 20)} #{int(ev['wp_id'])} {esc(ev.get('subject'), 120)}"
+
+
+def _said(ev: dict) -> str:
+    c = (ev.get("comment") or "").strip()
+    return f"\n{_fence(clip_block(c, 1200))}" if c else ""
+
+
+def clip_block(text: str, n: int) -> str:
+    """Like clip, but keeps line breaks, for a comment shown in a block."""
+    return text if len(text) <= n else text[: n - 1].rstrip() + "…"
+
+
+def pm_event_message(ev: dict) -> str:
+    who = esc(ev.get("author") or "someone", 60)
+    if ev.get("action") == "created":
+        line = f"🆕 {_wp_head(ev)} · created by {who}"
+    elif ev.get("to"):
+        line = f"🔀 {_wp_head(ev)} · {esc(ev.get('from') or '?', 30)} → **{esc(ev['to'], 30)}** · by {who}"
+    else:
+        line = f"💬 {_wp_head(ev)} · {who}"
+    return line + _said(ev) + f"\n[open in OpenProject]({ev['url']})" * bool(ev.get("url"))
+
+
+def pm_alert(ev: dict, why: str) -> str:
+    who = esc(ev.get("author") or "someone", 60)
+    if why == "blocked":
+        lane = f", lane {code(ev['lane'], 20)}" if ev.get("lane") else ""
+        head = f"**⛔ Blocked**: {_wp_head(ev)} in {esc(ev.get('project'), 60)}{lane} · by {who}"
+    else:
+        head = f"**📣 {who} mentioned you** on {_wp_head(ev)}"
+    return head + _said(ev) + "\nReply in this topic to comment on it in OpenProject."
+
+
+def board_section(s, error: str | None = None, friday: bool = False):
+    """The OpenProject board in the briefing. None means the engine has no board to show, and
+    then the section is left out; a failed read says so by name."""
+    if error:
+        return f"⚠ **Board:** did not load — {esc(error, 300)}"
+    if s is None:
+        return None
+    active = [f"{r['n']} {esc(r['status'], 30)}" for r in s.get("by_status", [])
+              if r["status"] in ("In Progress", "Awaiting approval", "In Review", "Blocked")]
+    lines = [f"**Board ({esc(s.get('project'), 40)}):** {s.get('open', 0)} open"
+             + (" · " + ", ".join(active) if active else "")]
+    blocked = s.get("blocked") or []
+    if blocked:
+        lines.append(f"⛔ Blocked or waiting ({len(blocked)}):")
+        for b in blocked[:8]:
+            waits = [c for c in b.get("chain", []) if c.get("depth") == 1]
+            on = ", waiting on " + ", ".join(f"#{c['id']} {esc(c.get('subject'), 60)} ({esc(c.get('status'), 20)})"
+                                             for c in waits[:3]) if waits else ""
+            lane = f" [{esc(b['lane'], 20)}]" if b.get("lane") else ""
+            lines.append(f"- #{b['id']} {esc(b.get('subject'), 80)}{lane} · {esc(b.get('status'), 20)}{on}")
+    if friday and s.get("throughput"):
+        w = s["throughput"][-1]
+        lines.append(f"Done this week: {w['agent']} by agents, {w['human']} by people.")
+    return "\n".join(lines)
 
 
 # ── T2.1 briefing: calendar/mail (from n8n) + tasks/gate (from the engine) ─────────────────────

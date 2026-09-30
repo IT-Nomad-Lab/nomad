@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Trimmed from a real RuneMatch `scripts/unity.sh test PlayMode` result (Unity 6, NUnit 3.5). -->
+<test-run id="2" testcasecount="6" result="Failed(Child)" total="6" passed="2" failed="2" inconclusive="1" skipped="1" asserts="0" engine-version="3.5.0.0" clr-version="4.0.30319.42000" start-time="2026-09-26 00:46:36Z" end-time="2026-09-26 00:56:21Z" duration="584.2">
+  <test-suite type="TestSuite" id="1554" name="RuneMatch" fullname="RuneMatch" runstate="Runnable" testcasecount="6" result="Failed" site="Child" total="6" passed="2" failed="2" inconclusive="1" skipped="1" asserts="0">
+    <properties>
+      <property name="platform" value="PlayMode" />
+    </properties>
+    <failure>
+      <message><![CDATA[One or more child tests had errors]]></message>
+    </failure>
+    <test-suite type="Assembly" id="1515" name="RuneMerge.Tests.PlayMode.dll" fullname="C:/Users/josia/Projects/RuneMatch/Library/ScriptAssemblies/RuneMerge.Tests.PlayMode.dll" runstate="Runnable" testcasecount="6" result="Failed" site="Child" total="6" passed="2" failed="2" inconclusive="1" skipped="1" asserts="0">
+      <test-suite type="TestFixture" id="1001" name="AbilityTests" fullname="RuneMerge.Tests.AbilityTests" classname="RuneMerge.Tests.AbilityTests" runstate="Runnable" testcasecount="2" result="Passed" total="2" passed="2" failed="0" inconclusive="0" skipped="0" asserts="0">
+        <test-case id="1002" name="AB1_Hidden_WithoutProfile" fullname="RuneMerge.Tests.AbilityTests.AB1_Hidden_WithoutProfile" methodname="AB1_Hidden_WithoutProfile" classname="RuneMerge.Tests.AbilityTests" runstate="Runnable" seed="77983672" result="Passed" duration="1.295395" asserts="0" />
+        <test-case id="1003" name="AB2_Hidden_ForClasslessProfile" fullname="RuneMerge.Tests.AbilityTests.AB2_Hidden_ForClasslessProfile" methodname="AB2_Hidden_ForClasslessProfile" classname="RuneMerge.Tests.AbilityTests" runstate="Runnable" seed="376487507" result="Passed" duration="0.260145" asserts="0" />
+      </test-suite>
+      <test-suite type="TestFixture" id="1400" name="PowerUpWildBurstTests" fullname="RuneMerge.Tests.PowerUpWildBurstTests" classname="RuneMerge.Tests.PowerUpWildBurstTests" runstate="Runnable" testcasecount="2" result="Failed" site="Child" total="2" passed="0" failed="2" inconclusive="0" skipped="0" asserts="0">
+        <test-case id="1404" name="PWR2_5_LodestoneGathersItsOwnColor" fullname="RuneMerge.Tests.PowerUpWildBurstTests.PWR2_5_LodestoneGathersItsOwnColor" methodname="PWR2_5_LodestoneGathersItsOwnColor" classname="RuneMerge.Tests.PowerUpWildBurstTests" runstate="Runnable" seed="1191522606" result="Failed" duration="5.367550" asserts="0">
+          <failure>
+            <message><![CDATA[  Expected: 3
+  But was:  2
+]]></message>
+            <stack-trace><![CDATA[at RuneMerge.Tests.PowerUpWildBurstTests+<PWR2_5_LodestoneGathersItsOwnColor>d__12.MoveNext () [0x001b2]]]></stack-trace>
+          </failure>
+        </test-case>
+        <test-case id="1405" name="LevelCurve_CV5a_Boss" fullname="RuneMerge.Tests.LevelCurveTests.CV5a_BossFractionsSitInTheSameBand" methodname="CV5a_BossFractionsSitInTheSameBand" classname="RuneMerge.Tests.LevelCurveTests" runstate="Runnable" result="Failed" label="Error" duration="0.1" asserts="0">
+          <failure>
+            <message><![CDATA[System.InvalidOperationException : red on purpose]]></message>
+          </failure>
+        </test-case>
+      </test-suite>
+      <test-suite type="TestFixture" id="1500" name="ScreenshotTests" fullname="RuneMerge.Tests.ScreenshotTests" runstate="Runnable" testcasecount="2" result="Skipped" total="2" passed="0" failed="0" inconclusive="1" skipped="1" asserts="0">
+        <test-case id="1501" name="SS1_Capture" fullname="RuneMerge.Tests.ScreenshotTests.SS1_Capture" methodname="SS1_Capture" classname="RuneMerge.Tests.ScreenshotTests" runstate="Explicit" result="Skipped" label="Explicit" asserts="0">
+          <reason>
+            <message><![CDATA[]]></message>
+          </reason>
+        </test-case>
+        <test-case id="1502" name="SS2_Compare" fullname="RuneMerge.Tests.ScreenshotTests.SS2_Compare" methodname="SS2_Compare" classname="RuneMerge.Tests.ScreenshotTests" runstate="Runnable" result="Inconclusive" asserts="0" />
+      </test-suite>
+    </test-suite>
+  </test-suite>
+</test-run>

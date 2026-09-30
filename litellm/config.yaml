@@ -20,7 +20,7 @@ model_list:
       api_base: http://host.docker.internal:11434
 
   # 2026-09-15: was deepseek-r1:32b. qwen3.6 scored the same (7/8) on the
-  # ~/colibri-bench quality set at ~20x the speed, and fits the 5090 at 8k ctx.
+  # ~/vendor/colibri-bench quality set at ~20x the speed, and fits the 5090 at 8k ctx.
   # Needs ~22 GB VRAM: it evicts ComfyUI / nomad-detect when it loads.
   - model_name: private         # local reasoning, privacy-sensitive, offline
     litellm_params:
@@ -150,6 +150,10 @@ router_settings:
 litellm_settings:
   drop_params: true
   # success_callback: ["langfuse"]   # enable later for observability
+  # Zulip #alerts > litellm-fallback when a Claude alias (deep, balanced) is served by codex or a
+  # local model. Resolved next to this file: docker-compose mounts it at /app/fallback_alert.py.
+  # Test it: docker exec nomad-litellm python /app/fallback_alert.py --test-alert
+  callbacks: fallback_alert.proxy_handler_instance
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY

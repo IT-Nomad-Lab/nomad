@@ -11,7 +11,7 @@ export function activate(ctx: vscode.ExtensionContext) {
   ctx.subscriptions.push(output);
 
   let state: NomadState = {
-    name: "—", hasMarker: false, git: { isRepo: false }, approvals: [], services: [], loading: false,
+    name: "—", hasMarker: false, git: { isRepo: false }, approvals: [], services: [], servicesStale: false, loading: false,
   };
   const getState = () => state;
 

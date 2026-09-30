@@ -7,6 +7,8 @@ import datetime as dt
 import os
 import sys
 
+import requests
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import render as R  # noqa: E402
@@ -27,6 +29,12 @@ MAIL_BROKEN = {**CAL_OK_EMPTY, "mail_ok": False, "mail_needing_reply": None,
                              "authentication included, or unsupported authentication method)."}
 
 
+def not_found():
+    resp = requests.Response()
+    resp.status_code = 404
+    return requests.HTTPError("404 Not Found", response=resp)
+
+
 class FakeEngine:
     def __init__(self):
         self.runs = {}
@@ -34,6 +42,7 @@ class FakeEngine:
         self.payload = CAL_OK_EMPTY
         self.briefing_error = None
         self.calls = []
+        self.board = None          # None: an engine without /pm-summary (404)
 
     def add(self, rid, status, lane="comms", created_at=None, **detail):
         self.runs[rid] = {"run_id": rid, "lane": lane, "status": status,
@@ -44,6 +53,12 @@ class FakeEngine:
             return {"runs": list(self.runs.values())}
         if path == "/project-goals":
             return {"projects": self.projects}
+        if path == "/pm-summary":
+            if isinstance(self.board, Exception):
+                raise self.board
+            if self.board is None:
+                raise not_found()
+            return self.board
         raise KeyError(path)
 
     def post(self, path, body, timeout=None):
@@ -244,3 +259,33 @@ def test_parse_command_recognizes_briefing_verbs():
     assert R.parse_command("briefing") == ("briefing", None)
     assert R.parse_command("Friday Review") == ("friday_review", None)
     assert R.parse_command("brief me")[0] == "chat"          # not an exact match: goes to chat
+
+
+# ── PM-01 P4: the OpenProject board in the briefing ─────────────────────────────────────────────
+BOARD = {"project": "nomad-work", "open": 6,
+         "by_status": [{"status": "Ready", "n": 3, "types": {"Task": 3}},
+                       {"status": "In Progress", "n": 2, "types": {"Task": 1, "Feature": 1}},
+                       {"status": "Blocked", "n": 1, "types": {"Task": 1}}],
+         "blocked": [{"id": 112, "subject": "Wire the API", "status": "Blocked", "lane": "dev",
+                      "chain": [{"id": 111, "subject": "Get the key", "status": "Ready", "depth": 1},
+                                {"id": 110, "subject": "Ask", "status": "New", "depth": 2}]}],
+         "throughput": [{"week": "2026-09-21", "agent": 4, "human": 1}]}
+
+
+def test_board_section_lists_open_and_blocked(tmp_path):
+    r, eng, chat = make(tmp_path)
+    eng.board = BOARD
+    text = r.briefing_text("morning")
+    assert "**Board (nomad-work):** 6 open · 2 In Progress, 1 Blocked" in text
+    assert "#112 Wire the API [dev] · Blocked, waiting on #111 Get the key (Ready)" in text
+    assert "#110" not in text                       # the briefing names direct blockers only
+    assert "Done this week" not in text
+    assert "4 by agents, 1 by people" in r.briefing_text("friday")
+
+
+def test_board_section_absent_vs_broken(tmp_path):
+    r, eng, chat = make(tmp_path)
+    assert "Board" not in r.briefing_text("morning")        # no P4 on the engine: left out
+    eng.board = ConnectionError("engine down")
+    text = r.briefing_text("morning")
+    assert "⚠ **Board:** did not load — engine down" in text

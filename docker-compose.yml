@@ -20,8 +20,16 @@ services:
       - "127.0.0.1:4000:4000"
     volumes:
       - ./litellm/config.yaml:/app/config.yaml:ro
+      # Fallback alert callback, beside the config so LiteLLM resolves it, and the Zulip bot
+      # credentials the relay and nomad-watch already use. See litellm/fallback_alert.py.
+      - ./litellm/fallback_alert.py:/app/fallback_alert.py:ro
+      - ${HOME}/.config/nomad/zulip-bot.zuliprc:/run/nomad/zulip-bot.zuliprc:ro
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     env_file: .env
+    environment:
+      - NOMAD_ZULIPRC=/run/nomad/zulip-bot.zuliprc
+      # Zulip is on the host loopback; host.docker.internal reaches it (see CLAUDE.md).
+      - NOMAD_FALLBACK_ZULIP_URL=http://host.docker.internal:8096
     restart: unless-stopped
 
   # ── Chat UI + voice + mobile PWA ───────────────────────────────────
@@ -85,12 +93,21 @@ services:
     environment:
       - NOMAD_RUNTIME=litellm                                  # SDK runtime is host/dev (see Dockerfile)
       - NOMAD_V2_ENGINE_HOST=0.0.0.0
+      # tailnet by default: local requests behave as with `off`, and only the operator's login
+      # gets in through `tailscale serve` on 8449 (#795). v2/publish.sh sets `on` in the shell for
+      # one `up -d`. Not in .env on purpose: a login that is on by default is a login that gets
+      # turned off locally and left off.
+      - NOMAD_AUTH_MODE=${NOMAD_AUTH_MODE:-tailnet}
+      # Both from .env. Left unset, nothing is served through the proxy (503), and local is unchanged.
+      - NOMAD_TAILNET_OPERATOR=${NOMAD_TAILNET_OPERATOR:-}
+      - NOMAD_TAILNET_ORIGIN=${NOMAD_TAILNET_ORIGIN:-}
       - NC_BASE_URL=http://nocodb:8080                         # NocoDB on the compose network
       - NOMAD_PG_HOST=postgres                                 # push gate: LISTEN/NOTIFY
       - NOMAD_PG_DB=nomad_v2
       - LITELLM_BASE_URL=http://litellm:4000
       - N8N_V2_SEND_URL=http://host.docker.internal:5678/webhook/v2-send  # standalone n8n
       - NOMAD_DISPATCH_URL=http://host.docker.internal:8090               # dev lane → Builder (native dispatcher)
+      - NOMAD_AUTOPILOT_URL=http://host.docker.internal:8092              # autopilot supervisor (#882); its token comes from /term-secret/autopilot-token
       - NOMAD_VOICE_URL=http://host.docker.internal:8200                           # 3D: local Piper/Whisper
       - NOMAD_CONSOLE_URL=http://nomad-console:8000                       # cockpit telemetry strip (CPU/MEM/GPU)
       - NOMAD_TERM_URL=ws://host.docker.internal:8091                     # interactive project terminal (PTY daemon)
@@ -107,8 +124,20 @@ services:
       - OPENAI_IMAGE_MODEL=gpt-image-1                                    # OpenAI Images (uses OPENAI_API_KEY)
       - NOMAD_IMAGE_DIR=/app/generated_images
       - NOMAD_PROMPTS_DIR=/app/prompts                  # named prompt registry (JDE_STYLE etc.)
+      # PM-01 P3: where projects live. nocodb (mc_goals/milestones/tasks) or openproject (nomad-pm,
+      # Feature > Epic > Task in NOMAD_PM_PROJECT). Tokens come from /term-secret below.
+      - NOMAD_PM=${NOMAD_PM:-nocodb}
+      - NOMAD_PM_URL=http://host.docker.internal:8097
+      - NOMAD_PM_PROJECT=nomad-work
+      # PM-01 P4: OpenProject's signed webhook lands on /pm-hook (secret in
+      # /term-secret/openproject-webhook.secret, made by ~/nomad-pm/seed.sh). The operator is
+      # OpenProject user 4; their watches and @mentions reach Zulip. Links in Zulip use the public URL.
+      - NOMAD_PM_OPERATOR_ID=${NOMAD_PM_OPERATOR_ID:-4}
+      - NOMAD_PM_PUBLIC_URL=${NOMAD_PM_PUBLIC_URL:-http://localhost:8097}
     volumes:
       - /home/jdelimam/.config/nomad:/term-secret:ro   # read the terminal daemon's shared token
+      # nomad-watch's own results, read-only. The engine reports them; it does not probe.
+      - /home/jdelimam/.local/state/nomad-watch:/watch-state:ro
       - ./v2/generated_images:/app/generated_images    # persisted generated images (served at /images)
       - ./prompts:/app/prompts:ro                       # house voice + shared prompt blocks (single source of truth)
     deploy:                    # GPU so the cockpit reads nvidia-smi itself instead of asking the v1 console
@@ -212,7 +241,7 @@ services:
     environment:
       - LITELLM_BASE_URL=http://litellm:4000
       - NOMAD_MODEL=deep
-      - PROJECT_ROOTS=/host
+      - PROJECT_ROOTS=/host:/host/content-creation:/host/civis
       - QDRANT_URL=http://qdrant:6333          # long-term conversational memory
       - OLLAMA_URL=http://host.docker.internal:11434  # embeddings (nomic-embed-text)
       - NOMAD_VOICE_URL=http://host.docker.internal:8200  # local Piper TTS + Whisper STT (server-side proxy)

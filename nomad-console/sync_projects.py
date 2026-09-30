@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Sync NOMAD's project list from `Nomad.md` markers into mission control.
 
-Any directory under PROJECT_ROOTS that contains a `Nomad.md` file is a NOMAD
-project. Its frontmatter is upserted into the Projects table the console reads.
-Drop a Nomad.md into any repo → it joins the list.
+The projects listed in nomad/projects.yaml are NOMAD projects (without that file: any
+directory under PROJECT_ROOTS that contains a `Nomad.md`). Each one's Nomad.md frontmatter is
+upserted into the Projects table the console reads. Add a projects.yaml entry → it joins.
 
 Sink is chosen by NOMAD_SOURCE (matches the console):
   - "nocodb" (default for the live cutover): upsert into the NocoDB `projects` table,
@@ -57,29 +57,57 @@ def _as_list(v):
     return ", ".join(p for p in parts if p)
 
 
-def discover():
-    """Return [{name, status, lane, stack, repo, owner}] for every Nomad.md project."""
-    found = {}
-    for root in ROOTS:
-        if not os.path.isdir(root):
+def _listed_projects(roots):
+    """nomad/projects.yaml as [(id, abs path, extra aliases)] for dispatchable entries whose
+    folder exists here, or None when there is no registry (then the caller scans the roots).
+    Same rules as dispatcher/dispatch.py registry(); paths are relative to the folder that
+    holds nomad/, so /host/nomad/projects.yaml resolves under /host."""
+    f = next((os.path.join(r, "nomad", "projects.yaml") for r in roots
+              if os.path.isfile(os.path.join(r, "nomad", "projects.yaml"))), None)
+    if not f:
+        return None
+    try:
+        import yaml
+        data = yaml.safe_load(open(f, encoding="utf-8")) or {}
+    except Exception:
+        return None
+    base = os.path.dirname(os.path.dirname(f))
+    out = []
+    for e in data.get("projects") or []:
+        if not isinstance(e, dict) or not e.get("id") or not e.get("path"):
             continue
-        for name in sorted(os.listdir(root)):
-            d = os.path.join(root, name)
-            mk = os.path.join(d, "Nomad.md")
-            if not (os.path.isdir(d) and os.path.isfile(mk)):
-                continue
-            m = frontmatter(mk)
-            if str(m.get("nomad", "true")).lower() == "false":
-                continue
-            disp = m.get("name") or name
-            found[disp] = {
-                "name": disp,
-                "status": (m.get("status") or "Active").capitalize(),
-                "lane": m.get("lane", ""),
-                "stack": _as_list(m.get("stack", "")),
-                "repo": m.get("repo", ""),
-                "owner": m.get("owner", "Josias"),
-            }
+        d = os.path.join(base, str(e["path"]))
+        if e.get("dispatch", True) is False or not os.path.isdir(d):
+            continue
+        out.append((str(e["id"]), d, {str(a).lower() for a in e.get("aliases") or []}))
+    return out
+
+
+def discover():
+    """Return [{name, status, lane, stack, repo, owner}] for every NOMAD project: the entries
+    in nomad/projects.yaml when it exists, else every Nomad.md dir under ROOTS."""
+    listed = _listed_projects(ROOTS)
+    if listed is None:
+        listed = [(name, os.path.join(root, name), set())
+                  for root in ROOTS if os.path.isdir(root)
+                  for name in sorted(os.listdir(root))]
+    found = {}
+    for name, d, _ in listed:
+        mk = os.path.join(d, "Nomad.md")
+        if not (os.path.isdir(d) and os.path.isfile(mk)):
+            continue
+        m = frontmatter(mk)
+        if str(m.get("nomad", "true")).lower() == "false":
+            continue
+        disp = m.get("name") or name
+        found[disp] = {
+            "name": disp,
+            "status": (m.get("status") or "Active").capitalize(),
+            "lane": m.get("lane", ""),
+            "stack": _as_list(m.get("stack", "")),
+            "repo": m.get("repo", ""),
+            "owner": m.get("owner", "Josias"),
+        }
     return list(found.values())
 
 

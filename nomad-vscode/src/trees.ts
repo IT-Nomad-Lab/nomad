@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { Approval, Milestone, Task } from "./api";
+import { Approval, Milestone, Service, Task } from "./api";
 import { gitSummary } from "./git";
 import { NomadState } from "./state";
 
@@ -127,18 +127,34 @@ export class PlatformTree implements vscode.TreeDataProvider<Node> {
   getChildren(): Node[] {
     const s = this.getState();
     if (!s.services.length) {
-      const item = new TreeItem("console unreachable", TreeItemCollapsibleState.None) as Node;
+      const item = new TreeItem(s.servicesNote || "engine unreachable", TreeItemCollapsibleState.None) as Node;
       item.iconPath = new ThemeIcon("debug-disconnect", new ThemeColor("charts.red"));
-      item.command = { command: "nomad.openConsole", title: "Open console" };
+      item.command = { command: "nomad.openConsole", title: "Open cockpit" };
       return [item];
     }
-    return s.services.map((svc) => {
+    const rows: Node[] = [];
+    // Say it once, at the top, rather than per row. A stale pass is one fact about the whole
+    // report, and the rows below it are a memory of what was true, not a reading.
+    if (s.servicesStale) {
+      const warn = new TreeItem(s.servicesNote || "readings are stale", TreeItemCollapsibleState.None) as Node;
+      warn.iconPath = new ThemeIcon("watch", new ThemeColor("charts.orange"));
+      warn.tooltip = "nomad-watch has not reported recently. Check its timer before trusting these.";
+      rows.push(warn);
+    }
+    s.services.forEach((svc: Service) => {
       const item = new TreeItem(svc.name, TreeItemCollapsibleState.None) as Node;
-      item.description = svc.up ? `${svc.ms} ms` : "offline";
-      item.iconPath = svc.up
-        ? new ThemeIcon("pass", new ThemeColor("charts.green"))
-        : new ThemeIcon("error", new ThemeColor("charts.red"));
-      return item;
+      if (svc.up === null || svc.up === undefined) {
+        item.description = svc.last_up ? "unknown (was up)" : "unknown (was down)";
+        item.iconPath = new ThemeIcon("question", new ThemeColor("charts.orange"));
+      } else if (svc.up) {
+        item.description = svc.detail || (svc.ms != null ? `${svc.ms} ms` : "ok");
+        item.iconPath = new ThemeIcon("pass", new ThemeColor("charts.green"));
+      } else {
+        item.description = svc.down_since ? `offline since ${svc.down_since}` : "offline";
+        item.iconPath = new ThemeIcon("error", new ThemeColor("charts.red"));
+      }
+      rows.push(item);
     });
+    return rows;
   }
 }

@@ -65,15 +65,10 @@
     "configuration": {
       "title": "NOMAD",
       "properties": {
-        "nomad.consoleUrl": {
-          "type": "string",
-          "default": "http://localhost:1701",
-          "description": "Base URL of the NOMAD command console (chat, approvals, services, dispatch)."
-        },
         "nomad.engineUrl": {
           "type": "string",
           "default": "http://localhost:8099",
-          "description": "Base URL of the NOMAD v2 pipeline engine (projects, tasks, gate)."
+          "description": "Base URL of the NOMAD v2 engine. Everything goes here: chat, approvals, services, dispatch, projects, tasks and the gate. The v1 console setting was removed in V2c because nothing pointed at it any more."
         },
         "nomad.refreshSeconds": {
           "type": "number",

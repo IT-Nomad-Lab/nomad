@@ -7,12 +7,12 @@ Wants=network-online.target
 Type=simple
 # %h = the user's home. Adjust if you cloned ComfyUI elsewhere (COMFYUI_DIR in install_comfyui.sh).
 WorkingDirectory=%h/ComfyUI
-# --listen 0.0.0.0 so the v2 engine container can reach it via host.docker.internal:8188.
-# WSL2 is NAT'd (not on the LAN); ComfyUI has no auth, so keep this box's firewall closed.
+# --listen 127.0.0.1: ComfyUI has no auth, so loopback only (#821). The v2 engine container
+# still reaches it via host.docker.internal:8188 (Docker Desktop's gateway lands on host loopback).
 # --disable-pinned-memory: big models (FLUX.2, 33GB DiT) offload to CPU RAM; pinned (page-locked,
 #   non-swappable) memory can exceed WSL's RAM and hard-OOM ComfyUI. Pageable offload + swap is
 #   slower but survives. --cache-none trims cached weights too. Needed on a 24GB card / 47GB WSL.
-ExecStart=%h/ComfyUI/venv/bin/python %h/ComfyUI/main.py --listen 0.0.0.0 --port 8188 --disable-pinned-memory --cache-none
+ExecStart=%h/ComfyUI/venv/bin/python %h/ComfyUI/main.py --listen 127.0.0.1 --port 8188 --disable-pinned-memory --cache-none
 Restart=on-failure
 RestartSec=5
 

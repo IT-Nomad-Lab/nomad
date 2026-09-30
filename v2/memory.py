@@ -13,12 +13,23 @@ def _words(s):
     return set(re.findall(r"[a-z][a-z0-9]{3,}", (s or "").lower()))
 
 
+# The dispatcher's answer to a project name it could not resolve. An episode that records only
+# that teaches the Manager nothing but the wrong name, and recalling it is how 'claude-bridge'
+# came back after #851 (run 50d61fe163ff).
+_PROJECT_MISS = re.compile(r"Unknown project '|' matches \d+ projects \(")
+
+
+def _project_miss(e):
+    return bool(_PROJECT_MISS.search(str(e.get("outcome", ""))))
+
+
 def recall(db, goal: str, limit: int = 4) -> str:
     """Return a compact summary of past episodes relevant to `goal` (for the Manager's context)."""
     try:
         eps = db.list("episodic", 60)
     except Exception:
         return ""
+    eps = [e for e in eps if not _project_miss(e)]
     eps.sort(key=lambda e: e.get("created_at") or "", reverse=True)
     gw = _words(goal)
 

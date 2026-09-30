@@ -3,7 +3,7 @@
 #
 # Installs ComfyUI in WSL with its own venv + PyTorch built for CUDA 12.8 (cu128 — required for
 # Blackwell), then downloads the SDXL base and FLUX.1 schnell (fp8) checkpoints. ComfyUI then serves
-# an HTTP API on 0.0.0.0:8188 so the v2 engine container can reach it via host.docker.internal:8188.
+# an HTTP API on 127.0.0.1:8188; the v2 engine container still reaches it via host.docker.internal:8188.
 #
 # Idempotent: re-running skips what's already present and resumes partial model downloads.
 # Heavy: PyTorch (~3 GB) + SDXL (~6.5 GB) + FLUX schnell fp8 (~17 GB). Expect a long first run.
@@ -64,5 +64,5 @@ fetch "https://huggingface.co/Comfy-Org/flux1-schnell/resolve/main/flux1-schnell
 
 log "Done. Checkpoints in $CKPT_DIR:"
 ls -lh "$CKPT_DIR" || true
-log "Start ComfyUI with:  $COMFY_DIR/venv/bin/python $COMFY_DIR/main.py --listen 0.0.0.0 --port 8188"
+log "Start ComfyUI with:  $COMFY_DIR/venv/bin/python $COMFY_DIR/main.py --listen 127.0.0.1 --port 8188"
 log "Or enable the boot service:  nomad-image/install_service.sh"

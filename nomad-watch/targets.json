@@ -36,6 +36,14 @@
       "hint": "`systemctl --user status nomad-dispatch`. It exits on purpose if it cannot read ~/.config/nomad/dispatch-token."
     },
     {
+      "name": "autopilot supervisor",
+      "type": "http",
+      "url": "http://127.0.0.1:8092/health",
+      "json_field": "heartbeat_age_s",
+      "json_max": 300,
+      "hint": "The heartbeat moves only when a whole pass ends, so a high age means a pass is hung; refused means the daemon is down. `journalctl --user -u nomad-autopilot -n 50`, then `systemctl --user restart nomad-autopilot`: running workers survive the restart and are adopted."
+    },
+    {
       "name": "v2 engine",
       "type": "http",
       "url": "http://127.0.0.1:8099/health",

@@ -1,0 +1,30 @@
+[Unit]
+Description=NOMAD autopilot supervisor (keeps agent workers on each project's board)
+After=default.target
+# The supervisor exits rather than serve without its token, and exits 3 after 5 loop failures in
+# a row. Restart=always alone would spin forever; these limits land it in `failed`, which
+# nomad-watch and `systemctl --user status` both show.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory=/home/jdelimam/nomad
+Environment=HOME=/home/jdelimam
+Environment=PYTHONUNBUFFERED=1
+# ~/.local/bin first: workers run `claude` (native installer, #861) and the test wrappers use uv.
+Environment=PATH=/home/jdelimam/.local/bin:/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin
+# Claude runs on the MAX account through Claude Code, never the API.
+Environment=ANTHROPIC_API_KEY=
+# Needs pyyaml (projects registry) and requests (nomad-pm, alerts) importable by this python.
+ExecStart=/usr/bin/python3 /home/jdelimam/nomad/autopilot/supervisor.py
+Restart=always
+RestartSec=5
+# Workers, gates and criteria drafts run in their own sessions, and crash recovery adopts live
+# workers after a restart (AC8). The default KillMode=control-group would kill them on every
+# stop or restart; `process` signals the supervisor only. Stop a project's workers with
+# Stop (kill) in the cockpit, not with systemctl.
+KillMode=process
+
+[Install]
+WantedBy=default.target

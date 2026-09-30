@@ -33,7 +33,7 @@ from websockets.asyncio.server import serve   # modern asyncio API (websockets >
 
 from dispatch import resolve, CLAUDE, ROOTS   # reuse the Builder's project whitelist + claude path
 
-HOST = os.environ.get("NOMAD_TERM_HOST", "0.0.0.0")
+HOST = os.environ.get("NOMAD_TERM_HOST", "127.0.0.1")   # loopback only (#821); containers still reach it via host.docker.internal
 PORT = int(os.environ.get("NOMAD_TERM_PORT", "8091"))
 IDLE_REAP_SECS = int(os.environ.get("NOMAD_TERM_IDLE", "1800"))   # kill sessions idle > 30 min
 SCROLLBACK = 100_000                                              # bytes of replay on reconnect
@@ -43,8 +43,8 @@ SESSIONS = {}   # project name -> Session
 
 
 def _load_or_make_token():
-    """Shared secret gating WS attach. termd binds 0.0.0.0 (so the console container can reach it
-    via host.docker.internal), which also exposes it to the LAN — so a token is required: only the
+    """Shared secret gating WS attach. termd binds 127.0.0.1 (the console container still reaches
+    it via host.docker.internal), but any local process can connect — so a token is required: only the
     console (which reads this same file via its read-only /host mount) can attach. Auto-generated;
     no manual config. NOMAD_TERM_TOKEN overrides. Fail-open to '' only if the FS is unwritable."""
     env = os.environ.get("NOMAD_TERM_TOKEN")

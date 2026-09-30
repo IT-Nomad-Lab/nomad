@@ -22,7 +22,7 @@ ai/      the same kind of thing, written by the models you actually use.
 | `opus_` | Claude Opus | the hard case, and the model Josias actually writes with |
 | `published_` | the content-creation pipeline (Opus in JDE_STYLE) | the output this service actually exists to audit |
 
-`published_*` is every piece in `~/content-creation` that was published between 2026-03 and
+`published_*` is every piece in `~/content-creation/content` that was published between 2026-03 and
 2026-09: 41 LinkedIn posts and 10 articles, NFKC-normalised (LinkedIn "bold" is
 mathematical-alphanumeric codepoints) with the production markers — `[COVER IMAGE]`, `[DIAGRAM: …]`
 — stripped. They belong in `ai/`, not `human/`. `master_index.json` records how each one was made:

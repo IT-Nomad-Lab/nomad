@@ -45,7 +45,8 @@ git diff                                          # confirm edits are additive/s
 ```
 
 ## Guardrails (NOMAD convention)
-- Make **uncommitted** edits only — never `git commit`/`push` (human-gated).
+- Make **uncommitted** edits by default. Run `git commit`/`merge`/`push` only when the user asks
+  for it in the session; never force-push.
 - Keep changes scoped; don't add dependencies without justification.
 - Secrets only in `.env` (never commit); agents reference LiteLLM **role aliases**
   (deep/balanced/gpt/fast/private/code), never raw model names.
@@ -56,3 +57,12 @@ git diff                                          # confirm edits are additive/s
   Vega-Lite for data charts — and let the layout engine place it (arrows routed, text never
   overflows). Image models (`generate_image`) are for *artistic* visuals only, not graphs.
 - v2 builds **alongside** v1; v1 (this repo's CLAUDE.md scope) is the rollback target — don't break it.
+
+## Git workflow (hard rule)
+
+Unless the operator says otherwise for a specific piece of work:
+
+- Develop each new feature on its own branch, created from the default branch (`master` or
+  `main`) before the first edit. Never build a feature directly on the default branch.
+- Merge into the default branch only when every item of the feature is done and all tests pass.
+  The merge, like commits and pushes, needs the operator's OK.

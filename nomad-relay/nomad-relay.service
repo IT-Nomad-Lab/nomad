@@ -18,6 +18,10 @@ Environment=NOMAD_CONSOLE_URL=http://127.0.0.1:1701
 Environment=NOMAD_ZULIPRC=/home/jdelimam/.config/nomad/zulip-bot.zuliprc
 Environment=NOMAD_RELAY_DIGEST=07:30,19:00
 Environment=NOMAD_RELAY_TZ=America/New_York
+# The cockpit on the tailnet (tailscale serve 8449, #795). Gate, #runs and failure messages link
+# to its run page for each run (#800). Must match the engine's NOMAD_TAILNET_ORIGIN, the Origin it
+# accepts writes from. Remove it and the messages go back to "approve it in the cockpit."
+Environment=NOMAD_TAILNET_ORIGIN=https://rogue01.tailc3147c.ts.net:8449
 # Actions Zulip may approve; everything else is reject-only from the phone.
 Environment=NOMAD_RELAY_REMOTE_ACTIONS=send_message,save_brief,save_content,generate_image
 # T2.1 morning briefing / Friday review. Calendar reads through n8n's existing

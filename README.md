@@ -57,9 +57,9 @@ In practice:
   to the platform (name, status, lane, stack) **and** documents which NOMAD capabilities the
   project may use and how to reach them (the LiteLLM gateway, the v2 engine, the MCP tools, the
   approval gate, voice, memory…). Drop a `Nomad.md` into any repo and it joins the platform.
-- **NOMAD discovers projects from those markers.**
-  [`nomad-console/sync_projects.py`](nomad-console/sync_projects.py) scans the project roots,
-  reads each `Nomad.md`, and upserts it into mission control — so the cockpit/console shows every
+- **NOMAD knows its projects from a registry.** [`projects.yaml`](projects.yaml) lists them;
+  [`nomad-console/sync_projects.py`](nomad-console/sync_projects.py) reads each listed repo's
+  `Nomad.md` and upserts it into mission control — so the cockpit/console shows every
   project's status in one place. *(The status UI is a work in progress.)*
 - **It's a read-only / centralized model.** Projects **use** NOMAD's capabilities but never
   **modify** them. This repo is the single source of truth for the platform: all services,

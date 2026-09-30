@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Image → textured GLB with TRELLIS.2 (runs in ~/trellis2/.venv).
+"""Image → textured GLB with TRELLIS.2 (runs in ~/vendor/trellis2/.venv).
 
-  ~/trellis2/.venv/bin/python trellis_gen.py a.png [b.png …] --out-dir out/ [--res 512|1024|1024_cascade|1536_cascade]
+  ~/vendor/trellis2/.venv/bin/python trellis_gen.py a.png [b.png …] --out-dir out/ [--res 512|1024|1024_cascade|1536_cascade]
 
-Loads the local weights copy (~/trellis2/weights), whose pipeline.json uses the MIT BiRefNet
+Loads the local weights copy (~/vendor/trellis2/weights), whose pipeline.json uses the MIT BiRefNet
 for background removal, not the non-commercial RMBG-2.0.
 """
 import os
@@ -17,7 +17,7 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, os.path.expanduser("~/trellis2"))
+sys.path.insert(0, os.path.expanduser("~/vendor/trellis2"))
 
 import torch
 from PIL import Image
@@ -46,7 +46,7 @@ def main():
     a.out_dir.mkdir(parents=True, exist_ok=True)
 
     t0 = time.time()
-    pipe = Trellis2ImageTo3DPipeline.from_pretrained(os.path.expanduser("~/trellis2/weights"))
+    pipe = Trellis2ImageTo3DPipeline.from_pretrained(os.path.expanduser("~/vendor/trellis2/weights"))
     pipe.cuda()
     load_s = time.time() - t0
 

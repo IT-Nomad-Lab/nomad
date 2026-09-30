@@ -92,6 +92,16 @@ def test_approve_executed():
 
 
 @case
+def test_a_build_reports_its_feature_branch():
+    e, db = _eng()
+    e.tools = {"dispatch_build": lambda **kw: {"ok": True, "summary": "built", "branch": "feat/x"}}
+    rid = _seed(db, action="dispatch_build", args={"project": "p", "task": "t", "run_id": "r1"})
+    out = e.resume_run(rid, "approved", _hash(db))
+    assert out["status"] == "executed", out
+    assert out["outcome"].endswith("[branch feat/x]"), out["outcome"]
+
+
+@case
 def test_tool_failure_is_failed_not_declined():
     e, db = _eng(ok=False)
     rid = _seed(db)
