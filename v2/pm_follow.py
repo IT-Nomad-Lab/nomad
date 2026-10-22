@@ -104,8 +104,9 @@ def plain(raw):
 
 
 class Follow:
-    def __init__(self, op, operator_id=OPERATOR_ID, keep=KEEP):
+    def __init__(self, op, operator_id=OPERATOR_ID, keep=KEEP, mentions=None):
         self.op = op
+        self.mentions = mentions            # pm_mention.Mentions: a bot mentioned runs a session
         self.operator_id = operator_id
         self.boot = uuid.uuid4().hex[:8]    # a restart empties the queue; the relay sees a new boot
         self.seq = 0
@@ -172,7 +173,8 @@ class Follow:
         status = _title(wp, "status")
         ev = {
             "wp_id": wp["id"], "subject": wp.get("subject"), "type": _title(wp, "type"),
-            "project": _title(wp, "project"), "status": status, "lane": self._lane(wp),
+            "project": _title(wp, "project"), "board": self._board(wp),
+            "status": status, "lane": self._lane(wp),
             "action": "created" if created else "updated",
             "from": change[0] if change else None, "to": change[1] if change else None,
             "blocked": bool(change and change[1] == "Blocked" and change[0] != "Blocked"),
@@ -185,7 +187,15 @@ class Follow:
             "origin": "zulip" if act["id"] in self.ours else "openproject",
             "activity_id": act["id"], "url": f"{PUBLIC_URL}/work_packages/{wp['id']}/activity",
         }
-        ev["decided"] = self._decide(wp, status, raw, ev["by_operator"])
+        ev["decided"] = self._decide(wp, status, raw, ev["by_operator"], act)
+        ev["session"] = None
+        if self.mentions and change and ev["closed"] and not self._closed(change[0] or ""):
+            self.mentions.task_closed(wp["id"])     # drop its session worktree if it is clean
+        if self.mentions and raw.strip():
+            try:
+                ev["session"] = self.mentions.consider(wp, act, raw, ev["by_operator"], ev["closed"])
+            except PMError:
+                pass
         with self.lock:
             self.seq += 1
             ev["seq"] = self.seq
@@ -210,13 +220,23 @@ class Follow:
                 self._remember(self.ours, act["id"])
         return {"ok": True, "wp_id": int(wp_id), "activity_id": act.get("id")}
 
-    def _decide(self, wp, status, raw, by_operator):
+    def _by_manager(self, act):
+        author = _href_id((act.get("_links") or {}).get("user"))
+        try:
+            manager = self.op.user_id_of(MANAGER)
+        except PMError:
+            return False
+        return bool(author and author == manager)
+
+    def _decide(self, wp, status, raw, by_operator, act):
         """Move a task in Awaiting approval when the operator's comment, or their Zulip reply,
         starts with approve or reject. Returns the new status, or None. Each activity comes
         through here once (self.seen), so a comment moves the task at most once."""
         if status != AWAITING or not raw.strip():
             return None
-        relayed = _ZULIP.match(raw)
+        # The prefix alone could be typed by anyone, so a relayed reply counts only when the
+        # manager posted it, as post_comment does.
+        relayed = _ZULIP.match(raw) if self._by_manager(act) else None
         if not (by_operator or relayed):
             return None
         target = decision(plain(raw[relayed.end():] if relayed else raw))
@@ -233,6 +253,14 @@ class Follow:
         try:
             return self.op.user_name(href)
         except PMError:
+            return None
+
+    def _board(self, wp):
+        """The board identifier, so the relay can post to that project's stream. None on a miss:
+        the relay then falls back to #projects."""
+        try:
+            return self.op.board_of(wp)
+        except (PMError, KeyError):
             return None
 
     def _lane(self, wp):

@@ -1,0 +1,13 @@
+id: data-or-ai-default
+role: permission
+description: >-
+  Data and AI projects. graphify (knowledge graph over files and papers) is allowed. Mail and
+  Drive (gmail, gdrive) hold personal data and stay off; elevenlabs and other credit-spending
+  servers stay off. The default tier already has nomad-scrape and nomad-local.
+statements:
+  - sid: graphify-skill
+    effect: allow
+    kind: skill
+    match: [graphify]
+settings:
+  cap: 2

@@ -11,7 +11,48 @@ Endpoints (native WSL service; the console reaches it at host.docker.internal:80
                                           plan = the approved plan, handed to the Builder
   POST /resolve {project}                 the registry id `project` names, or candidates;
                                           a folder or path inside a repo names that repo
+  POST /create-project {name, prd, type?, …}
+                                          set a whole project up: the engine's
+                                          POST /owui/create-project, nomad_projects.create (#1374)
+  GET  /create-project?id=                how that run is going
+  POST /new-project {name, description, id?, prd?, stack?, lane?, local_only?, register?, template?}
+                                          scaffold a project repo (new_project): one of
+                                          create's steps, like the three below
+  POST /seed-board {board, name}          add its nomad-pm board and seed it (seed_board)
+  POST /register-project {id, local_only?, autopilot?, type?, policies?}
+                                          add it to projects.yaml on a branch (register_hub)
+  POST /project-stream {id}               its Zulip stream, via the relay (project_stream)
+  POST /project-info {id}                 what deleting it would touch (project_info, #1200)
+  POST /archive-project {id, confirm_remote?}
+                                          move the repo to ~/archive/<id> (archive_project)
+  POST /unregister-project {id}           drop it from projects.yaml on a branch (unregister_hub)
+  POST /archive-board {board}             drop its seed.rb row, archive the board (archive_board)
+  POST /archive-stream {id}               archive its Zulip stream, via the relay (archive_stream)
+  POST /session {key, project, prompt, bot, mode, title}
+                                          a resumable agent session per OpenProject work
+                                          package, in its own worktree (sessions.py)
+  POST /session/close {key}               the work package closed: drop a clean worktree
+  POST /session/project {board, comment, subject, key?}
+                                          the project a mention on that board runs in, and
+                                          with `key`, the session and branch it will use
   GET  /projects                          discovered Nomad.md projects
+  GET  /profiles                          the project types (profiles/*.yaml) for + New project
+  GET  /profiles/list · /profiles/get?id=  POST /profiles/validate · /profiles/dry-run {id, yaml?}
+                                          the cockpit's Standards area
+                                          (nomad_projects/profile_api.py, #1377)
+  POST /profiles/save {id, yaml}          commit a profile on branch profile/<id>, never
+                                          master (#1379)
+  GET  /policies · /policies/get?id= · /policies/effective?project=
+                                          the policy layer (nomad_policy/api.py, #1396)
+  POST /policies/simulate · /policies/tag-dry-run · /policies/tag-save · /policies/tag-accept · /policies/validate · /policies/save · /policies/attach
+                                          simulate a call, preview a tag, save or attach
+                                          on a policy/* branch, never on master
+  POST /policies/guardrail-save {id, yaml, confirm}
+                                          also needs X-Nomad-Cockpit (cockpit-token) and
+                                          confirm = the id: the operator, from the cockpit
+  POST /comfy/generate {graph, timeout?}  run one ComfyUI graph under shared GPU admission and
+                                          return {ok, png_b64}, or busy (#1462, comfy_gate.py).
+                                          The engine's local image provider goes through it
   GET  /health                            the only unauthenticated route
 
 GUARDRAILS:
@@ -41,19 +82,28 @@ import shutil
 import subprocess
 import sys
 import time
+import urllib.parse
 from datetime import date
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import projects_registry  # noqa: E402  (shared with autopilot/projects.py)
+import sessions  # noqa: E402  (POST /session, docs/prd/op-mention-agent.md)
+import bridge_bind  # noqa: E402  (loopback + NOMAD_BRIDGE_IP, #383)
+import comfy_gate  # noqa: E402  (POST /comfy/generate, shared GPU admission #1462)
 
-HOST = os.environ.get("NOMAD_DISPATCH_HOST", "127.0.0.1")   # loopback only (#821); containers still reach it via host.docker.internal
+HOST = os.environ.get("NOMAD_DISPATCH_HOST", "127.0.0.1")   # loopback only (#821); containers reach it on NOMAD_BRIDGE_IP (#383)
 PORT = int(os.environ.get("NOMAD_DISPATCH_PORT", "8090"))
 ROOTS = os.environ.get("PROJECT_ROOTS", "/home/jdelimam").split(":")
 CLAUDE = shutil.which("claude") or os.path.expanduser("~/.local/bin/claude")  # 2.x native
 #   installer path, as in claude-bridge. The old linuxbrew one is gone, and every build failed on it
 #   (#861). /health reports whether this exists, so the next move shows up in nomad-watch.
 TIMEOUT = int(os.environ.get("NOMAD_DISPATCH_TIMEOUT", "900"))
+# Token budget (#1089): Sonnet unless NOMAD_DISPATCH_MODEL says otherwise, the 1M window off so a
+# run compacts at 200K, subagents on Sonnet, no fast mode. The key blanked bills the Max plan.
+MODEL = os.environ.get("NOMAD_DISPATCH_MODEL", "sonnet")
+RUN_ENV = {"ANTHROPIC_API_KEY": "", "CLAUDE_CODE_DISABLE_1M_CONTEXT": "1",
+           "CLAUDE_CODE_SUBAGENT_MODEL": "sonnet", "CLAUDE_CODE_DISABLE_FAST_MODE": "1"}
 
 
 def claude_found() -> bool:
@@ -87,6 +137,33 @@ def _load_or_make_token():
 
 
 TOKEN = _load_or_make_token()
+
+# The cockpit's own token (#1396). Only the engine sends it (X-Nomad-Cockpit), read from the
+# /term-secret mount, and only for a guardrail save. A caller holding just the dispatch token, as
+# agents do, cannot save a guardrail. The hooks deny agents this file and the route.
+COCKPIT_TOKEN_PATH = os.path.expanduser("~/.config/nomad/cockpit-token")
+
+
+def _cockpit_token():
+    env = os.environ.get("NOMAD_COCKPIT_TOKEN")
+    if env:
+        return env
+    try:
+        if os.path.exists(COCKPIT_TOKEN_PATH):
+            tok = open(COCKPIT_TOKEN_PATH).read().strip()
+            if tok:
+                return tok
+        os.makedirs(os.path.dirname(COCKPIT_TOKEN_PATH), exist_ok=True)
+        tok = secrets.token_urlsafe(24)
+        fd = os.open(COCKPIT_TOKEN_PATH, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(tok)
+        return tok
+    except OSError:
+        return ""                       # no token: every guardrail save is refused, nothing else changes
+
+
+COCKPIT_TOKEN = _cockpit_token()
 
 GUARD = (
     "You are NOMAD's Builder agent, working directly inside this repository. "
@@ -175,6 +252,65 @@ def _row(d, slug, also_extra=()):
             "aliases": {a for a in aliases if len(a) >= 3}}
 
 
+def _board_for():
+    """autopilot/tasks.py's board_for: the BOARDS map, the hub being this file's parent."""
+    hub = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if hub not in sys.path:
+        sys.path.insert(0, hub)
+    from autopilot import tasks
+    return tasks.board_for
+
+
+def projects_payload():
+    """GET /projects: names, ids, and one detail row per dispatchable project."""
+    reg = registry()
+    board_for = _board_for()
+    return {"projects": [r["name"] for r in reg],
+            "ids": [r["slug"] for r in reg],
+            "detail": [{"name": r["name"], "id": r["slug"], "lane": r["lane"], "repo": r["repo"],
+                        "status": r["status"], "local_only": r.get("local_only", False),
+                        "type": r.get("type", projects_registry.DEFAULT_TYPE),
+                        "board": board_for(r["slug"])}
+                       for r in reg]}
+
+
+CONTEXT_MAX = int(os.environ.get("NOMAD_CONTEXT_MAX_CHARS") or 40000)
+
+
+def _read_capped(path, limit):
+    """{"path", "text", "chars", "truncated"} for a file, or None if it can't be read."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            text = fh.read(limit + 1)
+    except OSError:
+        return None
+    return {"path": path, "text": text[:limit], "truncated": len(text) > limit}
+
+
+def project_context(pid):
+    """GET /project-context?id=<id>: a dispatchable project's CLAUDE.md and PRD, read-only, for the
+    Open WebUI sessions (docs/prd/owui-sessions.md §6.2). The PRD is docs/PRD.md, else the newest
+    docs/prd/*.md. Looked up by registry id only, so no caller-supplied path is ever opened."""
+    row = next((r for r in registry() if r["slug"] == pid), None)
+    if row is None:
+        return None
+    root = row["path"]
+    prd = os.path.join(root, "docs", "PRD.md")
+    if not os.path.isfile(prd):
+        d = os.path.join(root, "docs", "prd")
+        try:
+            cands = [os.path.join(d, f) for f in os.listdir(d) if f.endswith(".md")]
+        except OSError:
+            cands = []
+        prd = max(cands, key=os.path.getmtime) if cands else None
+    def rel(c):
+        return c and {**c, "path": os.path.relpath(c["path"], root)}
+    return {"id": pid, "name": row["name"], "type": row.get("type", projects_registry.DEFAULT_TYPE),
+            "board": _board_for()(pid),
+            "claude_md": rel(_read_capped(os.path.join(root, "CLAUDE.md"), CONTEXT_MAX)),
+            "prd": rel(prd and _read_capped(prd, CONTEXT_MAX))}
+
+
 def registry():
     """The projects NOMAD may dispatch to. nomad/projects.yaml is the list when it exists:
     the entry id is the exact name, `dispatch: false` entries (publish targets, mirrors) are
@@ -188,7 +324,9 @@ def registry():
             if not e["dispatch"] or not os.path.isdir(e["path"]) or real in seen:
                 continue
             seen.add(real)
-            out.append(_row(e["path"], e["id"], e["aliases"]))
+            # local_only: true keeps the project's Open WebUI chats on local models (#1114).
+            out.append({**_row(e["path"], e["id"], e["aliases"]), "local_only": e.get("local_only") is True,
+                        "type": projects_registry.entry_type(e)})
         return out
     out, seen = [], set()
     for root in ROOTS:
@@ -402,11 +540,11 @@ def run_claude(path, task, mode, branch="", plan="", subdir=""):
     guard = PLAN_GUARD if mode == "plan" else GUARD
     if branch:
         guard += f" You are on feature branch `{branch}`."
-    cmd = [CLAUDE, "-p", builder_prompt(task, plan, subdir), "--model", "opus",
+    cmd = [CLAUDE, "-p", builder_prompt(task, plan, subdir), "--model", MODEL,
            "--append-system-prompt", guard,
            "--permission-mode", perm, "--output-format", "json"]
     proc = subprocess.run(cmd, cwd=path, capture_output=True, text=True,
-                          timeout=TIMEOUT, env={**os.environ, "ANTHROPIC_API_KEY": ""})
+                          timeout=TIMEOUT, env={**os.environ, **RUN_ENV})
     if proc.returncode != 0:
         raise RuntimeError(f"claude exited {proc.returncode}: {proc.stderr[:500]}")
     data = json.loads(proc.stdout)
@@ -473,44 +611,785 @@ def verify(project, command):
             "secs": round(time.time() - t0, 1)}
 
 
-def new_project(name, description=""):
-    """Scaffold a brand-new NOMAD project repo: dir + Nomad.md marker + CLAUDE.md +
-    README + git init. Lands under the first PROJECT_ROOTS dir and is appended to
-    nomad/projects.yaml, so it's immediately discoverable by NOMAD. Returns {ok, name, slug, path} (ok=False if it exists)."""
+SHARED_MCP = ("nomad-local", "nomad-scrape", "nomad-image", "nomad-detect", "nomad-audio")
+OWNER = os.environ.get("NOMAD_OWNER", "Josias")
+PROJECT_ID = re.compile(r"^[a-z0-9][a-z0-9-]{1,39}$")
+SHARED_NOTE = ("Shared tools and services (MCP servers, NOMAD CRM, AI-text detection, Codex, local "
+               "image and\nmusic generation, Penpot) are documented once in "
+               "`~/nomad/docs/SHARED-RESOURCES.md`. Use them;\ndon't modify them here (extend the "
+               "platform in the `nomad` repo).\n")
+
+
+def _scaffold_files(name, slug, desc, prd, stack, lane, local_only, today):
+    """What a new project repo starts with (docs/prd/owui-sessions.md §6.4 step 3.1): what an
+    existing project has, so every NOMAD surface that reads Nomad.md, CLAUDE.md, AGENTS.md or
+    .mcp.json sees it like the others."""
+    hub = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    py = os.path.join(hub, "mcp-local", ".venv", "bin", "python")
+    mcp = {"mcpServers": {s: {"command": py,
+                              "args": [os.path.join(hub, "mcp-local", s.replace("-", "_") + ".py")]}
+                          for s in SHARED_MCP}}
+    stack_line = "[" + ", ".join(stack) + "]"
+    sdlc = ("How to work (autonomy tiers, branches, PRD, nomad-pm tasks): `~/nomad/docs/SDLC.md`. "
+            "Read it before planning or starting work.")
+    prd_note = "The approved PRD is `docs/PRD.md`. " if prd else "Write the PRD first: `docs/PRD.md`. "
+    local = ("\n- This project is **local-only**: its Open WebUI chats use local models, never a "
+             "cloud model.") if local_only else ""
+    files = {
+        "Nomad.md": (f"---\nnomad: true\nname: {name}\nstatus: planning\nowner: {OWNER}\n"
+                     f"repo: \"\"\nlane: {lane}\nstack: {stack_line}\nupdated: {today}\n---\n"
+                     f"# {name}\n\n{desc}\n\n{SHARED_NOTE}\n"
+                     "> Managed by **NOMAD**. Companion files: **CLAUDE.md** (context) · "
+                     "**AGENTS.md** (agent build/test rules) · **docs/PRD.md** (the PRD).\n"),
+        "CLAUDE.md": (f"# {name}: context for AI coding agents\n\n> NOMAD-managed. Created {today}."
+                      f"\n\n## What it is\n{desc}\n\n## Status\nPlanning. {prd_note}The roadmap "
+                      f"and tasks are on the `{slug}` board in nomad-pm.\n\n## How to work\n{sdlc}"
+                      "\n\n## Conventions\n- Secrets live in `.env`: never committed, never "
+                      "printed.\n- Each piece of work gets its own branch off the default branch."
+                      "\n- Build and test rules: `AGENTS.md`." + local + "\n"),
+        "AGENTS.md": (f"# AGENTS.md: build and guardrail rules for {slug}\n\n## Golden rules\n"
+                      f"- {sdlc}\n- Every piece of work has a nomad-pm task on the `{slug}` board, "
+                      "and its status matches what really happened.\n- Secrets stay in `.env`; "
+                      "never commit them.\n- Use model role aliases, never raw model names.\n\n"
+                      "## Run / test (before calling a change done)\nNot set up yet: the first "
+                      "milestone adds the test command here and in `~/nomad/projects.yaml`.\n\n"
+                      "## Publish (gated: human approval, via NOMAD)\nDeploying, exposing "
+                      "externally, sending email, pushing, or any spend goes through NOMAD's human "
+                      "approval gate.\n\n## Git workflow (hard rule)\n- Develop each feature on its "
+                      "own branch, created from the default branch before the first edit.\n- Merge "
+                      "into the default branch only when the feature is done and all tests pass.\n"
+                      "- Never force-push.\n"),
+        "README.md": f"# {name}\n\n{desc}\n\n_Scaffolded by NOMAD on {today}._\n",
+        ".gitignore": ".env\n.env.*\n!.env.example\n__pycache__/\n*.pyc\nnode_modules/\n.venv/\n.DS_Store\n",
+        ".mcp.json": json.dumps(mcp, indent=2) + "\n",
+    }
+    if prd:
+        files["docs/PRD.md"] = prd.rstrip() + "\n"
+    return files
+
+
+TEMPLATES = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "templates")
+
+
+def _template_files(template):
+    """Files of templates/<template>/ as {relative path: text}; {} when there is none."""
+    root = os.path.join(TEMPLATES, template or "")
+    out = {}
+    for dp, _, fns in os.walk(root) if template and os.path.isdir(root) else ():
+        for fn in fns:
+            fp = os.path.join(dp, fn)
+            with open(fp, encoding="utf-8") as f:
+                out[os.path.relpath(fp, root)] = f.read()
+    return out
+
+
+def new_project(name, description="", id="", prd="", stack=(), lane="dev", local_only=False,
+                register=True, template=""):
+    """Scaffold a new NOMAD project repo under the first PROJECT_ROOTS dir: Nomad.md, CLAUDE.md,
+    AGENTS.md, .mcp.json, README, .gitignore and, given `prd`, docs/PRD.md; then git init and the
+    first commit. Returns {ok, name, slug, path}.
+
+    The console's form sends only `name` and `description`: the repo is also appended to
+    projects.yaml, and an existing folder is an error. The Open WebUI + New project setup
+    (owui_setup, §6.4) sends `id` and `register: false`, registers on a hub branch itself, and
+    re-runs a step after a failure, so an existing repo with that id's Nomad.md is a success
+    (`existed: true`), left as it is."""
     name = (name or "").strip()
     if not name:
         return {"ok": False, "error": "Project needs a name."}
-    slug = _slug(name)
-    root = ROOTS[0]
-    path = os.path.join(root, slug)
+    slug = (id or "").strip() or _slug(name)
+    if not PROJECT_ID.match(slug):
+        return {"ok": False, "error": f"'{slug}' is not a usable project id."}
+    path = os.path.join(ROOTS[0], slug)
     if os.path.exists(path):
+        if id and os.path.isfile(os.path.join(path, "Nomad.md")) and git(path, "rev-parse", "HEAD"):
+            return {"ok": True, "name": name, "slug": slug, "path": path, "existed": True}
         return {"ok": False, "error": f"'{slug}' already exists at {path}."}
     today = date.today().isoformat()
-    desc = description.strip() or f"{name} — a NOMAD-managed project."
-    os.makedirs(path, exist_ok=True)
-    files = {
-        "Nomad.md": (f"---\nname: {name}\nstatus: Planning\nnomad: true\n"
-                     f"created: {today}\n---\n\n# {name}\n\n{desc}\n\n"
-                     "This repo is tracked by NOMAD (mission control + Builder dispatch).\n"),
-        "CLAUDE.md": (f"# {name} — project guide\n\n> NOMAD-managed. Created {today}.\n\n"
-                      f"## What this is\n{desc}\n\n## Status\nPlanning — scope being defined.\n\n"
-                      "## Conventions\n- Secrets only in `.env` (never commit).\n"
-                      "- Keep changes small and reversible; commit/push stay human-gated.\n"
-                      "- Each new feature gets its own branch; merge to the default branch only "
-                      "when the feature is done and all tests pass.\n\n"
-                      "## Next steps\n- [ ] Define the goal and first milestone.\n"),
-        "README.md": f"# {name}\n\n{desc}\n\n_Scaffolded by NOMAD on {today}._\n",
-        ".gitignore": ".env\n.env.*\n__pycache__/\n*.pyc\nnode_modules/\n.DS_Store\n",
-    }
+    desc = (description or "").strip() or f"{name}, a NOMAD-managed project."
+    stack = [str(x).strip() for x in (stack or []) if str(x).strip()]
+    files = _scaffold_files(name, slug, desc, prd or "", stack, lane or "dev", bool(local_only), today)
+    files.update(_template_files(template))   # e.g. "website": .claude/settings.json allowlist
+    if template == "website":
+        files["AGENTS.md"] += ("\n## Website standards\nStatic export, design source of truth, quality "
+                              "gates and launch checklist: `~/nomad/docs/standards/WEBSITES.md` and "
+                              "`docs/WEBSITE-CHECKLIST.md`. Read them before the first milestone.\n")
+        files["CLAUDE.md"] += "\n## Website\nBuilt to `~/nomad/docs/standards/WEBSITES.md`.\n"
     for fn, body in files.items():
-        with open(os.path.join(path, fn), "w", encoding="utf-8") as f:
+        fp = os.path.join(path, fn)
+        os.makedirs(os.path.dirname(fp), exist_ok=True)
+        with open(fp, "w", encoding="utf-8") as f:
             f.write(body)
     git(path, "init", "-q")
     git(path, "add", "-A")
     git(path, "-c", "user.email=nomad@itnomadlab.com", "-c", "user.name=NOMAD",
         "commit", "-q", "-m", f"Scaffold {name} (NOMAD)")
-    register_project(slug, path)
+    if not git(path, "rev-parse", "HEAD"):
+        return {"ok": False, "error": f"git init or the first commit failed in {path}."}
+    if register:
+        register_project(slug, path)
     return {"ok": True, "name": name, "slug": slug, "path": path}
+
+
+# ── nomad-pm board for a new project (POST /seed-board, §6.4 step 3.3) ──────────────────
+# Seeding runs `docker exec` into the OpenProject container, so it happens here on the host.
+# ~/nomad-pm is a shared checkout someone may be editing: the board row is added on its own
+# branch in a worktree, seeded from there, and fast-forwarded into main only when git can.
+PM_REPO = os.environ.get("NOMAD_PM_REPO", os.path.expanduser("~/nomad-pm"))
+PM_BRANCH = os.environ.get("NOMAD_PM_BRANCH", "main")
+SEED_TIMEOUT = int(os.environ.get("NOMAD_SEED_TIMEOUT", "900"))
+_BOARD_ROW = re.compile(r'\["([a-z0-9-]+)",\s*"[^"]*"\]')
+
+
+def _boards(seed_rb):
+    m = re.search(r"^BOARDS = \[\n(.*?)^\]\.freeze", seed_rb, re.S | re.M)
+    return (m, _BOARD_ROW.findall(m.group(1))) if m else (None, [])
+
+
+def _add_board(seed_rb, ident, name):
+    m, idents = _boards(seed_rb)
+    if not m:
+        raise ValueError("seed.rb has no BOARDS = [ ... ].freeze block")
+    if ident in idents:
+        return seed_rb
+    body = m.group(1).rstrip("\n")
+    return seed_rb[:m.start(1)] + f'{body},\n  ["{ident}", "{name}"]\n' + seed_rb[m.end(1):]
+
+
+def _run(cmd, cwd, timeout=30):
+    p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout,
+                       env={**os.environ, "GIT_PAGER": "cat"})
+    return p.returncode, (p.stdout or "") + (p.stderr or "")
+
+
+def seed_board(ident, name):
+    """Add [ident, name] to BOARDS in ~/nomad-pm/seed.rb and run ./seed.sh. Re-running is safe:
+    a board already in main is only re-seeded. Returns {ok, board, op_id, merged, branch, note}."""
+    ident, name = (ident or "").strip(), (name or "").strip()
+    if not PROJECT_ID.match(ident):
+        return {"ok": False, "error": f"'{ident}' is not a usable board identifier."}
+    if not name or any(c in name for c in '"\\#\n'):
+        return {"ok": False, "error": "The board name can't be empty or hold \", \\, # or a newline."}
+    rc, main_rb = _run(["git", "show", f"{PM_BRANCH}:seed.rb"], PM_REPO)
+    if rc:
+        return {"ok": False, "error": f"can't read seed.rb on {PM_BRANCH} in {PM_REPO}"}
+    branch, wt = f"board/{ident}", f"{PM_REPO}-wt/board-{ident}"
+    if ident in _boards(main_rb)[1]:
+        where, branch = PM_REPO, ""
+    else:
+        why = _worktree(PM_REPO, wt, branch, PM_BRANCH)
+        if why:
+            return {"ok": False, "error": why}
+        seed = os.path.join(wt, "seed.rb")
+        text = open(seed, encoding="utf-8").read()
+        new = _add_board(text, ident, name)
+        if new != text:
+            with open(seed, "w", encoding="utf-8") as f:
+                f.write(new)
+        why = _commit(wt, ["seed.rb"], f"Board {ident}: {name} (NOMAD + New project)")
+        if why:
+            return {"ok": False, "error": why}
+        where = wt
+    try:
+        rc, out = _run(["bash", os.path.join(where, "seed.sh")], where, timeout=SEED_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": f"seed.sh timed out after {SEED_TIMEOUT}s", "branch": branch}
+    m = re.search(rf"board: {re.escape(ident)} id=(\d+)", out)
+    if rc or not m:
+        return {"ok": False, "error": f"seed.sh failed (rc {rc}): {out[-500:]}", "branch": branch}
+    res = {"ok": True, "board": ident, "op_id": int(m.group(1)), "merged": not branch,
+           "branch": branch, "note": ""}
+    if branch:
+        why = _ff_into(PM_REPO, branch, PM_BRANCH)
+        if why:
+            res["note"] = f"The board is seeded. Branch {branch} isn't merged into {PM_BRANCH} yet: {why}"
+        else:
+            res["merged"] = True
+            _drop(PM_REPO, wt, branch, PM_BRANCH)
+    return res
+
+
+def _ff_into(repo, branch, target):
+    """Fast-forward `target` to `branch` without touching anyone's work. Where `target` is
+    checked out, `git merge --ff-only` runs there, and git refuses when local edits are in the
+    way. Where it isn't checked out (another session switched the shared checkout), the ref
+    moves only if it is an ancestor. Returns "" when merged, else why not."""
+    rc, out = _run(["git", "worktree", "list", "--porcelain"], repo)
+    where, cur = None, None
+    for line in out.splitlines():
+        if line.startswith("worktree "):
+            cur = line[9:]
+        elif line == f"branch refs/heads/{target}":
+            where = cur
+    if where:
+        rc, out = _run(["git", "merge", "--ff-only", "-q", branch], where)
+        if rc == 0:
+            return ""
+        lines = [ln.strip() for ln in out.splitlines() if ln.strip()]
+        if any("local changes" in ln for ln in lines):
+            return f"{where} has uncommitted changes to {', '.join(ln for ln in lines if not ln.endswith(('merge:', '.', 'Aborting')))}"
+        return lines[0][:200] if lines else "git merge --ff-only failed"
+    if _run(["git", "merge-base", "--is-ancestor", target, branch], repo)[0]:
+        return f"{target} has moved on; merge {branch} by hand"
+    old = _run(["git", "rev-parse", target], repo)[1].strip()
+    new = _run(["git", "rev-parse", branch], repo)[1].strip()
+    rc, out = _run(["git", "update-ref", f"refs/heads/{target}", new, old], repo)
+    return "" if rc == 0 else out.strip()[-200:]
+
+
+def _drop(repo, wt, branch, target):
+    """Remove a merged work branch and its worktree. `branch -d` judges "merged" against HEAD,
+    which may be another session's branch, so the check is against `target` instead."""
+    _run(["git", "worktree", "remove", wt], repo)
+    if _run(["git", "merge-base", "--is-ancestor", branch, target], repo)[0] == 0:
+        _run(["git", "branch", "-D", branch], repo)
+
+
+def _worktree(repo, wt, branch, base):
+    """A worktree on `branch` (made from `base` if new), or why it can't be made."""
+    if os.path.isdir(wt):
+        return ""
+    have = _run(["git", "rev-parse", "--verify", "-q", branch], repo)[0] == 0
+    rc, out = _run(["git", "worktree", "add", "-q", wt, *([branch] if have else ["-b", branch, base])],
+                   repo)
+    return f"git worktree add failed: {out[-300:]}" if rc else ""
+
+
+def _commit(wt, paths, message):
+    _run(["git", "add", "--", *paths], wt)
+    if _run(["git", "diff", "--cached", "--quiet"], wt)[0] == 0:
+        return ""                                   # nothing new: an earlier run committed it
+    rc, out = _run(["git", "-c", "user.email=nomad@itnomadlab.com", "-c", "user.name=NOMAD",
+                    "commit", "-q", "-m", message], wt)
+    return f"commit failed: {out[-300:]}" if rc else ""
+
+
+# ── hub registry for a new project (POST /register-project, §6.4 step 3.2) ───────────────
+HUB = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+HUB_BRANCH = os.environ.get("NOMAD_HUB_BRANCH", "master")
+NO_TESTS = "echo 'No test command yet: set it in projects.yaml' >&2; exit 1"
+PY = ["uv", "run", "--no-project", "--with", "pytest", "--with", "pyyaml", "--with", "requests",
+      "python"]
+
+
+def _registry_entry(pid, rel, local_only, autopilot, ptype="", policies=(), gates=None):
+    """The projects.yaml entry. `ptype` and `policies` are left out when empty, so an untyped
+    project's entry is what it was before types (#1373). `gates` is the profile's
+    {pre_merge, milestone}: written into the autopilot block, a step list as JSON strings."""
+    lines = [f"  - id: {pid}", f"    path: {rel}"]
+    if ptype and ptype != projects_registry.DEFAULT_TYPE:
+        lines.append(f"    type: {ptype}")
+    if policies:
+        lines.append(f"    policies: [{', '.join(policies)}]")
+    if local_only:
+        lines.append("    local_only: true")
+    if autopilot:
+        lines += ["    autopilot:                       # + New project; the switch starts off",
+                  f'      test: "{NO_TESTS}"   # the first milestone sets the real one']
+        for key, k in (("pre_merge", "pre_merge_gate"), ("milestone", "milestone_gate")):
+            steps = (gates or {}).get(key) or ()
+            if steps:
+                lines.append(f"      {k}: [{', '.join(json.dumps(x) for x in steps)}]"
+                             f"   # from the {ptype} profile")
+    return "\n".join(lines) + "\n"
+
+
+def _profiles():
+    """nomad_projects.profiles from this checkout (the hub)."""
+    if HUB not in sys.path:
+        sys.path.insert(0, HUB)
+    from nomad_projects import profiles
+    return profiles
+
+
+def profiles_payload():
+    """GET /profiles: every project type, generic last, for the + New project type question
+    (#1373). A bad profile file is an error, not a shorter list."""
+    try:
+        got = _profiles().load_all()
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:300]}"}
+    order = sorted(got, key=lambda t: (t == projects_registry.DEFAULT_TYPE, got[t].title.lower()))
+    return {"ok": True, "default": projects_registry.DEFAULT_TYPE, "profiles": [
+        {"id": t, "title": got[t].title, "description": got[t].description,
+         "interview": {"ask": [dict(q, options=list(q.get("options", ())))
+                               if "options" in q else dict(q) for q in got[t].interview["ask"]],
+                       "skip": list(got[t].interview["skip"])},
+         "stack": got[t].stack, "policies": list(got[t].policies),
+         "agents": [dict(a) for a in got[t].agents],
+         "gates": {k: list(v) for k, v in got[t].gates.items()}} for t in order]}
+
+
+# ── policies (#1396): the cockpit's Policies area, nomad_policy/api.py on this checkout ─────
+POLICY_GETS = ("/policies", "/policies/get", "/policies/effective")
+POLICY_POSTS = ("/policies/simulate", "/policies/tag-dry-run", "/policies/tag-save", "/policies/tag-accept",
+                "/policies/validate", "/policies/save", "/policies/attach", "/policies/guardrail-save")
+
+
+def _policy_api():
+    if HUB not in sys.path:
+        sys.path.insert(0, HUB)
+    from nomad_policy import api
+    return api
+
+
+def policies_route(route, args, cockpit=False):
+    """(status, body) for one /policies route. `args` is the query (GET) or the JSON body (POST).
+    `cockpit` is true only when the request carried the cockpit token."""
+    api = _policy_api()
+
+    def s(k):
+        v = args.get(k)
+        return v if isinstance(v, str) else ""
+    try:
+        if route == "/policies":
+            return 200, api.list_policies()
+        if route == "/policies/get":
+            return 200, api.get_policy(s("id"))
+        if route == "/policies/effective":
+            return 200, api.effective(s("project"))
+        if route == "/policies/simulate":
+            return 200, api.simulate(s("project"), s("kind"), s("name"), args.get("context") or {})
+        if route == "/policies/tag-dry-run":
+            return 200, api.tag_dry_run(s("project"), s("type"))
+        if route == "/policies/tag-save":
+            return 200, api.tag_save(s("project"), s("type"))
+        if route == "/policies/tag-accept":
+            return 200, api.tag_accept(s("project"), s("change"))
+        if route == "/policies/validate":
+            return 200, api.validate(s("id"), s("yaml"))
+        if route == "/policies/save":
+            return 200, api.save(s("id"), s("yaml"))
+        if route == "/policies/attach":
+            return 200, api.attach(s("target"), s("name"), s("policy"), detach=args.get("detach") is True)
+        if route == "/policies/guardrail-save":
+            if not cockpit:
+                return 403, {"ok": False, "error": "a guardrail is saved only from the cockpit, by the operator"}
+            return 200, api.save_guardrail(s("id"), s("yaml"), args.get("confirm"))
+    except api.ApiError as e:
+        return e.status, {"ok": False, "error": str(e)}
+    except Exception as e:
+        return 500, {"ok": False, "error": f"{type(e).__name__}: {str(e)[:300]}"}
+    return 404, {"ok": False, "error": "not found"}
+
+
+# ── profiles (#1377): the cockpit's Standards area, nomad_projects/profile_api.py ───────────
+PROFILE_GETS = ("/profiles/list", "/profiles/get", "/profiles/dry-run")   # GET dry-run: master's version (#1378)
+PROFILE_POSTS = ("/profiles/validate", "/profiles/dry-run", "/profiles/save")   # save: on profile/<id> (#1379)
+
+
+def profiles_route(route, args):
+    """(status, body) for one /profiles/* route. `args` is the query or the JSON body. The only
+    write is save, which commits on branch profile/<id> and never on master."""
+    _policy_api()
+    from nomad_projects import profile_api as api
+
+    def s(k):
+        v = args.get(k)
+        return v if isinstance(v, str) else ""
+    try:
+        if route == "/profiles/list":
+            return 200, api.list_profiles()
+        if route == "/profiles/get":
+            return 200, api.get_profile(s("id"))
+        if route == "/profiles/validate":
+            return 200, api.validate(s("id"), s("yaml"), keep=args.get("keep") is True)
+        if route == "/profiles/dry-run":
+            return 200, api.dry_run(s("id"), s("yaml") if s("yaml").strip() else None)
+        if route == "/profiles/save":
+            return 200, api.save(s("id"), s("yaml"), keep=args.get("keep") is True)
+    except api.ApiError as e:
+        return e.status, {"ok": False, "error": str(e)}
+    except Exception as e:
+        return 500, {"ok": False, "error": f"{type(e).__name__}: {str(e)[:300]}"}
+    return 404, {"ok": False, "error": "not found"}
+
+
+def _type_and_policies(ptype, policies):
+    """(profile or None, policy ids, error). The type must have a profile; each attached
+    policy needs a policies/types/<id>.yaml. Nothing the caller sends is written unchecked."""
+    ptype = (ptype or "").strip() or projects_registry.DEFAULT_TYPE
+    prof = None
+    try:
+        profiles = _profiles()
+        if not profiles.ID_RE.match(ptype):
+            return None, (), f"'{ptype}' is not a project type"
+        prof = profiles.load(ptype)
+        ids = []
+        for x in policies or ():
+            x = str(x).strip()
+            if not profiles.ID_RE.match(x) or not os.path.isfile(
+                    os.path.join(profiles.TYPE_POLICIES_DIR, x + ".yaml")):
+                return None, (), f"no policy '{x}' in policies/types/"
+            if x not in ids:
+                ids.append(x)
+    except Exception as e:
+        return None, (), f"type '{ptype}': {type(e).__name__}: {str(e)[:200]}"
+    return prof, tuple(ids), ""
+
+
+def _folders(path):
+    try:
+        return len(json.load(open(path, encoding="utf-8")).get("folders") or [])
+    except (OSError, ValueError, AttributeError):
+        return 0
+
+
+def register_hub(pid, local_only=False, autopilot=False, ptype="", policies=()):
+    """Add a scaffolded project to ~/nomad/projects.yaml on a `register/<id>` branch: the entry
+    (with an autopilot block when asked, whose test fails until the project has one, so nothing
+    merges by accident), its golden settings file, and the regenerated nomad.code-workspace.
+    Then fast-forward master. Re-running is safe. Returns {ok, merged, branch, note}.
+
+    `ptype` (#1373) is written as `type:`, and its profile's gates go into the autopilot block:
+    they are read here from the profile, not taken from the caller. `policies` are attached at
+    the project layer (e.g. engine-unity)."""
+    pid = (pid or "").strip()
+    if not PROJECT_ID.match(pid):
+        return {"ok": False, "error": f"'{pid}' is not a usable project id."}
+    prof, policies, why = _type_and_policies(ptype, policies)
+    if why:
+        return {"ok": False, "error": why}
+    path = os.path.join(ROOTS[0], pid)
+    if not os.path.isfile(os.path.join(path, "Nomad.md")):
+        return {"ok": False, "error": f"no scaffolded repo at {path}: run /new-project first"}
+    rc, listed = _run(["git", "show", f"{HUB_BRANCH}:projects.yaml"], HUB)
+    if rc:
+        return {"ok": False, "error": f"can't read projects.yaml on {HUB_BRANCH}"}
+    if re.search(rf"^\s*- (id: |\{{id: ){re.escape(pid)}\b", listed, re.M):
+        return {"ok": True, "merged": True, "branch": "", "note": "already registered"}
+    branch, wt = f"register/{pid}", os.path.join(os.path.dirname(HUB), "nomad-wt", f"register-{pid}")
+    why = _worktree(HUB, wt, branch, HUB_BRANCH)
+    if why:
+        return {"ok": False, "error": why}
+    reg = os.path.join(wt, "projects.yaml")
+    text = open(reg, encoding="utf-8").read()
+    if not re.search(rf"^\s*- (id: |\{{id: ){re.escape(pid)}\b", text, re.M):
+        rel = os.path.relpath(path, os.path.dirname(HUB))
+        with open(reg, "a", encoding="utf-8") as f:
+            f.write(("" if text.endswith("\n") else "\n") + _registry_entry(
+                pid, rel, local_only, autopilot, prof.id, policies, prof.gates))
+    paths = ["projects.yaml", "nomad.code-workspace"]
+    try:
+        if autopilot:
+            golden = os.path.join("autopilot", "testdata", "golden", f"{pid}-settings.json")
+            k = ["-m", "pytest", "-q", "-p", "no:cacheprovider", "autopilot/test_permissions.py",
+                 "-k", f"golden and {pid}"]
+            _run(PY + k, wt, timeout=300)                 # a missing golden is written, and fails
+            rc, out = _run(PY + k, wt, timeout=300)
+            if rc or not os.path.isfile(os.path.join(wt, golden)):
+                return {"ok": False, "error": f"golden file check failed: {out[-400:]}", "branch": branch}
+            paths.append(golden)
+        before = _folders(os.path.join(wt, "nomad.code-workspace"))
+        rc, out = _run(["env", f"NOMAD_WORKSPACE_HOME={os.path.dirname(HUB)}", *PY,
+                        "scripts/gen-workspace.py"], wt, timeout=120)
+        if rc == 0 and _folders(os.path.join(wt, "nomad.code-workspace")) < before:
+            rc, out = 1, f"it dropped folders ({before} before): {out}"
+    except subprocess.TimeoutExpired as e:
+        return {"ok": False, "error": f"timed out: {e.cmd[-1]}", "branch": branch}
+    if rc:
+        return {"ok": False, "error": f"gen-workspace failed: {out[-300:]}", "branch": branch}
+    why = _commit(wt, paths, f"Register {pid} (NOMAD + New project)")
+    if why:
+        return {"ok": False, "error": why, "branch": branch}
+    why = _ff_into(HUB, branch, HUB_BRANCH)
+    if why:
+        return {"ok": True, "merged": False, "branch": branch,
+                "note": f"Registered on {branch}; not merged into {HUB_BRANCH} yet: {why}"}
+    _drop(HUB, wt, branch, HUB_BRANCH)
+    return {"ok": True, "merged": True, "branch": branch, "note": ""}
+
+
+# ── the project's Zulip stream (POST /project-stream, §6.4 step 3.5) ─────────────────────
+RELAY = os.path.join(HUB, "nomad-relay")
+RELAY_ENV = os.path.expanduser(os.environ.get("NOMAD_RELAY_ENV", "~/.config/nomad/relay.env"))
+
+
+def project_stream(pid):
+    """Create #<id> with the operator and the bot subscribed, through the relay's
+    project_streams.py (idempotent). Returns {ok, stream, result}."""
+    pid = (pid or "").strip()
+    if not PROJECT_ID.match(pid):
+        return {"ok": False, "error": f"'{pid}' is not a usable stream name."}
+    env = dict(os.environ)
+    try:
+        for line in open(RELAY_ENV, encoding="utf-8"):
+            k, sep, v = line.strip().partition("=")
+            if sep and k.startswith("NOMAD_ZULIP_"):
+                env[k] = v.strip().strip('"')
+    except OSError:
+        return {"ok": False, "error": f"can't read {RELAY_ENV}"}
+    try:
+        p = subprocess.run([os.path.join(RELAY, ".venv", "bin", "python"), "project_streams.py", pid],
+                           cwd=RELAY, env=env, capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    line = next((ln for ln in p.stdout.splitlines() if ln.startswith(f"#{pid}:")), "")
+    result = line.split(":", 1)[1].strip() if line else (p.stderr or p.stdout).strip()[-300:]
+    return {"ok": p.returncode == 0 and result == "ok", "stream": pid, "result": result}
+
+
+# ── delete a project from Open WebUI (#1200, docs/prd/owui-sessions.md §6.6) ─────────────
+# The reverse of the routes above. Nothing here erases data: the repo moves to ~/archive, the board
+# and the stream are archived. The v2 engine asks for the operator's approval first and calls these
+# one by one; each is safe to run twice, so a retry after a failure resumes.
+HUB_IDS = {"nomad", "nomad-pm"}                   # never deleted, whatever the caller says
+PROTECTED_BOARDS = {"nomad-work", "nomad-portfolio", "nomad-pm"}
+ARCHIVE = os.environ.get("NOMAD_ARCHIVE_DIR", os.path.join(ROOTS[0], "archive"))
+OP_CONTAINER = os.environ.get("NOMAD_OP_CONTAINER", "nomad-openproject")
+GOLDEN = os.path.join("autopilot", "testdata", "golden", "{}-settings.json")
+_ENTRY = r"^  - (?:id: |\{{id: ){}(?![\w-])"
+
+
+def _hub_flagged(pid, entry=None):
+    return pid in HUB_IDS or bool(entry and entry.get("hub") is True)
+
+
+def _top_level(path):
+    return os.path.dirname(os.path.normpath(path)) == os.path.normpath(ROOTS[0])
+
+
+def project_info(pid):
+    """Everything a delete would touch, read only, for the operator's approval. Returns {ok,
+    known, hub, path, name, board, remote, dirty, golden, refuse}; `refuse` is why this project
+    can't be deleted from a chat at all, else ""."""
+    pid = (pid or "").strip()
+    if not PROJECT_ID.match(pid):
+        return {"ok": False, "error": f"'{pid}' is not a usable project id."}
+    listed = load_projects()
+    if listed is None:
+        return {"ok": False, "error": "can't read projects.yaml"}
+    entry = next((e for e in listed if e["id"] == pid), None)
+    if entry is None:
+        return {"ok": True, "known": False, "refuse": f"`{pid}` is not in projects.yaml."}
+    path = entry["path"]
+    hub = _hub_flagged(pid, entry)
+    board = _board_for()(pid)
+    remotes = []
+    dirty = 0
+    if os.path.isdir(path):
+        rc, out = _run(["git", "remote", "-v"], path)
+        remotes = sorted({ln.split()[1] for ln in out.splitlines() if rc == 0 and len(ln.split()) > 1})
+        dirty = len([ln for ln in _run(["git", "status", "--porcelain"], path)[1].splitlines() if ln.strip()])
+    refuse = ""
+    if hub:
+        refuse = f"`{pid}` is a hub repo, and a chat never deletes a hub repo."
+    elif os.path.islink(path) or not _top_level(path):
+        refuse = f"`{pid}` is not a plain top-level repo ({path}), so it is not moved from a chat."
+    elif board != pid:
+        refuse = f"`{pid}` shares the board `{board}` with other projects, so it is not deleted from a chat."
+    elif pid in PROTECTED_BOARDS:
+        refuse = f"`{pid}` is a protected board."
+    rc, ls = _run(["git", "ls-tree", "--name-only", HUB_BRANCH, GOLDEN.format(pid)], HUB)
+    return {"ok": True, "known": True, "hub": hub, "path": path, "name": _frontmatter(path).get("name") or pid,
+            "board": board, "remote": remotes, "dirty": dirty, "golden": bool(rc == 0 and ls.strip()),
+            "archive": os.path.join(ARCHIVE, pid), "refuse": refuse}
+
+
+def archive_project(pid, confirm_remote=False):
+    """Move the repo to ~/archive/<id> (never rm). Re-running after the move says so. Refuses a
+    hub repo, a symlink, a grouped repo, and a repo with a git remote unless `confirm_remote`:
+    the remote itself is never touched. Returns {ok, path, existed, note}."""
+    info = project_info(pid)
+    dest = os.path.join(ARCHIVE, (pid or "").strip())
+    if not info.get("ok"):
+        return info
+    if not info["known"]:
+        if os.path.isdir(dest):
+            return {"ok": True, "path": dest, "existed": True, "note": "already archived"}
+        return {"ok": False, "error": info["refuse"]}
+    if info["refuse"]:
+        return {"ok": False, "error": info["refuse"]}
+    src = info["path"]
+    if not os.path.isdir(src):
+        if os.path.isdir(dest):
+            return {"ok": True, "path": dest, "existed": True, "note": "already archived"}
+        return {"ok": False, "error": f"no repo at {src} and none in {ARCHIVE}"}
+    if info["remote"] and confirm_remote is not True:
+        return {"ok": False, "error": f"it has a git remote ({', '.join(info['remote'])}); "
+                                      "the operator has not confirmed archiving it"}
+    if os.path.exists(dest):
+        return {"ok": False, "error": f"{dest} already exists; not overwriting it"}
+    os.makedirs(ARCHIVE, exist_ok=True)
+    try:
+        shutil.move(src, dest)
+    except OSError as e:
+        return {"ok": False, "error": f"move failed: {e}"}
+    wt = src + "-wt"
+    return {"ok": True, "path": dest, "existed": False,
+            "note": f"worktrees in {wt} were not moved" if os.path.isdir(wt) else ""}
+
+
+def _drop_entry(text, pid):
+    """projects.yaml without the entry for `pid` (a block or a one-line flow mapping), keeping
+    every comment and every other entry as written. Unchanged text when it isn't listed."""
+    lines = text.splitlines(keepends=True)
+    start = next((i for i, ln in enumerate(lines) if re.match(_ENTRY.format(re.escape(pid)), ln)), None)
+    if start is None:
+        return text
+    end = start + 1
+    while end < len(lines) and (not lines[end].strip() or len(lines[end]) - len(lines[end].lstrip()) >= 4):
+        if not lines[end].strip():
+            break
+        end += 1
+    return "".join(lines[:start] + lines[end:])
+
+
+def unregister_hub(pid):
+    """Remove a project from ~/nomad/projects.yaml on an `unregister/<id>` branch: the entry, its
+    golden settings file, and the regenerated nomad.code-workspace. Then fast-forward master, as
+    register_hub does. Re-running is safe. Returns {ok, merged, branch, note}."""
+    pid = (pid or "").strip()
+    if not PROJECT_ID.match(pid):
+        return {"ok": False, "error": f"'{pid}' is not a usable project id."}
+    rc, listed = _run(["git", "show", f"{HUB_BRANCH}:projects.yaml"], HUB)
+    if rc:
+        return {"ok": False, "error": f"can't read projects.yaml on {HUB_BRANCH}"}
+    import yaml
+    try:
+        entries = (yaml.safe_load(listed) or {}).get("projects") or []
+    except yaml.YAMLError as e:
+        return {"ok": False, "error": f"projects.yaml on {HUB_BRANCH} doesn't parse: {e}"}
+    entry = next((e for e in entries if isinstance(e, dict) and str(e.get("id")) == pid), None)
+    if _hub_flagged(pid, entry):
+        return {"ok": False, "error": f"`{pid}` is a hub repo."}
+    branch, wt = f"unregister/{pid}", os.path.join(os.path.dirname(HUB), "nomad-wt", f"unregister-{pid}")
+    pending = _run(["git", "rev-parse", "--verify", "-q", branch], HUB)[0] == 0
+    if entry is None and not pending:
+        return {"ok": True, "merged": True, "branch": "", "note": "already unregistered"}
+    why = _worktree(HUB, wt, branch, HUB_BRANCH)
+    if why:
+        return {"ok": False, "error": why}
+    reg = os.path.join(wt, "projects.yaml")
+    text = open(reg, encoding="utf-8").read()
+    if re.search(_ENTRY.format(re.escape(pid)), text, re.M):
+        with open(reg, "w", encoding="utf-8") as f:
+            f.write(_drop_entry(text, pid))
+    paths = ["projects.yaml", "nomad.code-workspace"]
+    golden = GOLDEN.format(pid)
+    if os.path.isfile(os.path.join(wt, golden)):
+        os.remove(os.path.join(wt, golden))
+        paths.append(golden)
+    try:
+        before = _folders(os.path.join(wt, "nomad.code-workspace"))
+        rc, out = _run(["env", f"NOMAD_WORKSPACE_HOME={os.path.dirname(HUB)}", *PY,
+                        "scripts/gen-workspace.py"], wt, timeout=120)
+        if rc == 0 and _folders(os.path.join(wt, "nomad.code-workspace")) < before - 1:
+            rc, out = 1, f"it dropped more than one folder ({before} before): {out}"
+    except subprocess.TimeoutExpired as e:
+        return {"ok": False, "error": f"timed out: {e.cmd[-1]}", "branch": branch}
+    if rc:
+        return {"ok": False, "error": f"gen-workspace failed: {out[-300:]}", "branch": branch}
+    why = _commit(wt, paths, f"Unregister {pid} (NOMAD delete project, #1200)")
+    if why:
+        return {"ok": False, "error": why, "branch": branch}
+    why = _ff_into(HUB, branch, HUB_BRANCH)
+    if why:
+        return {"ok": True, "merged": False, "branch": branch, "golden": golden in paths,
+                "note": f"Unregistered on {branch}; not merged into {HUB_BRANCH} yet: {why}"}
+    _drop(HUB, wt, branch, HUB_BRANCH)
+    return {"ok": True, "merged": True, "branch": branch, "golden": golden in paths, "note": ""}
+
+
+def _drop_board_row(seed_rb, ident):
+    """seed.rb without the BOARDS row for `ident`, formatting of the other rows kept."""
+    m, idents = _boards(seed_rb)
+    if not m or ident not in idents:
+        return seed_rb
+    row = rf'\["{re.escape(ident)}",\s*"[^"]*"\]'
+    body = m.group(1)
+    new = re.sub(rf",\s*{row}(?=\s*\Z)", "", body, count=1)           # the last row: drop the comma before
+    if new == body:
+        new = re.sub(rf"{row},[ \t]*", "", body, count=1)
+    new = "".join(ln for ln in new.splitlines(keepends=True) if ln.strip())
+    return seed_rb[:m.start(1)] + new + seed_rb[m.end(1):]
+
+
+def archive_board(ident):
+    """Take the board's row out of ~/nomad-pm/seed.rb (on a branch, fast-forwarded into main like
+    seed_board does), so no re-seed brings it back, then archive the OpenProject project from
+    inside its container. The work packages stay, archived with it. Re-running is safe.
+    Returns {ok, board, archived, merged, branch, note}."""
+    ident = (ident or "").strip()
+    if not PROJECT_ID.match(ident):
+        return {"ok": False, "error": f"'{ident}' is not a usable board identifier."}
+    if ident in PROTECTED_BOARDS or ident in HUB_IDS:
+        return {"ok": False, "error": f"board `{ident}` is protected."}
+    rc, main_rb = _run(["git", "show", f"{PM_BRANCH}:seed.rb"], PM_REPO)
+    if rc:
+        return {"ok": False, "error": f"can't read seed.rb on {PM_BRANCH} in {PM_REPO}"}
+    res = {"ok": True, "board": ident, "merged": True, "branch": "", "note": ""}
+    branch, wt = f"board-rm/{ident}", f"{PM_REPO}-wt/board-rm-{ident}"
+    if ident in _boards(main_rb)[1] or _run(["git", "rev-parse", "--verify", "-q", branch], PM_REPO)[0] == 0:
+        why = _worktree(PM_REPO, wt, branch, PM_BRANCH)
+        if why:
+            return {"ok": False, "error": why}
+        seed = os.path.join(wt, "seed.rb")
+        text = open(seed, encoding="utf-8").read()
+        new = _drop_board_row(text, ident)
+        if new != text:
+            with open(seed, "w", encoding="utf-8") as f:
+                f.write(new)
+        why = _commit(wt, ["seed.rb"], f"Remove board {ident} (NOMAD delete project, #1200)")
+        if why:
+            return {"ok": False, "error": why}
+        res["branch"] = branch
+        why = _ff_into(PM_REPO, branch, PM_BRANCH)
+        if why:
+            res.update(merged=False, note=f"Branch {branch} isn't merged into {PM_BRANCH} yet: {why}")
+        else:
+            _drop(PM_REPO, wt, branch, PM_BRANCH)
+    ruby = (f'pr = Project.find_by(identifier: "{ident}")\n'
+            'if pr.nil?\n  puts "[archive] none"\nelse\n'
+            '  if pr.active?\n'
+            '    if defined?(Projects::ArchiveService)\n'
+            '      Projects::ArchiveService.new(user: User.system, model: pr).call\n'
+            '    else\n      pr.update_column(:active, false)\n    end\n  end\n'
+            '  puts(pr.reload.active? ? "[archive] failed" : "[archive] done")\nend\n')
+    tmp = f"/tmp/nomad-archive-{ident}.rb"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(ruby)
+        rc, out = _run(["docker", "cp", tmp, f"{OP_CONTAINER}:{tmp}"], HUB, timeout=60)
+        if rc:
+            return {"ok": False, "error": f"docker cp failed: {out[-200:]}", **{k: res[k] for k in ("branch", "merged")}}
+        rc, out = _run(["docker", "exec", OP_CONTAINER, "bash", "-c",
+                        f"cd /app && bundle exec rails runner -e production {tmp}"], HUB, timeout=300)
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": "archiving the board timed out", "branch": res["branch"]}
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+    mark = re.search(r"\[archive\] (done|none|failed)", out)
+    if rc or not mark or mark.group(1) == "failed":
+        return {"ok": False, "error": f"archive failed (rc {rc}): {out[-300:]}", "branch": res["branch"]}
+    return {**res, "archived": mark.group(1) == "done"}
+
+
+def archive_stream(pid):
+    """Archive the project's Zulip stream through the relay's project_streams.py --archive,
+    with the relay's credentials. A stream that isn't there counts as done. Returns {ok, stream, result}."""
+    pid = (pid or "").strip()
+    if not PROJECT_ID.match(pid) or pid in HUB_IDS:
+        return {"ok": False, "error": f"'{pid}' is not a stream a chat may archive."}
+    env = dict(os.environ)
+    try:
+        for line in open(RELAY_ENV, encoding="utf-8"):
+            k, sep, v = line.strip().partition("=")
+            if sep and k.startswith("NOMAD_ZULIP_"):
+                env[k] = v.strip().strip('"')
+    except OSError:
+        return {"ok": False, "error": f"can't read {RELAY_ENV}"}
+    try:
+        p = subprocess.run([os.path.join(RELAY, ".venv", "bin", "python"), "project_streams.py",
+                            "--archive", pid], cwd=RELAY, env=env, capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    line = next((ln for ln in p.stdout.splitlines() if ln.startswith(f"#{pid}:")), "")
+    result = line.split(":", 1)[1].strip() if line else (p.stderr or p.stdout).strip()[-300:]
+    return {"ok": p.returncode == 0 and result.startswith("ok"), "stream": pid, "result": result}
 
 
 # ── Save a generated image into a project's folder ──────────────────────────────────
@@ -518,6 +1397,26 @@ def new_project(name, description=""):
 # dispatcher (native, with host FS write access) resolves which project the prompt named and saves
 # the file inside it. The engine container never needs write access to the project tree.
 DEFAULT_IMAGE_SUBDIR = os.environ.get("NOMAD_IMAGE_SUBDIR", "assets/nomad-images")
+
+
+def session_project(req):
+    """POST /session/project: the registry project a mention on a board runs in (sessions.py)."""
+    hub = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if hub not in sys.path:
+        sys.path.insert(0, hub)
+    from autopilot import tasks   # the BOARDS map; the hub is this file's parent
+    listed = load_projects()
+    if listed is None:            # no readable registry: the scan's slugs are the ids
+        entries = [(r["slug"], r["path"]) for r in registry()]
+    else:
+        entries = [(e["id"], e["path"]) for e in listed
+                   if e["dispatch"] and os.path.isdir(e["path"])]
+    out = sessions.project_for(str(req.get("board") or ""), req.get("comment", ""),
+                               req.get("subject", ""), entries, tasks.board_for)
+    if out.get("project") and req.get("key"):
+        path = dict(entries)[out["project"]]
+        out["session"] = sessions.preview(str(req["key"]), path, req.get("subject", ""))
+    return out
 
 
 def resolve_from_text(text):
@@ -592,6 +1491,56 @@ def save_image(text, filename, content_b64, subdir=None):
             "rel": os.path.relpath(path, proj["path"])}
 
 
+# ── a whole project (POST /create-project, #1374) ──────────────────────────────────────
+# One creation process: the engine runs nomad_projects.create, the module the Open WebUI chat
+# runs, with the same setup (which calls back into /new-project, /register-project, /seed-board
+# and /project-stream here; the server is threaded, so that can't deadlock). This only forwards.
+ENGINE_URL = os.environ.get("NOMAD_ENGINE_URL", "http://127.0.0.1:8099").rstrip("/")
+OWUI_TOKEN_FILE = os.path.expanduser(os.environ.get("NOMAD_OWUI_TOKEN_FILE",
+                                                    "~/.config/nomad/owui-token"))
+
+
+def _owui_token():
+    tok = os.environ.get("NOMAD_OWUI_TOKEN", "").strip()
+    if not tok and os.path.isfile(OWUI_TOKEN_FILE):
+        with open(OWUI_TOKEN_FILE, encoding="utf-8") as f:
+            tok = f.read().strip()
+    return tok
+
+
+def _engine(method, path, body=None, timeout=60):
+    """The engine's JSON answer, a refusal included; {ok: false, error} when it can't be asked."""
+    import urllib.error
+    import urllib.request
+    tok = _owui_token()
+    if not tok:
+        return {"ok": False, "error": f"no Open WebUI token (NOMAD_OWUI_TOKEN or {OWUI_TOKEN_FILE})"}
+    req = urllib.request.Request(ENGINE_URL + path, method=method,
+                                 data=None if body is None else json.dumps(body).encode(),
+                                 headers={"Content-Type": "application/json", "X-Nomad-Token": tok})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        try:
+            return json.loads(e.read() or b"{}") or {"ok": False, "error": f"engine HTTP {e.code}"}
+        except ValueError:
+            return {"ok": False, "error": f"engine HTTP {e.code}"}
+    except Exception as e:
+        return {"ok": False, "error": f"the engine can't be reached: {type(e).__name__}"}
+
+
+def create_project(req):
+    return _engine("POST", "/owui/create-project", req if isinstance(req, dict) else {})
+
+
+def create_status(pid):
+    pid = (pid or "").strip()
+    if not PROJECT_ID.match(pid):
+        return {"ok": False, "error": f"'{pid}' is not a usable project id."}
+    return _engine("GET", f"/owui/create-project/{pid}", timeout=15)
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
@@ -620,11 +1569,29 @@ class Handler(BaseHTTPRequestHandler):
         elif not self._authed():
             return
         elif self.path.rstrip("/") == "/projects":
-            reg = registry()
-            self._send(200, {"projects": [r["name"] for r in reg],
-                             "ids": [r["slug"] for r in reg],
-                             "detail": [{"name": r["name"], "id": r["slug"], "lane": r["lane"],
-                                         "repo": r["repo"], "status": r["status"]} for r in reg]})
+            self._send(200, projects_payload())
+        elif self.path.rstrip("/") == "/profiles":
+            self._send(200, profiles_payload())
+        elif urllib.parse.urlsplit(self.path).path.rstrip("/") in POLICY_GETS:
+            u = urllib.parse.urlsplit(self.path)
+            q = {k: v[0] for k, v in urllib.parse.parse_qs(u.query).items()}
+            self._send(*policies_route(u.path.rstrip("/"), q))
+        elif urllib.parse.urlsplit(self.path).path.rstrip("/") in PROFILE_GETS:
+            u = urllib.parse.urlsplit(self.path)
+            q = {k: v[0] for k, v in urllib.parse.parse_qs(u.query).items()}
+            if u.path.rstrip("/") == "/profiles/dry-run":
+                q = {"id": q.get("id", "")}          # a GET dry-runs master's version only
+            self._send(*profiles_route(u.path.rstrip("/"), q))
+        elif urllib.parse.urlsplit(self.path).path.rstrip("/") == "/create-project":
+            q = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            self._send(200, create_status((q.get("id") or [""])[0]))
+        elif urllib.parse.urlsplit(self.path).path.rstrip("/") == "/project-context":
+            q = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            ctx = project_context((q.get("id") or [""])[0])
+            if ctx is None:
+                self._send(404, {"ok": False, "error": "no such dispatchable project"})
+            else:
+                self._send(200, ctx)
         else:
             self._send(404, {"error": "not found"})
 
@@ -632,14 +1599,75 @@ class Handler(BaseHTTPRequestHandler):
         route = self.path.rstrip("/")
         if not self._authed():
             return
-        if route not in ("/dispatch", "/new-project", "/verify", "/save-image", "/resolve"):
+        if route in PROFILE_POSTS:
+            try:
+                req = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+            except ValueError:
+                self._send(400, {"ok": False, "error": "body must be JSON"})
+                return
+            if not isinstance(req, dict):
+                self._send(400, {"ok": False, "error": "body must be a JSON object"})
+                return
+            self._send(*profiles_route(route, req))
+            return
+        if route in POLICY_POSTS:
+            try:
+                req = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+            except ValueError:
+                self._send(400, {"ok": False, "error": "body must be JSON"})
+                return
+            if not isinstance(req, dict):
+                self._send(400, {"ok": False, "error": "body must be a JSON object"})
+                return
+            given = self.headers.get("X-Nomad-Cockpit", "")
+            cockpit = bool(COCKPIT_TOKEN) and bool(given) and hmac.compare_digest(given, COCKPIT_TOKEN)
+            self._send(*policies_route(route, req, cockpit))
+            return
+        if route not in ("/dispatch", "/create-project", "/new-project", "/seed-board", "/register-project",
+                         "/project-stream", "/project-info", "/archive-project",
+                         "/unregister-project", "/archive-board", "/archive-stream", "/verify", "/save-image", "/resolve", "/session",
+                         "/session/close", "/session/project", "/comfy/generate"):
             self._send(404, {"error": "not found"})
             return
         try:
             n = int(self.headers.get("Content-Length", 0))
             req = json.loads(self.rfile.read(n) or b"{}")
+            if route == "/create-project":
+                self._send(200, create_project(req))
+                return
             if route == "/new-project":
-                self._send(200, new_project(req.get("name", ""), req.get("description", "")))
+                self._send(200, new_project(
+                    req.get("name", ""), req.get("description", ""), id=req.get("id", ""),
+                    prd=req.get("prd", ""), stack=req.get("stack") or (),
+                    lane=req.get("lane", "dev"), local_only=req.get("local_only") is True,
+                    register=req.get("register", True) is not False,
+                    template=req.get("template", "")))
+                return
+            if route == "/seed-board":
+                self._send(200, seed_board(req.get("board", ""), req.get("name", "")))
+                return
+            if route == "/register-project":
+                self._send(200, register_hub(req.get("id", ""), req.get("local_only") is True,
+                                             req.get("autopilot") is True, req.get("type") or "",
+                                             req.get("policies") or ()))
+                return
+            if route == "/project-stream":
+                self._send(200, project_stream(req.get("id", "")))
+                return
+            if route == "/project-info":
+                self._send(200, project_info(req.get("id", "")))
+                return
+            if route == "/archive-project":
+                self._send(200, archive_project(req.get("id", ""), req.get("confirm_remote") is True))
+                return
+            if route == "/unregister-project":
+                self._send(200, unregister_hub(req.get("id", "")))
+                return
+            if route == "/archive-board":
+                self._send(200, archive_board(req.get("board", "")))
+                return
+            if route == "/archive-stream":
+                self._send(200, archive_stream(req.get("id", "")))
                 return
             if route == "/resolve":
                 self._send(200, check_project(req.get("project", "")))
@@ -647,9 +1675,25 @@ class Handler(BaseHTTPRequestHandler):
             if route == "/verify":
                 self._send(200, verify(req.get("project", ""), req.get("command", "")))
                 return
+            if route == "/comfy/generate":
+                self._send(200, comfy_gate.generate(req.get("graph"), req.get("timeout")))
+                return
             if route == "/save-image":
                 self._send(200, save_image(req.get("text", ""), req.get("filename", ""),
                                            req.get("content_b64", ""), req.get("subdir")))
+                return
+            if route == "/session/project":
+                self._send(200, session_project(req))
+                return
+            if route == "/session/close":
+                self._send(200, sessions.close(req))
+                return
+            if route == "/session":
+                proj = resolve(req.get("project", ""))
+                if not proj or proj.get("ambiguous"):
+                    self._send(200, _unresolved(req.get("project", ""), proj))
+                    return
+                self._send(200, sessions.run(req, lambda _p: proj, default_branch, CLAUDE))
                 return
             mode = "plan" if req.get("mode") == "plan" else "build"
             proj = resolve(req.get("project", ""))
@@ -686,4 +1730,4 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     print(f"NOMAD dispatcher on http://{HOST}:{PORT} (claude={CLAUDE}, roots={ROOTS}, "
           f"token={TOKEN_PATH}, {len(registry())} projects)", flush=True)
-    ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
+    bridge_bind.serve_http(HOST, PORT, Handler)   # + the Docker bridge gateway (#383)

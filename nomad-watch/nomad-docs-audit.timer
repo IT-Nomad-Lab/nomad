@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the NOMAD agent-docs-audit once a month
+
+[Timer]
+OnCalendar=*-*-01 09:00:00
+Persistent=true
+RandomizedDelaySec=10min
+Unit=nomad-docs-audit.service
+
+[Install]
+WantedBy=timers.target

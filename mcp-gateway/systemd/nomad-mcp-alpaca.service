@@ -1,0 +1,14 @@
+[Unit]
+Description=NOMAD MCP: Alpaca market data (paper, read-only), loopback only; the auth proxy fronts it
+After=network.target
+
+[Service]
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=MCP_HOST=127.0.0.1
+Environment=MCP_PORT=18310
+ExecStart=%h/nomad/mcp-gateway/alpaca.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

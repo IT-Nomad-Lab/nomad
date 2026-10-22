@@ -1,5 +1,5 @@
 [Unit]
-Description=NOMAD detect — AI-text detection (Binoculars + style linter) on the GPU
+Description=NOMAD detect — AI-text detection (Binoculars + style linter) on the CPU
 After=network-online.target
 
 [Service]
@@ -8,8 +8,13 @@ WorkingDirectory=%h/nomad/nomad-detect
 EnvironmentFile=-%h/nomad/.env
 Environment=NOMAD_DETECT_OBSERVER=Qwen/Qwen2.5-1.5B
 Environment=NOMAD_DETECT_PERFORMER=Qwen/Qwen2.5-1.5B-Instruct
-Environment=NOMAD_DETECT_DEVICE=cuda
+# CPU, not cuda (#1037): its ~2 GB of VRAM pushed the 23.9 GB card over once Ollama's private model
+# (21.9 GB) and nomad-stt loaded, and Windows paged the loser to system RAM (80 -> 13 tok/s).
+# On CPU (float32): scores within 0.007 of the bf16 GPU calibration, ~9 s per check, ~13 GB RAM.
+Environment=NOMAD_DETECT_DEVICE=cpu
 Environment=NOMAD_DETECT_PORT=8214
+# Also listen on the Docker bridge gateway: the engine reaches it there under Docker Engine (#383).
+Environment=NOMAD_BRIDGE_IP=172.17.0.1
 Environment=NOMAD_DETECT_EAGER_LOAD=1
 ExecStart=%h/nomad/nomad-detect/.venv/bin/python %h/nomad/nomad-detect/server.py
 Restart=on-failure

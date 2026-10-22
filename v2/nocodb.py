@@ -6,6 +6,7 @@ auto data API. NocoDB-on-Postgres is the source of truth, so the engine is other
 import json
 import os
 import urllib.error
+import urllib.parse
 import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -100,7 +101,8 @@ class NocoDB:
 
     def find(self, table, field, value):
         self._auth()
-        path = f"/api/v2/tables/{self.table_id(table)}/records?where=({field},eq,{value})&limit=1"
+        where = urllib.parse.quote(f"({field},eq,{value})", safe="(),")   # a title has spaces
+        path = f"/api/v2/tables/{self.table_id(table)}/records?where={where}&limit=1"
         rows = self._req("GET", path).get("list", [])
         return rows[0] if rows else None
 

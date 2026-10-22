@@ -74,6 +74,11 @@ def auc(human: list[float], ai: list[float]) -> float:
 
 
 def fit(samples: list[dict[str, Any]], save: bool = True) -> dict[str, Any]:
+    with binoculars.admitted():
+        return _fit(samples, save)
+
+
+def _fit(samples: list[dict[str, Any]], save: bool) -> dict[str, Any]:
     eng = binoculars.engine()
     scored, skipped = {"human": [], "ai": []}, []
     by_source: dict[str, list[float]] = {}

@@ -1,0 +1,11 @@
+id: design-read
+role: permission
+description: >-
+  Read Figma design data through the MCP gateway (Framelink wrapper, personal access token,
+  read tools only). Penpot is in the default tier already. The gateway key must still be
+  granted per project (mcp-gateway/grant.py figma); this policy only says the type may use it.
+statements:
+  - sid: figma-read
+    effect: allow
+    kind: mcp
+    match: [figma]

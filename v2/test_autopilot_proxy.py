@@ -407,6 +407,16 @@ def test_approve_moves_the_task_with_the_answer_as_nomad_manager(op, client):
     assert op.moves == [(647, "Approved", "**Operator, via the cockpit:**\n\n(a)", "nomad-manager")]
 
 
+def test_a_multi_line_answer_reaches_the_comment_whole(op, client):
+    # #982: #961's cockpit answer stopped after "really contain". Nothing on this path cuts lines.
+    text = ("Check that the worker permissions really contain\n"
+            "`Bash(git -C /wt/ap-961 restore --source=HEAD --staged --worktree tools/rvoxel)`\n\n"
+            "and then go with (2).")
+    assert client.post("/api/autopilot/tasks/647/decide",
+                       json={"decision": "approve", "text": text + "\n"}).status_code == 200
+    assert op.moves == [(647, "Approved", "**Operator, via the cockpit:**\n\n" + text, "nomad-manager")]
+
+
 def test_approve_without_text_posts_no_comment(op, client):
     assert client.post("/api/autopilot/tasks/647/decide", json={"decision": "approve"}).status_code == 200
     assert op.moves == [(647, "Approved", "", "nomad-manager")]
@@ -447,3 +457,63 @@ def test_decide_is_a_write(op, client, monkeypatch):
     assert client.post("/api/autopilot/tasks/647/decide", json={"decision": "approve"},
                        headers=TAILNET).status_code == 200
     assert len(op.moves) == 1
+
+
+def test_a_mention_sees_an_autopilot_worker_on_its_task(monkeypatch):
+    """pm_mention's collision rule (#922): a live worker on the task blocks a session; a supervisor
+    that is down blocks nothing."""
+    st = {"projects": {"nomad": {"workers": [{"task": 919, "pid": 1}]}, "crm": {"workers": []}}}
+    monkeypatch.setattr(server, "_autopilot", lambda m, p, b=None: (200, st))
+    assert server._autopilot_on_task(919) and not server._autopilot_on_task(920)
+    monkeypatch.setattr(server, "_autopilot", lambda m, p, b=None: (503, {"ok": False}))
+    assert not server._autopilot_on_task(919)
+
+
+# ── the question behind a task in Awaiting approval (#1175) ─────────────────────────────────────
+
+class FakeOPAsk(FakeOP):
+    def __init__(self, notes):
+        super().__init__()
+        self.notes = notes
+
+    def get(self, i):
+        wp = super().get(i)
+        wp.update({"subject": "Pick the art pack", "_links": {**wp["_links"], "project": {"title": "runematch"}}})
+        return wp
+
+    def activities(self, i):
+        return [{"comment": {"raw": raw}, "createdAt": "2026-10-12T10:00:00Z",
+                 "_links": {"user": {"title": who}}} for who, raw in self.notes]
+
+
+def test_the_question_endpoint_reads_the_worker_comment_and_its_options(monkeypatch, client):
+    monkeypatch.setattr(server, "AUTH_MODE", "off")
+    monkeypatch.setattr(server.eng, "_op", FakeOPAsk([
+        ("worker", "Which pack?\n1. Itch.io, 12 USD\n2. Unity store, 20 USD"),
+        ("Josias", "**Operator, via the cockpit:**\n\nOption 1")]))
+    r = client.get("/api/autopilot/tasks/11534/question")
+    j = r.json()
+    assert r.status_code == 200 and j["subject"] == "Pick the art pack" and j["project"] == "runematch"
+    assert j["stem"] == "Which pack?" and [o["key"] for o in j["options"]] == ["1", "2"]
+    assert j["complex"] is False and j["asked_by"] == "worker"
+
+
+def test_a_long_question_is_flagged_complex_not_shown_whole(monkeypatch, client):
+    monkeypatch.setattr(server, "AUTH_MODE", "off")
+    monkeypatch.setattr(server.eng, "_op", FakeOPAsk([("worker", "detail " * 200)]))
+    j = client.get("/api/autopilot/tasks/11534/question").json()
+    assert j["complex"] is True and len(j["stem"]) <= 401
+
+
+def test_the_question_of_an_unknown_task_is_a_404(monkeypatch, client):
+    monkeypatch.setattr(server, "AUTH_MODE", "off")
+    monkeypatch.setattr(server.eng, "_op", FakeOPAsk([]))
+    assert client.get("/api/autopilot/tasks/404/question").status_code == 404
+
+
+def test_the_question_is_a_read_through_the_tailnet(monkeypatch, client):
+    monkeypatch.setattr(server, "AUTH_MODE", "tailnet")
+    monkeypatch.setattr(server, "TAILNET_OPERATOR", "op@example.com")
+    monkeypatch.setattr(server, "TAILNET_ORIGIN", "https://cockpit.ts.net")
+    monkeypatch.setattr(server.eng, "_op", FakeOPAsk([("worker", "Go ahead?")]))
+    assert client.get("/api/autopilot/tasks/647/question", headers=TAILNET).status_code == 200

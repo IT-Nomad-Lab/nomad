@@ -1,0 +1,19 @@
+# NOMAD secrets vault (Epic #1291, PRD docs/prd/secrets-vault-google-broker.md): OpenBao, Raft
+# storage, loopback only. Host port 8205 (8200 is the voice service).
+# Unseal key and AppRole files: ~/.config/nomad/openbao/ (0600), never in the repo.
+name: nomad-vault
+services:
+  openbao:
+    image: openbao/openbao:2.6.2
+    restart: unless-stopped
+    ports: ["127.0.0.1:8205:8200"]
+    environment:
+      BAO_ADDR: http://127.0.0.1:8200
+    volumes:
+      - ./config.hcl:/openbao/config/config.hcl:ro
+      - data:/openbao/data
+      - audit:/openbao/audit
+    command: ["bao", "server", "-config=/openbao/config/config.hcl"]
+volumes:
+  data:
+  audit:

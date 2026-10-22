@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "nomad-pm": {
+      "command": "git",
+      "args": ["-c", "alias.nomad-run=!bash", "nomad-run", "${CLAUDE_PLUGIN_ROOT}/bin/nomad-run", "nomad-pm"]
+    }
+  }
+}

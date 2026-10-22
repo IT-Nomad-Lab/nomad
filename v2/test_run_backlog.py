@@ -27,7 +27,8 @@ class Eng(engine_mod.Engine):
     def project_goals(self, limit=60):
         return self._goals
 
-    def run_next_task(self, goal_id):
+    def run_next_task(self, goal_id, ready_only=False):
+        assert ready_only, "the sweep must never take Backlog (#990)"
         self.calls.append(goal_id)
         if goal_id in self._fail:
             raise RuntimeError("nocodb unreachable")

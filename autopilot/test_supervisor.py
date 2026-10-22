@@ -290,6 +290,92 @@ def test_budget_cap_pauses_new_work(store):
     assert store.project("a")["state"] == "running"
 
 
+class Notes:
+    """An alerter that only records what it was asked to send."""
+
+    def __init__(self):
+        self.sent = []
+
+    def notify(self, project, key, title, body=""):
+        self.sent.append((project, key, title))
+
+    def on_pass(self, *a, **kw):
+        pass
+
+    def project_state(self, *a, **kw):
+        pass
+
+
+def limit_hit(task, reset_at):
+    return {"task": task, "outcome": "resume", "requeue": True, "reset_at": reset_at,
+            "detail": "Claude usage limit reached"}
+
+
+def test_a_usage_limit_hit_pauses_every_project_until_the_reset_then_resumes(store):
+    clock = [1000.0]
+    sched, notes = Fake([1, 2]), Notes()
+    sup = sv.Supervisor(store, sched, alerter=notes, limit_margin=300, now=lambda: clock[0])
+    for pid in ("a", "b"):
+        sup.store.set_autopilot(pid, True)
+        sup.start_project(pid)
+    store.update_config({"global_cap": 3})
+    sup.run_all()
+    assert [w["task"] for w in store.project("a")["workers"]] == [1, 2]
+    assert [w["task"] for w in store.project("b")["workers"]] == [1]
+
+    sched.done = [limit_hit(1, 2000.0)]            # a's task 1 hits the limit
+    sup.run_all()
+    assert store.usage_pause()["until"] == 2300.0
+    a, b = store.project("a"), store.project("b")
+    assert [w["task"] for w in a["workers"]] == [2]             # not restarted
+    assert a["state"] == "waiting" and "usage limit reached; resuming at" in a["detail"]
+    assert [w["task"] for w in b["workers"]] == [1]              # b's slot is free, nothing starts
+    b_before = len(sched.slots_seen)
+
+    sched.done = [limit_hit(2, 2100.0)]            # a second hit only moves the end
+    sup.run_all()
+    assert store.usage_pause()["until"] == 2400.0
+    clock[0] = 2399.0
+    sup.run_all()
+    assert len(sched.slots_seen) == b_before                    # still nothing started
+    assert [k.split(":")[-1] for _, k, _ in notes.sent] == ["pause"]
+
+    clock[0] = 2400.0
+    sup.run_all()
+    assert store.usage_pause() is None
+    assert sorted(w["task"] for w in store.project("a")["workers"]) == [1, 2]   # task 1 resumed
+    assert store.project("a")["state"] == "running"
+    assert [k.split(":")[-1] for _, k, _ in notes.sent] == ["pause", "resume"]
+    assert "usage limit reached" in notes.sent[0][2] and "resumes" in notes.sent[1][2]
+    sup.run_all()
+    assert len(notes.sent) == 2                                  # exactly one of each
+
+
+def test_the_usage_pause_survives_a_restart(store, tmp_path):
+    sup = sv.Supervisor(store, Fake([]), now=lambda: 1000.0, limit_margin=60)
+    sup.usage_hit("a", limit_hit(1, 5000.0))
+    again = st.StateStore(str(tmp_path / "state.json"))
+    assert again.usage_pause()["until"] == 5060.0
+    assert sv.Supervisor(again, Fake([]), now=lambda: 2000.0).usage_paused()
+
+
+def test_a_once_run_that_hits_the_limit_stays_on_and_retries_after_the_reset(store):
+    clock = [1000.0]
+    sched = Fake([7])
+    sup = sv.Supervisor(store, sched, limit_margin=0, now=lambda: clock[0])
+    sup.start_project("a")                                       # switch OFF: run once
+    sup.run_all()
+    assert store.project("a")["once"]["task"] == "7"
+    sched.done = [limit_hit(7, 1500.0)]
+    sup.run_all()
+    p = store.project("a")
+    assert p["enabled"] and p["state"] == "waiting" and p["workers"] == []
+    clock[0] = 1500.0
+    sup.run_all()
+    p = store.project("a")
+    assert p["once"]["task"] == "7" and [w["task"] for w in p["workers"]] == [7]
+
+
 def test_disabled_projects_are_not_passed(store):
     sched = Flaky()
     sup = sv.Supervisor(store, sched)
@@ -371,6 +457,46 @@ def test_budget_object_books_spend_and_pauses(store, tmp_path):
     assert [w["task"] for w in p["workers"]] == [2]              # running workers are untouched
     assert sup.status()["budget"]["spent_usd"] == 1.5
     assert sup.status()["budget"]["paused_projects"] == ["a"]
+
+
+def test_ac6_cap_below_one_run_pauses_alerts_once_and_no_limit_resumes(store, tmp_path):
+    """PRD 7 AC6 in one supervisor: a cap below one run's cost, `budget paused` with one alert
+    per channel however many passes it lasts, and switching to no limit resumes on the next pass."""
+    import alerts as al
+    import budget as bg
+
+    class Chan(al.Channel):
+        def __init__(self, name):
+            self.name, self.sent = name, []
+
+        def send(self, project, title, body):
+            self.sent.append(title)
+
+    chans = [Chan("cockpit"), Chan("zulip"), Chan("email")]
+    b = bg.Budget(store, runs_dir=str(tmp_path / "runs"))
+    b.set_cap(0.5)
+    sched = Fake([1])
+    sup = sv.Supervisor(store, sched, budget=b,
+                        alerter=al.Alerter(chans, al.Ledger(str(tmp_path / "alerts.json"))))
+    sup.store.set_autopilot("a", True)
+    sup.start_project("a")
+    sup.run_all()
+    assert [w["task"] for w in store.project("a")["workers"]] == [1]   # nothing spent yet
+
+    sched.done = [{"task": 1, "outcome": "merge", "cost_usd": 2.0}]    # one run, over the cap
+    sched.tasks = [2, 3]
+    for _ in range(3):
+        sup.run_all()
+        p = store.project("a")
+        assert p["state"] == "budget_paused" and p["workers"] == []
+        assert p["detail"].startswith("daily cap $0.50 reached; 2 task(s) wait")
+    assert [c.sent for c in chans] == [["project a is budget paused"]] * 3
+
+    b.set_mode("unlimited")
+    sup.run_all()
+    p = store.project("a")
+    assert p["state"] == "running" and [w["task"] for w in p["workers"]] == [2, 3]
+    assert [len(c.sent) for c in chans] == [1, 1, 1]                   # resuming is not an alert
 
 
 def test_milestone_alerts_go_through_the_alerter_once_per_text():

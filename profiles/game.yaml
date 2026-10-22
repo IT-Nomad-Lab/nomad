@@ -1,0 +1,26 @@
+# A game, engine-neutral. The engine is settled while the PRD is written (interview question
+# `engine`); the project then gets that engine's policy at project level, e.g. engine-unity
+# (policies/types/engine-unity.yaml: RuneMatch's Unity gates and scene/prefab edit denies).
+# Until then the project's own gate applies. Schema and checks: nomad_projects/profiles.py.
+id: game
+title: Game
+description: A video game or interactive toy, played on a screen or in a browser.
+
+interview:
+  ask:
+    - {id: engine, question: "Engine? (settled in the PRD; Unity, Godot and web are options)", kind: single, options: [Unity, Godot, web (canvas/JS), other, not decided yet]}
+    - {id: platform, question: "Where does it run?", kind: multi, options: [desktop, mobile, browser]}
+    - {id: loop, question: "What is the core loop in one sentence?", kind: text}
+    - {id: art, question: "Where does the art come from?", kind: single, options: [own assets, generated, asset store, placeholder for now]}
+  skip: []
+
+policies: [game-default, docs-audit]
+
+agents:
+  - {role: backend-engineer, lane: dev}
+  - {role: qa-test, lane: dev}
+
+files: [README.md, Nomad.md, CLAUDE.md]
+
+autopilot:
+  lanes: [dev]

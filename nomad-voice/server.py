@@ -418,4 +418,9 @@ async def lifespan(_app: FastAPI):
 app.router.lifespan_context = lifespan
 
 if __name__ == "__main__":
-    uvicorn.run(app, host=HOST, port=PORT)
+    import importlib.util   # dispatcher/bridge_bind.py, by path: loopback + NOMAD_BRIDGE_IP (#383)
+    spec = importlib.util.spec_from_file_location("bridge_bind", os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "dispatcher", "bridge_bind.py"))
+    bridge_bind = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bridge_bind)
+    bridge_bind.serve_uvicorn(app, HOST, PORT)

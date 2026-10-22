@@ -24,7 +24,11 @@ import json, os, sys, time
 scenario = os.environ.get("FAKE_SCENARIO", "success")
 with open(os.environ["FAKE_ARGV"], "w") as f:
     json.dump({{"argv": sys.argv[1:], "cwd": os.getcwd(),
-               "api_key": os.environ.get("ANTHROPIC_API_KEY")}}, f)
+               "api_key": os.environ.get("ANTHROPIC_API_KEY"),
+               "no_bg": os.environ.get("CLAUDE_CODE_DISABLE_BACKGROUND_TASKS"),
+               "no_1m": os.environ.get("CLAUDE_CODE_DISABLE_1M_CONTEXT"),
+               "sub_model": os.environ.get("CLAUDE_CODE_SUBAGENT_MODEL"),
+               "no_fast": os.environ.get("CLAUDE_CODE_DISABLE_FAST_MODE")}}, f)
 
 def emit(o):
     print(json.dumps(o), flush=True)
@@ -56,9 +60,21 @@ elif scenario == "recovered":
     denials = [{{"tool_name": "Bash", "tool_use_id": "t1", "tool_input": {{"command": "git status && ls"}}}}]
 elif scenario == "crash":
     sys.stderr.write("boom: auth failed\n"); sys.exit(2)
+elif scenario == "limit":
+    bash("t1", "git status"); res("t1", "clean")
+    text = "Claude AI usage limit reached|" + os.environ["FAKE_RESET"]
+    emit({{"type": "assistant", "message": {{"content": [{{"type": "text", "text": text}}]}}}})
+    emit({{"type": "result", "subtype": "success", "is_error": True, "result": text,
+          "total_cost_usd": 0.1, "permission_denials": []}})
+    sys.exit(1)
+elif scenario == "limit_stderr":
+    sys.stderr.write("Error: 5-hour limit reached ∙ resets 3pm\n"); sys.exit(1)
 emit({{"type": "assistant", "message": {{"content": [{{"type": "text", "text": text}}]}}}})
 emit({{"type": "result", "subtype": "success", "is_error": False, "result": text,
-      "total_cost_usd": 0.42, "permission_denials": denials}})
+      "total_cost_usd": 0.42, "num_turns": 7, "session_id": os.environ.get("FAKE_SESSION", "sess-1"),
+      "modelUsage": {{"claude-sonnet-5-5": {{"inputTokens": 100, "outputTokens": 50,
+                                            "cacheReadInputTokens": 900, "costUSD": 0.42}}}},
+      "permission_denials": denials}})
 '''
 
 
@@ -124,6 +140,23 @@ def wait_done(pool, ctx, timeout=15):
 
 
 # ---- worktrees --------------------------------------------------------------------------------
+
+def test_worker_launch_and_collection_use_the_injected_native_adapter(project, fake, tmp_path):
+    from unittest.mock import Mock
+    native = wk.ClaudeAdapter(parse_stream=wk.parse_stream, kill_group=wk._kill_group, adopt=wk.Adopted)
+    adapter = Mock(wraps=native)
+    pool = pool_for(project, fake, tmp_path, adapter=adapter)
+    run = pool.launch(project, {"task": "42", "title": "Adapter fixture"})
+    finished = wait_done(pool, Ctx(project.id))
+    assert finished[0]["outcome"] == "merge"
+    adapter.command.assert_called_once()
+    adapter.launch.assert_called_once()
+    adapter.parse.assert_called_once_with(run.log)
+    captured = json.loads((tmp_path / "argv.json").read_text())
+    assert captured["api_key"] == ""
+    assert "--settings" in captured["argv"]
+    assert "--max-budget-usd" in captured["argv"]
+
 
 def test_new_worktree_on_a_task_branch_from_the_default_branch(project, tmp_path):
     wt = wk.ensure_worktree(project.repo, project.autopilot.worktree_root, "42", "Fix the Thing!")
@@ -204,6 +237,111 @@ def test_regenerated_paths_never_hide_other_changes(project, tmp_path):
     assert open(os.path.join(lane, "README")).read() == "real work\n"
 
 
+# ---- Unity import noise (#996) ----------------------------------------------------------------
+
+UNITY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "unity_noise")
+META = open(os.path.join(UNITY, "rune.png.meta")).read()
+WEBGL = "  - serializedVersion: 3\n    buildTarget: WebGL\n"
+PLATFORMS = open(os.path.join(UNITY, "platforms.txt")).read()   # Android + iPhone, overridden: 0
+META_NOISE = META.replace(WEBGL, PLATFORMS + WEBGL, 1)           # where Unity puts them
+PS = "PlayerSettings:\n  companyName: IT Nomad Lab\n  productName: RuneMatch\n  bundleVersion: 0.1\n"
+PS_NOISE = PS.replace("productName: RuneMatch", "productName: RuneMatch-ap-936")
+METAS = ("Assets/Resources/Runes/rune.png.meta", "Assets/Resources/Board/tile.png.meta")
+SETTINGS = "ProjectSettings/ProjectSettings.asset"
+NOISE = (projects.Noise("Assets/*.meta", "unity-default-platforms"),
+         projects.Noise(SETTINGS, "only-keys", ("productName",)))
+
+
+def unity_lane(project, tmp_path, tid, files):
+    """A held worktree for task `tid` on a repo with two .meta files and ProjectSettings, then
+    `files` (path -> content) written into it, as a Unity run leaves them."""
+    sh(project.repo, "git", "switch", "-q", "main")
+    for rel, text in [*((m, META) for m in METAS), (SETTINGS, PS)]:
+        os.makedirs(os.path.join(project.repo, os.path.dirname(rel)), exist_ok=True)
+        with open(os.path.join(project.repo, rel), "w") as f:
+            f.write(text)
+    sh(project.repo, "git", "add", ".")
+    sh(project.repo, "git", "commit", "-qm", "unity")
+    sh(project.repo, "git", "switch", "-q", "feat/other")
+    lane = str(tmp_path / f"lane-{tid}")
+    sh(project.repo, "git", "worktree", "add", "-b", f"feat/{tid}-unity", lane, "main")
+    for rel, text in files.items():
+        with open(os.path.join(lane, rel), "w") as f:
+            f.write(text)
+    return lane
+
+
+def read(lane, rel):
+    return open(os.path.join(lane, rel)).read()
+
+
+def test_unity_import_noise_is_reset_so_a_held_worktree_is_adopted(project, tmp_path):
+    lane = unity_lane(project, tmp_path, "936", {METAS[0]: META_NOISE, METAS[1]: META_NOISE,
+                                                 SETTINGS: PS_NOISE})
+    sh(lane, "git", "add", METAS[1])              # staged noise is reset too
+    wt = wk.ensure_worktree(project.repo, project.autopilot.worktree_root, "936", "x", noise=NOISE)
+    assert os.path.realpath(wt.path) == os.path.realpath(lane) and not wt.dirty
+    assert sh(lane, "git", "status", "--porcelain") == ""
+    assert read(lane, METAS[0]) == META and read(lane, SETTINGS) == PS
+
+
+def test_reset_noise_names_what_it_reset(project, tmp_path):
+    lane = unity_lane(project, tmp_path, "1", {METAS[0]: META_NOISE, SETTINGS: PS_NOISE})
+    assert sorted(wk.reset_noise(lane, NOISE)) == sorted([METAS[0], SETTINGS])
+
+
+@pytest.mark.parametrize("real", [
+    META_NOISE.replace("spriteMode: 1", "spriteMode: 2"),                    # a real import change
+    META_NOISE.replace("buildTarget: iPhone\n    maxTextureSize: 2048",       # an overridden block
+                       "buildTarget: iPhone\n    maxTextureSize: 1024").replace(
+        "    overridden: 0\n    ignorePlatformSupport: 0\n    androidETC2FallbackOverride: 0\n"
+        "    forceMaximumCompressionQuality_BC6H_BC7: 0\n  - serializedVersion: 3\n    buildTarget: WebGL",
+        "    overridden: 1\n    ignorePlatformSupport: 0\n    androidETC2FallbackOverride: 0\n"
+        "    forceMaximumCompressionQuality_BC6H_BC7: 0\n  - serializedVersion: 3\n    buildTarget: WebGL"),
+    META_NOISE.replace("buildTarget: WebGL\n    maxTextureSize: 2048",       # an existing block changed
+                       "buildTarget: WebGL\n    maxTextureSize: 512"),
+    META.replace(WEBGL + "    maxTextureSize: 2048", WEBGL + "    maxTextureSize: 512"),
+    META.replace(WEBGL, PLATFORMS.replace("Android", "Standalone") + WEBGL),  # a duplicate target
+    META.replace(WEBGL, ""),                                                   # a block removed
+])
+def test_a_meta_with_noise_and_a_real_change_is_left_alone(project, tmp_path, real):
+    assert real != META_NOISE
+    lane = unity_lane(project, tmp_path, "937", {METAS[0]: real, METAS[1]: META_NOISE})
+    with pytest.raises(wk.WorkerError, match="uncommitted changes"):
+        wk.ensure_worktree(project.repo, project.autopilot.worktree_root, "937", "x", noise=NOISE)
+    assert read(lane, METAS[0]) == real
+    assert read(lane, METAS[1]) == META                # the pure-noise one was still reset
+
+
+@pytest.mark.parametrize("real", [
+    PS_NOISE.replace("bundleVersion: 0.1", "bundleVersion: 0.2"),
+    PS.replace("companyName: IT Nomad Lab", "companyName: Other"),
+    PS_NOISE.replace("  productName:", "    productName:"),     # moved to another level
+    PS_NOISE + "  extra: 1\n",
+])
+def test_project_settings_with_any_other_change_are_left_alone(project, tmp_path, real):
+    lane = unity_lane(project, tmp_path, "938", {SETTINGS: real})
+    assert wk.reset_noise(lane, NOISE) == []
+    assert read(lane, SETTINGS) == real
+
+
+def test_noise_rules_only_apply_to_their_glob(project, tmp_path):
+    lane = unity_lane(project, tmp_path, "939", {METAS[0]: META_NOISE, SETTINGS: PS_NOISE})
+    assert wk.reset_noise(lane, (projects.Noise("Other/*.meta", "unity-default-platforms"),
+                                 projects.Noise(SETTINGS, "unity-default-platforms"))) == []
+    assert read(lane, METAS[0]) == META_NOISE and read(lane, SETTINGS) == PS_NOISE
+
+
+def test_without_noise_rules_nothing_changes(project, tmp_path):
+    lane = unity_lane(project, tmp_path, "940", {METAS[0]: META_NOISE, SETTINGS: PS_NOISE})
+    before = sh(lane, "git", "status", "--porcelain")
+    assert wk.reset_noise(lane, ()) == []
+    with pytest.raises(wk.WorkerError, match="uncommitted changes"):
+        wk.ensure_worktree(project.repo, project.autopilot.worktree_root, "940", "x")
+    assert sh(lane, "git", "status", "--porcelain") == before
+    assert read(lane, METAS[0]) == META_NOISE and read(lane, SETTINGS) == PS_NOISE
+
+
 def test_a_branch_in_the_main_checkout_is_refused(project):
     sh(project.repo, "git", "branch", "-m", "feat/other", "feat/6-main-here")
     with pytest.raises(wk.WorkerError, match="main checkout"):
@@ -237,7 +375,10 @@ def test_launch_invocation_log_and_success(project, fake, tmp_path, monkeypatch)
     mcp = os.path.join(os.path.dirname(argv[i + 1]), "mcp.json")
     assert argv[i + 2:] == ["--setting-sources", "", "--mcp-config", mcp, "--strict-mcp-config",
                             "--permission-mode", "dontAsk",
+                            "--model", "sonnet", "--max-turns", "150", "--max-budget-usd", "10",
                             "--verbose", "--output-format", "stream-json"]
+    # #1088: compaction at 200K, subagents on Sonnet, no fast mode
+    assert (seen["no_1m"], seen["sub_model"], seen["no_fast"]) == ("1", "sonnet", "1")
     # the run gets nomad-pm, and only nomad-pm (#832/#842 ran with no tracker at all)
     assert list(json.load(open(mcp))["mcpServers"]) == ["nomad-pm"]
     assert seen["cwd"] == started[0]["worktree"] and seen["api_key"] == ""
@@ -247,6 +388,9 @@ def test_launch_invocation_log_and_success(project, fake, tmp_path, monkeypatch)
     wrapper = str(tmp_path / "state" / "bin" / "proj-test-default")
     assert f"`{wrapper} [filter]`" in prompt and "ONLY through its wrapper" in prompt
     assert "promote" not in prompt                            # not a New task
+    # #985: a backgrounded test run dies with the headless session, so it can't be started
+    assert seen["no_bg"] == "1"
+    assert "Never use run_in_background or Monitor" in prompt
 
     settings_file = argv[i + 1]
     assert settings_file == str(tmp_path / "state" / "settings" / "proj-5.json")
@@ -308,6 +452,54 @@ def test_project_rules_are_named_when_present(project, fake, tmp_path, monkeypat
     wait_done(pool, ctx)
     prompt = json.load(open(tmp_path / "argv.json"))["argv"][1]
     assert os.path.join(project.repo, "AUTONOMY.md") in prompt
+
+
+def test_a_collected_run_appends_one_ledger_line(project, fake, tmp_path, monkeypatch):
+    monkeypatch.setenv("FAKE_SCENARIO", "success")
+    pool = pool_for(project, fake, tmp_path)
+    ctx = Ctx("proj")
+    pool.start_workers(ctx, [{"task": "5", "title": "Add a widget"}])
+    [out] = wait_done(pool, ctx)
+    lines = [json.loads(x) for x in open(tmp_path / "state" / "cost-ledger.jsonl")]
+    assert len(lines) == 1
+    e = lines[0]
+    assert (e["project"], e["task"], e["session_id"], e["num_turns"]) == ("proj", "5", "sess-1", 7)
+    assert e["total_cost_usd"] == 0.42 and e["outcome"] == "merge" and "detail" in e
+    assert e["modelUsage"]["claude-sonnet-5-5"]["outputTokens"] == 50
+    assert e["elapsed_s"] == out["elapsed_s"]
+    assert out["cost_usd"] == 0.42          # the existing cost parsing is unchanged
+
+
+def test_a_resumed_session_is_not_counted_twice(project, fake, tmp_path, monkeypatch):
+    import state
+    d = str(tmp_path / "ledger")
+    # one session, resumed: the second result carries the whole conversation's total
+    state.append_ledger(d, {"project": "p", "task": "9", "session_id": "s1",
+                            "total_cost_usd": 1.0, "num_turns": 10})
+    state.append_ledger(d, {"project": "p", "task": "9", "session_id": "s1",
+                            "total_cost_usd": 1.5, "num_turns": 16})
+    assert state.task_totals(d) == {"p": {"9": {"cost_usd": 1.5, "turns": 16, "runs": 1}}}
+    # a different session of the same task is a separate conversation: it adds
+    state.append_ledger(d, {"project": "p", "task": "9", "session_id": "s2",
+                            "total_cost_usd": 0.5, "num_turns": 4})
+    assert state.task_totals(d)["p"]["9"] == {"cost_usd": 2.0, "turns": 20, "runs": 2}
+    state.note_escalated(d, "p", "9")      # an event line is not a run
+    assert state.task_totals(d)["p"]["9"]["runs"] == 2
+
+
+def test_failed_streak_counts_failures_in_a_row(tmp_path):
+    import state
+    d = str(tmp_path / "ledger")
+    run = lambda outcome, task="9": state.append_ledger(d, {"project": "p", "task": task,
+                                                           "outcome": outcome})
+    assert state.failed_streak(d, "p", "9") == 0
+    run("failed"); run("merge"); run("failed"); run("resume"); run("failed"); run("failed", "8")
+    assert state.failed_streak(d, "p", "9") == 2      # merge ends it; resume is skipped
+    run("failed")
+    assert state.failed_streak(d, "p", "9") == 3
+    state.note_escalated(d, "p", "9")
+    assert state.failed_streak(d, "p", "9") == 0      # the operator has it now
+    assert state.failed_streak(d, "p", "8") == 1 and state.failed_streak(d, "q", "9") == 0
 
 
 def test_missing_marker_is_failed(project, fake, tmp_path, monkeypatch):
@@ -462,3 +654,82 @@ def test_scheduler_hooks_delegate(project, fake, tmp_path, monkeypatch):
         out = sch.collect(ctx)
         time.sleep(0.05)
     assert out[0]["outcome"] == "merge"
+
+
+# ---- the Max usage limit (#960) ---------------------------------------------------------------
+
+def test_a_run_that_hits_the_usage_limit_is_requeued_not_failed(project, fake, tmp_path, monkeypatch):
+    reset = int(time.time()) + 3600
+    monkeypatch.setenv("FAKE_SCENARIO", "limit")
+    monkeypatch.setenv("FAKE_RESET", str(reset))
+    pool = pool_for(project, fake, tmp_path, tracker=lambda tid: "failed")   # never asked
+    ctx = Ctx("proj")
+    [started] = pool.start_workers(ctx, [{"task": "5", "title": "x"}])
+    [out] = wait_done(pool, ctx)
+    assert out["outcome"] == "resume" and out["requeue"] and out["reset_at"] == reset
+    assert "usage limit reached; resuming at" in out["detail"]
+    assert os.path.isdir(started["worktree"])                                 # kept
+    assert sh(started["worktree"], "git", "branch", "--show-current") == started["branch"]
+
+
+def test_a_limit_hit_seen_only_on_stderr_is_requeued(project, fake, tmp_path, monkeypatch):
+    monkeypatch.setenv("FAKE_SCENARIO", "limit_stderr")
+    pool = pool_for(project, fake, tmp_path)
+    ctx = Ctx("proj")
+    pool.start_workers(ctx, [{"task": "5"}])
+    [out] = wait_done(pool, ctx)
+    assert out["outcome"] == "resume" and out["requeue"] and out["reset_at"] > time.time()
+
+
+def test_an_ordinary_failure_carries_no_reset(project, fake, tmp_path, monkeypatch):
+    monkeypatch.setenv("FAKE_SCENARIO", "crash")
+    pool = pool_for(project, fake, tmp_path)
+    ctx = Ctx("proj")
+    pool.start_workers(ctx, [{"task": "5"}])
+    [out] = wait_done(pool, ctx)
+    assert out["outcome"] == "failed" and "reset_at" not in out
+
+
+# ---- token caps (#1088) -----------------------------------------------------------------------
+
+def test_cap_args_defaults_and_empty_drops_flag():
+    assert wk.cap_args() == ["--model", "sonnet", "--max-turns", "150", "--max-budget-usd", "10"]
+    assert wk.cap_args(model="opus", max_turns="", max_budget_usd=" ") == ["--model", "opus"]
+
+
+def test_project_caps_override_the_globals():
+    from projects import Autopilot, Project
+    own = Project("p", "/x", autopilot=Autopilot(test={}, pre_merge_gate=(), milestone_gate=(),
+                                                  model="opus", max_budget_usd=4))
+    assert wk.project_caps(own) == ["--model", "opus", "--max-turns", "150",
+                                    "--max-budget-usd", "4"]
+    plain = Project("p", "/x", autopilot=Autopilot(test={}, pre_merge_gate=(), milestone_gate=()))
+    assert wk.project_caps(plain) == wk.cap_args()
+    assert wk.project_caps(Project("p", "/x")) == wk.cap_args()
+
+
+def test_suites_outside_loop_tests_are_marked_gate_only():
+    from projects import Autopilot, Command, Project
+    edit, play = Command("unity EditMode {filter}"), Command("unity PlayMode {filter}")
+    ap = Autopilot(test={"EditMode": edit, "PlayMode": play}, pre_merge_gate=(edit, play),
+                   milestone_gate=(), loop_tests=("EditMode",))
+    lines = wk.commands_block(Project("p", "/x", autopilot=ap)).splitlines()
+    [e] = [x for x in lines if "test `EditMode`" in x]
+    [p] = [x for x in lines if "test `PlayMode`" in x]
+    assert "GATE ONLY" not in e and "PRE-MERGE GATE ONLY" in p
+    every = Autopilot(test={"EditMode": edit, "PlayMode": play}, pre_merge_gate=(edit, play),
+                      milestone_gate=())
+    assert "GATE ONLY" not in wk.commands_block(Project("p", "/x", autopilot=every))
+
+
+@pytest.mark.parametrize("subtype", ["error_max_turns", "error_max_budget_usd"])
+def test_run_stopped_at_cap_needs_operator(subtype):
+    p = {"result": "", "marker": None, "is_error": True, "subtype": subtype, "shell_calls": []}
+    outcome, detail = wk.judge(p)
+    assert outcome == "needs_operator" and subtype in detail and "split the task" in detail
+
+
+def test_other_error_without_marker_still_fails():
+    p = {"result": "", "marker": None, "is_error": True, "subtype": "error_during_execution",
+         "shell_calls": []}
+    assert wk.judge(p)[0] == "failed"

@@ -1,0 +1,28 @@
+{
+  "id": "labApprovalGate1",
+  "name": "lab-approval-gate (UNTESTED draft)",
+  "active": false,
+  "nodes": [
+    {"name": "Request", "type": "n8n-nodes-base.webhook", "typeVersion": 2, "position": [0, 0],
+     "parameters": {"path": "lab-approval", "httpMethod": "POST", "authentication": "headerAuth",
+                    "responseMode": "onReceived"}},
+    {"name": "Notify Zulip #lab", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4, "position": [240, 0],
+     "parameters": {"method": "POST", "url": "http://zulip/api/v1/messages",
+                    "sendBody": true, "bodyParameters": {"parameters": [
+                      {"name": "type", "value": "stream"}, {"name": "to", "value": "lab"},
+                      {"name": "topic", "value": "approvals"},
+                      {"name": "content", "value": "=Approval {{$json.body.approval_id}}: {{$json.body.kind}} ({{$json.body.policy_class}})\n{{$json.body.summary}}\nReasons: {{$json.body.reasons.join('; ')}}"}]}}},
+    {"name": "Wait for decision", "type": "n8n-nodes-base.wait", "typeVersion": 1, "position": [480, 0],
+     "parameters": {"resume": "webhook", "httpMethod": "POST"}},
+    {"name": "Decide", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4, "position": [720, 0],
+     "parameters": {"method": "POST", "url": "={{$('Request').item.json.body.decide_url}}",
+                    "sendHeaders": true, "headerParameters": {"parameters": [{"name": "x-lab-token", "value": "={{$env.LAB_API_TOKEN}}"}]},
+                    "sendBody": true, "specifyBody": "json",
+                    "jsonBody": "={\"approved\": {{$json.body.approved}}, \"by\": \"zulip\"}"}}
+  ],
+  "connections": {
+    "Request": {"main": [[{"node": "Notify Zulip #lab", "type": "main", "index": 0}]]},
+    "Notify Zulip #lab": {"main": [[{"node": "Wait for decision", "type": "main", "index": 0}]]},
+    "Wait for decision": {"main": [[{"node": "Decide", "type": "main", "index": 0}]]}
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "set": {
+    "permissions": {
+      "allow": [
+        "WebSearch",
+        "Bash(claude --version)",
+        "Bash(bash -n:*)",
+        "Bash(git status:*)",
+        "Bash(git log:*)",
+        "Bash(git diff:*)",
+        "Bash(git show:*)",
+        "Bash(git branch:*)",
+        "Bash(git worktree:*)",
+        "Bash(git fetch:*)",
+        "Bash(git rev-parse:*)",
+        "Bash(git merge-base:*)",
+        "Bash(git stash list:*)",
+        "Bash(git add:*)",
+        "Bash(git commit:*)",
+        "Bash(git switch:*)",
+        "Bash(git checkout:*)",
+        "Bash(git merge:*)",
+        "Bash(git -C:*)",
+        "Bash(uvx pytest:*)",
+        "Bash(python3 -m pytest:*)",
+        "Bash(python3 -m unittest:*)"
+      ],
+      "deny": [
+        "Bash(git push --force:*)",
+        "Bash(git push -f:*)",
+        "Bash(git push --force-with-lease:*)",
+        "Bash(git push --mirror:*)",
+        "Bash(git reset --hard:*)",
+        "Bash(git clean -fdx:*)"
+      ]
+    },
+    "autoMode": {
+      "soft_deny": ["$defaults"]
+    },
+    "enabledPlugins": {
+      "nomad-operator@nomad-marketplace": true,
+      "nomad@nomad-marketplace": true,
+      "pyright-lsp@claude-plugins-official": true,
+      "typescript-lsp@claude-plugins-official": true,
+      "context7@claude-plugins-official": true,
+      "frontend-design@claude-plugins-official": true,
+      "claude-security@claude-plugins-official": true
+    },
+    "agentPushNotifEnabled": true
+  },
+  "retire": []
+}

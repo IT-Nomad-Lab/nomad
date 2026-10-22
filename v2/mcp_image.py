@@ -5,7 +5,8 @@ after the human gate approves. On success the image is persisted locally and a s
 (`/images/<file>`) is filed to the `content` table (sink), so it shows up like any content run.
 
 Backends (selectable + ordered fallback via NOMAD_IMAGE_PROVIDER, default "comfyui,openai,firefly"):
-  • comfyui — LOCAL on the RTX 5090 via ComfyUI's HTTP API (free, always-on, no per-image cost).
+  • comfyui — LOCAL on the RTX 5090 via ComfyUI's HTTP API (free, no per-image cost), run by the
+              host dispatcher under shared GPU admission (dispatcher/comfy_gate.py, #1462).
   • openai  — OpenAI Images API (gpt-image-1 / dall-e-3); costs per image.
   • firefly — Adobe Firefly server-to-server (commercially-safe licensing); spends Adobe credits.
               UNVERIFIED: no Adobe key has ever existed here, so it has never run against the live
@@ -91,7 +92,7 @@ def _dispatch_token():
 DISPATCH_TOKEN = _dispatch_token()
 
 # ── ComfyUI (local) ────────────────────────────────────────────────────────────────
-COMFYUI_URL = os.environ.get("COMFYUI_URL", "http://host.docker.internal:8188").rstrip("/")
+# ComfyUI itself is reached only through the dispatcher's /comfy/generate (shared GPU admission).
 COMFYUI_MODEL = os.environ.get("COMFYUI_MODEL", "sdxl").lower()   # sdxl | flux | flux2 | qwen
 COMFYUI_SDXL_CKPT = os.environ.get("COMFYUI_SDXL_CKPT", "sd_xl_base_1.0.safetensors")
 COMFYUI_FLUX_CKPT = os.environ.get("COMFYUI_FLUX_CKPT", "flux1-schnell-fp8.safetensors")
@@ -288,29 +289,23 @@ def _comfy_graph(prompt: str, style: dict = None) -> dict:
 
 
 def _comfyui(prompt: str, style: dict = None) -> bytes:
-    """Queue a prompt on local ComfyUI, wait for it, and return the output PNG bytes."""
-    client_id = uuid.uuid4().hex
-    r = requests.post(f"{COMFYUI_URL}/prompt",
-                      json={"prompt": _comfy_graph(prompt, style), "client_id": client_id}, timeout=30)
-    r.raise_for_status()
-    pid = r.json()["prompt_id"]
+    """Run the graph on local ComfyUI under shared GPU admission and return the PNG bytes.
+
+    The dispatcher on the host takes /tmp/nomad-gpu.lock, queues the graph, and drops ComfyUI's
+    models before it releases (dispatcher/comfy_gate.py, #1462). This container cannot take that
+    lock itself, so it never posts to ComfyUI directly. Busy GPU raises like ComfyUI being down."""
     limit = (style or {}).get("timeout", COMFYUI_TIMEOUT)
-    deadline = time.time() + limit
-    while time.time() < deadline:
-        h = requests.get(f"{COMFYUI_URL}/history/{pid}", timeout=30).json()
-        if pid in h:
-            outputs = h[pid].get("outputs", {})
-            for node in outputs.values():
-                for img in node.get("images", []):
-                    v = requests.get(f"{COMFYUI_URL}/view",
-                                     params={"filename": img["filename"],
-                                             "subfolder": img.get("subfolder", ""),
-                                             "type": img.get("type", "output")}, timeout=60)
-                    v.raise_for_status()
-                    return v.content
-            raise RuntimeError(f"ComfyUI finished with no image output: {json.dumps(outputs)[:200]}")
-        time.sleep(1.0)
-    raise TimeoutError(f"ComfyUI did not finish within {limit}s")
+    r = requests.post(f"{DISPATCH_URL}/comfy/generate",
+                      json={"graph": _comfy_graph(prompt, style), "timeout": limit},
+                      headers={"X-Nomad-Token": DISPATCH_TOKEN}, timeout=2 * limit + 240)   # queue + run + settle
+    try:
+        out = r.json()
+    except ValueError:
+        raise RuntimeError(f"dispatcher /comfy/generate answered HTTP {r.status_code}") from None
+    if not out.get("ok"):
+        why = "GPU busy: " if out.get("busy") else ""
+        raise RuntimeError(f"ComfyUI via dispatcher: {why}{out.get('error', f'HTTP {r.status_code}')}")
+    return base64.b64decode(out["png_b64"])
 
 
 # ══ provider: OpenAI ════════════════════════════════════════════════════════════════

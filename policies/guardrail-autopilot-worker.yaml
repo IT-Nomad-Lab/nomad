@@ -1,0 +1,138 @@
+id: guardrail-autopilot-worker
+role: guardrail
+description: >-
+  Layer 1, imported from the deny list of autopilot/permissions.template.json (#1391; PRD
+  docs/prd/autopilot.md 5.8). Each match is a Claude Code permission rule (kind tool) with the
+  template's placeholders {worktree}, {repo}, {state_dir} and {default_branch}; the compiler
+  (#1392) fills them as autopilot/permissions.py does. default_mode is the template's
+  permissions.defaultMode, locked so no type or project policy loosens it. The allow list is
+  a grant, so it lives in the permission policy autopilot-worker-base.
+settings:
+  default_mode: 'dontAsk'
+locks: [default_mode]
+statements:
+  - sid: autopilot-git
+    effect: deny
+    kind: tool
+    match:
+      - 'Bash(git push *)'
+      - 'Bash(git stash *)'
+      - 'Bash(git reset *)'
+      - 'Bash(git rebase *)'
+      - 'Bash(git clean *)'
+      - 'Bash(git branch -D *)'
+      - 'Bash(git branch -d *)'
+      - 'Bash(git branch --delete *)'
+      - 'Bash(git commit --amend *)'
+      - 'Bash(git commit * --amend*)'
+      - 'Bash(git worktree remove *)'
+  - sid: autopilot-git-worktree
+    effect: deny
+    kind: tool
+    match:
+      - 'Bash(git -C {worktree} push *)'
+      - 'Bash(git -C {worktree} stash *)'
+      - 'Bash(git -C {worktree} reset *)'
+      - 'Bash(git -C {worktree} rebase *)'
+      - 'Bash(git -C {worktree} clean *)'
+      - 'Bash(git -C {worktree} branch -D *)'
+      - 'Bash(git -C {worktree} branch -d *)'
+      - 'Bash(git -C {worktree} branch --delete *)'
+      - 'Bash(git -C {worktree} commit --amend *)'
+      - 'Bash(git -C {worktree} commit * --amend*)'
+      - 'Bash(git -C {worktree} switch -f*)'
+      - 'Bash(git -C {worktree} switch --force*)'
+      - 'Bash(git -C {worktree} switch -C *)'
+      - 'Bash(git -C {worktree} switch --discard-changes*)'
+      - 'Bash(git -C {worktree} switch * --discard-changes*)'
+  - sid: autopilot-git-protected-branch
+    effect: deny
+    kind: tool
+    match:
+      - 'Bash(git switch {default_branch} *)'
+      - 'Bash(git switch * {default_branch} *)'
+      - 'Bash(git checkout {default_branch} *)'
+      - 'Bash(git checkout * {default_branch} *)'
+      - 'Bash(git -C {worktree} switch {default_branch} *)'
+      - 'Bash(git -C {worktree} switch * {default_branch} *)'
+      - 'Bash(git -C {worktree} checkout {default_branch} *)'
+      - 'Bash(git -C {worktree} checkout * {default_branch} *)'
+  - sid: autopilot-git-repo
+    effect: deny
+    kind: tool
+    match:
+      - 'Bash(git -C {repo} push *)'
+      - 'Bash(git -C {repo} stash *)'
+      - 'Bash(git -C {repo} reset *)'
+      - 'Bash(git -C {repo} rebase *)'
+      - 'Bash(git -C {repo} clean *)'
+      - 'Bash(git -C {repo} checkout *)'
+      - 'Bash(git -C {repo} branch -D *)'
+      - 'Bash(git -C {repo} commit *)'
+      - 'Bash(git -C {repo} merge *)'
+  - sid: autopilot-rm-recursive
+    effect: deny
+    kind: tool
+    match:
+      - 'Bash(rm -rf *)'
+      - 'Bash(rm -fr *)'
+      - 'Bash(rm -r *)'
+      - 'Bash(rm -R *)'
+      - 'Bash(rm --recursive *)'
+  - sid: autopilot-gh-api-write
+    effect: deny
+    kind: tool
+    match:
+      - 'Bash(gh api -X*)'
+      - 'Bash(gh api * -X*)'
+      - 'Bash(gh api --method*)'
+      - 'Bash(gh api * --method*)'
+      - 'Bash(gh api -f*)'
+      - 'Bash(gh api * -f*)'
+      - 'Bash(gh api -F*)'
+      - 'Bash(gh api * -F*)'
+      - 'Bash(gh api --field*)'
+      - 'Bash(gh api * --field*)'
+      - 'Bash(gh api --raw-field*)'
+      - 'Bash(gh api * --raw-field*)'
+      - 'Bash(gh api --input*)'
+      - 'Bash(gh api * --input*)'
+  - sid: autopilot-edit-agent-rules
+    effect: deny
+    kind: tool
+    match:
+      - 'Edit(**/AGENTS.md)'
+      - 'Edit(//**/AGENTS.md)'
+      - 'Edit(**/CLAUDE.md)'
+      - 'Edit(//**/CLAUDE.md)'
+      - 'Edit(**/AUTONOMY*.md)'
+      - 'Edit(//**/AUTONOMY*.md)'
+  - sid: autopilot-edit-agent-config
+    effect: deny
+    kind: tool
+    match:
+      - 'Edit(**/.claude/**)'
+      - 'Edit(//**/.claude/**)'
+      - 'Edit(~/.claude/**)'
+      - 'Edit(**/.mcp.json)'
+      - 'Edit(//**/.mcp.json)'
+      - 'Edit(**/projects.yaml)'
+      - 'Edit(//**/projects.yaml)'
+  - sid: autopilot-edit-checkout-and-state
+    effect: deny
+    kind: tool
+    match:
+      - 'Edit(/{repo}/**)'
+      - 'Edit(/{state_dir}/**)'
+  - sid: autopilot-cockpit-only
+    effect: deny
+    kind: tool
+    # #1396: a guardrail is saved only by the operator, from the cockpit, with the cockpit token.
+    match:
+      - 'Bash(*cockpit-token*)'
+      - 'Bash(*cockpit_token*)'
+      - 'Bash(*guardrail-save*)'
+      - 'Bash(*X-Nomad-Cockpit*)'
+      - 'Read(~/.config/nomad/cockpit-token)'
+      - 'Read(//**/cockpit-token)'
+      - 'Edit(~/.config/nomad/cockpit-token)'

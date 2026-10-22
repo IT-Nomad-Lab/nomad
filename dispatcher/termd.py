@@ -16,6 +16,7 @@ This is the OPERATOR's own interactive session — they drive it. acceptEdits/fu
 commit/push are their call here (distinct from the autonomous crew's commit-gated guardrails).
 """
 import asyncio
+import contextlib
 import fcntl
 import hmac
 import http
@@ -32,8 +33,9 @@ import urllib.parse
 from websockets.asyncio.server import serve   # modern asyncio API (websockets >= 13)
 
 from dispatch import resolve, CLAUDE, ROOTS   # reuse the Builder's project whitelist + claude path
+import bridge_bind   # loopback + NOMAD_BRIDGE_IP (#383)
 
-HOST = os.environ.get("NOMAD_TERM_HOST", "127.0.0.1")   # loopback only (#821); containers still reach it via host.docker.internal
+HOST = os.environ.get("NOMAD_TERM_HOST", "127.0.0.1")   # loopback only (#821); containers reach it on NOMAD_BRIDGE_IP (#383)
 PORT = int(os.environ.get("NOMAD_TERM_PORT", "8091"))
 IDLE_REAP_SECS = int(os.environ.get("NOMAD_TERM_IDLE", "1800"))   # kill sessions idle > 30 min
 SCROLLBACK = 100_000                                              # bytes of replay on reconnect
@@ -87,6 +89,7 @@ class Session:
             try:
                 os.chdir(path)
                 os.environ["TERM"] = "xterm-256color"
+                os.environ["ANTHROPIC_API_KEY"] = ""   # #960: the Max plan only, never a paid key
                 os.execvp(TERM_CMD, [TERM_CMD])
             except Exception as e:                # pragma: no cover
                 os.write(2, f"failed to launch {TERM_CMD}: {e}\n".encode())
@@ -228,8 +231,11 @@ def _process_request(connection, request):
 
 async def main():
     asyncio.create_task(_reaper())
-    async with serve(handler, HOST, PORT, process_request=_process_request,
-                     max_size=4 * 1024 * 1024):
+    async with contextlib.AsyncExitStack() as stack:
+        # One server per address: loopback, plus the Docker bridge gateway if set (#383).
+        for sock in bridge_bind.listen_sockets(HOST, PORT):
+            await stack.enter_async_context(serve(handler, sock=sock, process_request=_process_request,
+                                                  max_size=4 * 1024 * 1024))
         print(f"NOMAD term daemon on ws://{HOST}:{PORT}/term (claude={CLAUDE}, roots={ROOTS})",
               flush=True)
         await asyncio.Future()   # run forever

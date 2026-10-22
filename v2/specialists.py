@@ -5,6 +5,7 @@ tool + one LANES entry. Each specialist Processes via the runtime (SDK-native, L
 into an action proposal for the human gate. Replaces the per-lane CommsSpecialist/Researcher.
 """
 import os
+import re
 
 import detector
 import drafting
@@ -88,10 +89,27 @@ def _ads_choose(intent):
     return ("save_content", lambda i, t, c, r: {"topic": t, "content": c, "run_id": r})
 
 
+# T3.1 "Claude Ads": an audit ask in the ads lane runs the audit-only Skill instead of the copywriter.
+# The audit verb is what selects it; the ad words are only for routing an ask the Manager might send
+# elsewhere ("audit our Google Ads account" is not a dev task).
+_AUDIT_RE = re.compile(r"\baudit|\bhealth[ -]?check\b|\b(review|assess|score)\b.*\b(ad|ads) "
+                       r"(account|campaign|set|group)s?\b", re.I)
+_AD_RE = re.compile(r"\b(google|meta|facebook|instagram|linkedin) ads\b|\bad (account|campaign|set|"
+                    r"group)s?\b|\bads (account|campaign)s?\b|\b(ppc|paid social|paid search)\b", re.I)
+def is_ads_audit(text):
+    return bool(_AUDIT_RE.search(text or ""))
+def is_ad_account_audit(text):
+    """An audit ask that names ads, so the engine can route it to the ads lane deterministically."""
+    return is_ads_audit(text) and bool(_AD_RE.search(text or ""))
+
+
 # lane → {skill, model, action, args(intent,target,content,run_id)->dict,
 #         enrich?(intent,target)->str  (gather live context before drafting),
 #         choose?(intent)->(action, args_fn)  (pick the action dynamically per run),
-#         read_tools?[...]  (read-only lookups this lane may make WHILE drafting)}
+#         read_tools?[...]  (read-only lookups this lane may make WHILE drafting),
+#         modes?{name: {match(intent)->bool, skill, action, args, read_tools?, max_tokens?}}
+#               (a second Skill in the same lane, picked per run before `choose`; a mode never
+#                gets the house-voice style or the detector rewrite, which may not touch numbers)}
 #
 # `read_tools` is least privilege, not a capability list: a lane gets only what its work needs, so
 # the comms specialist cannot search the web merely because the researcher can. Every name must be
@@ -112,7 +130,15 @@ LANES = {
     "ads":      {"skill": "ads.md", "model": "balanced", "action": "save_content", "style": "JDE_STYLE",
                  "choose": _ads_choose,
                  "read_tools": ["web_search", "recall"],
-                 "args": lambda i, t, c, r: {"topic": t, "content": c, "run_id": r}},
+                 "args": lambda i, t, c, r: {"topic": t, "content": c, "run_id": r},
+                 # Audit-only: no ad-platform tool exists here or in drafting.READ_TOOLS, and no web
+                 # search either, so every figure in the audit comes from the data the operator
+                 # supplied. The filed report goes to NOMAD's own `content` table after the gate.
+                 "modes": {"audit": {"match": is_ads_audit, "skill": "ads_audit.md",
+                                     "action": "save_content", "read_tools": ["recall"],
+                                     "max_tokens": 1800,
+                                     "args": lambda i, t, c, r: {"topic": _subject(t, "Ads audit · "),
+                                                                 "content": c, "run_id": r}}}},
     "dev":      {"skill": "dev.md", "model": "balanced", "action": "dispatch_build",
                  "read_tools": ["recall"],
                  "args": lambda i, t, c, r: {"project": t, "task": i, "plan": c, "run_id": r}},
@@ -133,13 +159,23 @@ class Specialist:
         self.read_tools = [t for t in cfg.get("read_tools", []) if t in drafting.READ_TOOLS]
         with open(os.path.join(SKILLS, cfg["skill"]), encoding="utf-8") as f:
             self.skill = f.read()
+        self.modes = {}
+        for name, m in cfg.get("modes", {}).items():
+            with open(os.path.join(SKILLS, m["skill"]), encoding="utf-8") as f:
+                self.modes[name] = {**m, "skill": f.read(),
+                                    "read_tools": [t for t in m.get("read_tools", [])
+                                                   if t in drafting.READ_TOOLS]}
         self.style = cfg.get("style")               # append the named house-voice block
         if self.style:
             block = _prompt(self.style)
             if block:
                 self.skill = f"{self.skill}\n\n=== WRITING STYLE ({self.style}) ===\n{block}"
 
-    def process(self, intent: str, target: str):
+    def mode_for(self, intent: str):
+        """The name of the first mode whose matcher takes this intent, else None (the lane's Skill)."""
+        return next((n for n, m in self.modes.items() if m["match"](intent)), None)
+
+    def process(self, intent: str, target: str, mode: str = None):
         """Draft the output via the lane's Skill. Returns (content, lookups).
 
         Still reversible, and that is load-bearing: Process runs UPSTREAM of the human gate, so the
@@ -162,6 +198,10 @@ class Specialist:
             user += ("\nUse this freshly gathered context — prefer it over assumptions, stay "
                      "consistent with it, and don't invent facts beyond it:\n\n" f"{evidence}\n")
         user += "\nProduce your output (only the content)."
+        if mode:
+            m = self.modes[mode]
+            return drafting.draft(m["skill"], user, self.model_alias,
+                                  max_tokens=m.get("max_tokens", 900), allowed=m["read_tools"])
         return drafting.draft(self.skill, user, self.model_alias,
                               max_tokens=900 if evidence else 700,
                               allowed=self.read_tools)
@@ -178,12 +218,18 @@ class Specialist:
         return runtime.run(self.skill, user, self.model_alias, max_tokens=900)
 
     def propose(self, intent: str, target: str, run_id: str) -> dict:
-        content, lookups = self.process(intent, target)
+        mode = self.mode_for(intent)
+        content, lookups = self.process(intent, target, mode)
         report = None
-        if self.style:      # a lane that writes in the house voice must clear the detector first
-            content, report = detector.enforce(content, rewrite=self._rewrite)
-        action, args_fn = self.choose(intent) if self.choose else (self.action, self._args)
+        if mode:
+            action, args_fn = self.modes[mode]["action"], self.modes[mode]["args"]
+        else:
+            if self.style:  # a lane that writes in the house voice must clear the detector first
+                content, report = detector.enforce(content, rewrite=self._rewrite)
+            action, args_fn = self.choose(intent) if self.choose else (self.action, self._args)
         prop = {"action": action, "args": args_fn(intent, target, content, run_id)}
+        if mode:
+            prop["mode"] = mode
         if report:
             prop["detector"] = report
         if lookups:

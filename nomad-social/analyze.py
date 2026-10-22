@@ -75,8 +75,11 @@ def _json(text: str) -> dict:
 # 12 frames measured 11,086 tokens and Ollama refused the request (2026-09-22). Raising num_ctx
 # grows the KV cache past what the 5090 holds next to 22 GB of weights, so local calls get
 # smaller frames, fewer of them, and trimmed text instead.
-LOCAL_MODELS = {"private"}
-LOCAL_WIDTH, LOCAL_MAX_IMAGES = 448, 8
+# `vision` (qwen3-vl-8b on llama.cpp :8241, #1046) has a 32k context and ~1 token per 32x32 px:
+# 12 frames at 720 px are ~11k tokens, which leaves room for the full text and the reply. On
+# overlay text it needs the pixels more than `private` does.
+#   alias: (frame width, max frames, trim the text, max reply tokens)
+LOCAL = {"private": (448, 8, True, 2500), "vision": (720, 12, False, 4000)}
 
 
 def _img(path: str, width: int | None = None) -> dict:
@@ -140,23 +143,24 @@ def analyse_item(item, processed: dict) -> dict:
     comments = "\n".join(f"- @{c.get('author')}: {c.get('text')}"
                          for c in item.comments[:40]) or "(none retrieved)"
 
-    def build(local: bool) -> tuple[list, int]:
+    def build(model: str) -> tuple[list, int]:
+        width, max_images, trim, _ = LOCAL.get(model, (None, MAX_IMAGES, False, 0))
         vis = processed["visuals"][:MAX_IMAGES]
-        if local and len(vis) > LOCAL_MAX_IMAGES:   # keep the first frame, spread the rest
-            step = (len(vis) - 1) / (LOCAL_MAX_IMAGES - 1)
-            vis = [vis[round(i * step)] for i in range(LOCAL_MAX_IMAGES)]
-        ctx = dict(context, caption=context["caption"][:1500]) if local else context
+        if len(vis) > max_images:   # keep the first frame, spread the rest
+            step = (len(vis) - 1) / (max_images - 1)
+            vis = [vis[round(i * step)] for i in range(max_images)]
+        ctx = dict(context, caption=context["caption"][:1500]) if trim else context
         content = [{"type": "text", "text": (
             "You are analysing one Instagram " + item.kind + " for a content strategist. The "
             "images below are, in order: " + "; ".join(v["label"] for v in vis) + ".\n\n"
             "METADATA:\n" + json.dumps(ctx, ensure_ascii=False, default=str) + "\n\n"
             "TRANSCRIPT (local Whisper, timestamps in seconds):\n"
-            + transcript[:2500 if local else 12000] + "\n\n"
-            "COMMENT SAMPLE:\n" + comments[:800 if local else 6000] + "\n\n"
+            + transcript[:2500 if trim else 12000] + "\n\n"
+            "COMMENT SAMPLE:\n" + comments[:800 if trim else 6000] + "\n\n"
             "Describe only what is in the images, transcript, caption and comments. Never guess "
             "who a person is from their face. Write in English whatever the source language. "
             "No em-dashes. Return ONE JSON object with exactly this shape:\n" + ITEM_SCHEMA)}]
-        content += [_img(v["path"], LOCAL_WIDTH if local else None) for v in vis]
+        content += [_img(v["path"], width) for v in vis]
         return content, len(vis)
 
     visuals = processed["visuals"]
@@ -167,12 +171,12 @@ def analyse_item(item, processed: dict) -> dict:
         # Gemini occasionally emits invalid JSON on long outputs (seen 2026-09-22: an unescaped
         # quote at char 5290, same reel parsed fine a run earlier). One cheap text-only repair
         # pass is far cheaper than re-sending 12-20 images.
-        local = model in LOCAL_MODELS
-        content, n_sent = build(local)
+        local = model in LOCAL
+        content, n_sent = build(model)
         try:
             text, served = _chat(model, [{"role": "user", "content": content}],
-                                 2500 if local else 8000, json_mode=True, no_fallback=True,
-                                 timeout=600 if local else 300)
+                                 LOCAL[model][3] if local else 8000, json_mode=True,
+                                 no_fallback=True, timeout=600 if local else 300)
         except Exception as e:
             errors.append(f"{model}: {str(e)[:200]}")
             continue

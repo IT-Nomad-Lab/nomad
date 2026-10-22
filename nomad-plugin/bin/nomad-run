@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# The nomad plugin's MCP servers run through nomad-operator's launcher, which knows the host
+# (#1056). This finds it: beside this plugin in the marketplace export, else in the export on
+# this host (Claude Code may run a cached copy of this plugin with nothing beside it).
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+for c in "$here/../../nomad-operator/bin/nomad-run" \
+         "${NOMAD_WIN_ROOT:-$HOME/.nomad/marketplace}/nomad-operator/bin/nomad-run" \
+         "${NOMAD_WSL_ROOT:-$HOME/.local/share/nomad-marketplace}/nomad-operator/bin/nomad-run"; do
+  [ -f "$c" ] && exec bash "$c" "$@"
+done
+echo "nomad plugin: no nomad-operator launcher found. Run claude-hooks/install.sh." >&2
+exit 1

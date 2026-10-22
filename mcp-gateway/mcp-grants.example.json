@@ -1,0 +1,11 @@
+{
+  "default": ["nomad-pm", "nomad-local", "nomad-scrape", "nomad-detect", "nomad-diagram", "penpot", "nomad-penpot-nav"],
+  "projects": {
+    "nomad": ["nomad-image", "nomad-audio"],
+    "nomad-os": ["supabase"],
+    "content-creation": ["nomad-image", "nomad-codex-image", "nomad-audio"],
+    "runematch": ["nomad-image", "nomad-audio"],
+    "shuma-ornaments": ["nomad-image"],
+    "itnomadlab-site": ["hostinger-hosting", "hostinger-dns"]
+  }
+}

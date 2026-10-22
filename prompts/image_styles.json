@@ -14,5 +14,17 @@
     "prefix": "Detailed isometric technical line illustration, like an architect's drawing: crisp black ink lines on a pure white background with a very faint pale blue grid. ",
     "suffix": " Exactly ONE colored element in the whole image: the key object of the scene, filled flat vivid orange. Everything else, including every person and all their clothing, is black ink line art on white with no fill color. Tiny precise details, dimension lines and thin callout leader lines, clean vector style, simple hatching instead of shading, generous white space around the diorama, editorial infographic quality. Any callout labels use clean uppercase sans-serif lettering and spell exactly the words given in quotes, and there is no other text anywhere.",
     "negative": "photorealistic, photograph, 3d render with lighting, perspective distortion, colored clothing, beige, brown, tan, blue objects, green, purple, many colors, gradients, gibberish text, misspelled words, random letters, watermark, signature, logo, blurry, lowres"
+  },
+  "nomad-cover": {
+    "description": "Nomad Lab article cover (adopted 2026-10-04): cinematic editorial scene, 16:9, Qwen-Image at full quality. Guide: content-creation/docs/images.md",
+    "model": "qwen",
+    "width": 1664,
+    "height": 928,
+    "steps": 40,
+    "cfg": 4.0,
+    "timeout": 900,
+    "prefix": "Cinematic editorial illustration for a technology leadership article cover, wide 16:9 composition. ",
+    "suffix": " The scene fills the whole frame with a real, detailed environment that carries the idea; no plain or flat backdrop. One clear focal subject placed off-centre, with calm negative space on one side for a title overlay. Deep navy and steel blue palette with one warm amber light source as the accent, volumetric light, atmospheric haze, high dynamic range, sharp detail on the focal subject, shallow depth of field, photographic realism with an editorial feel. No text, no words, no letters, no logos anywhere.",
+    "negative": "text, words, letters, captions, title, watermark, signature, logo, gibberish text, flat background, empty background, plain color backdrop, cartoon, clipart, oversaturated neon, cluttered composition, deformed hands, extra limbs, blurry focal subject, lowres, jpeg artifacts"
   }
 }

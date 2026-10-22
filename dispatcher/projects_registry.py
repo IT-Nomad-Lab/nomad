@@ -9,6 +9,16 @@ one rule for finding the registry and turning an entry's `path` into an absolute
 """
 import os
 
+DEFAULT_TYPE = "generic"    # an entry without `type:` (profiles/generic.yaml: today's behaviour)
+
+
+def entry_type(entry):
+    """The project type an entry names (`type:` in projects.yaml), "generic" when it has none.
+    No profile check here (the dispatcher must keep working on a registry it cannot validate);
+    autopilot/projects.py refuses an unknown type."""
+    t = entry.get("type")
+    return str(t).strip() if t is not None and str(t).strip() else DEFAULT_TYPE
+
 
 def registry_file(roots, override=""):
     """The registry path, or None. `override` wins when set (and must exist)."""

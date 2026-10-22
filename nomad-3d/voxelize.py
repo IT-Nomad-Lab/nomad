@@ -312,16 +312,17 @@ def _emissive_spill(V, N, C, E, radius: float = 0.22, gain: float = 5.0):
     return np.minimum(out, 0.9)
 
 
-def render_views(V, F, C, N, E, out_png: Path, px: int = 420, night: bool = False):
-    """4 turntable views. night=True approximates the Ember Vale look: dim blue moonlight, emissive
-    voxels at full strength, and a blurred bloom pass added on top."""
+def render_views(V, F, C, N, E, out_png: Path, px: int = 420, night: bool = False,
+                 yaws=(35, 125, 215, 305), pitch: float = 28):
+    """Turntable views (4 by default). night=True approximates the Ember Vale look: dim blue
+    moonlight, emissive voxels at full strength, and a blurred bloom pass added on top."""
     views = []
     light = np.array([0.4, 0.8, 0.45])
     light /= np.linalg.norm(light)
     moon = np.array([0.55, 0.62, 1.0])  # cool tint for lit faces at night
     spill = _emissive_spill(V, N, C, E) if night else None
-    for yaw in (35, 125, 215, 305):
-        a, p = np.radians(yaw), np.radians(28)
+    for yaw in yaws:
+        a, p = np.radians(yaw), np.radians(pitch)
         ry = np.array([[np.cos(a), 0, np.sin(a)], [0, 1, 0], [-np.sin(a), 0, np.cos(a)]])
         rx = np.array([[1, 0, 0], [0, np.cos(p), -np.sin(p)], [0, np.sin(p), np.cos(p)]])
         R = rx @ ry
@@ -359,7 +360,7 @@ def render_views(V, F, C, N, E, out_png: Path, px: int = 420, night: bool = Fals
             wide = glow.filter(ImageFilter.GaussianBlur(px * 0.07))
             img = ImageChops.add(ImageChops.add(img, bloom), wide)
         views.append(img)
-    sheet = Image.new("RGB", (px * 4, px))
+    sheet = Image.new("RGB", (px * len(views), px))
     for i, im in enumerate(views):
         sheet.paste(im, (i * px, 0))
     sheet.save(out_png)

@@ -1,0 +1,19 @@
+[Unit]
+Description=NOMAD agent bridge (Open WebUI -> local Claude Code, full toolset, approval gates)
+After=default.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/jdelimam/nomad/agent-bridge
+# Same subscription-login rules as nomad-claude-bridge: HOME for ~/.claude, blank
+# ANTHROPIC_API_KEY. The bridge also refuses any run whose apiKeySource is not "none".
+Environment=HOME=/home/jdelimam
+Environment=PATH=/home/jdelimam/.local/bin:/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin
+Environment=ANTHROPIC_API_KEY=
+# Loopback + docker bridge only, never 0.0.0.0 (drop-in sets NOMAD_BRIDGE_IP=172.17.0.1).
+ExecStart=/usr/bin/python3 /home/jdelimam/nomad/agent-bridge/server.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

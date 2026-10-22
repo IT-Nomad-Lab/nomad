@@ -11,6 +11,8 @@ EnvironmentFile=-%h/nomad/.env
 # Host-native: reach the LiteLLM container via its published loopback port.
 Environment=LITELLM_BASE_URL=http://127.0.0.1:4000
 Environment=NOMAD_VOICE_PORT=8200
+# Also listen on the Docker bridge gateway: containers reach it there under Docker Engine (#383).
+Environment=NOMAD_BRIDGE_IP=172.17.0.1
 Environment=NOMAD_VOICE_MODEL=fast
 # STT engine: whisper (CPU, safe default) | kyutai (GPU sidecar nomad-stt on :8212, lower latency).
 # Flip with a drop-in override so a fresh install without the sidecar still works:

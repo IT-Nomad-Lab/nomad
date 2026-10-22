@@ -3,7 +3,8 @@
 PRD docs/prd/autopilot.md 5.8, task #875. The operator reviews `permissions.template.json`
 once (README-permissions.md explains it). For each worker this module renders it:
 
-- fills {worktree}, {repo} and {state_dir};
+- fills {worktree}, {repo} and {state_dir}, and renders a rule holding {default_branch} once
+  per protected branch (protected_branches, #989);
 - writes one wrapper script per project command (tests, the pre-merge gate, build, post_test)
   and allows exactly those wrappers. A project command is never allowed by its own prefix:
   `Bash(scripts/unity.sh *)` would allow every argument, and `flock`/`VAR=x` prefixes don't
@@ -45,6 +46,8 @@ FILTER_MAX = 200
 # Paths that end up inside rules: no spaces, globs, quotes or parentheses.
 SAFE_PATH_RE = re.compile(r"^/[A-Za-z0-9_./@+-]*$")
 NAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*$")
+BRANCH_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_./-]*$")
+PROTECTED = ("main", "master")              # always protected, whatever the lookup finds
 ENV_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 MAX_LOCKS = 7                               # file descriptors 9 down to 3
 
@@ -90,15 +93,43 @@ def _fill(rule, values):
     return rule
 
 
-def render_template(worktree, repo, state_dir=STATE_DIR, template=None):
-    """The template with its placeholders filled; no project additions yet."""
+def _fill_all(rule, values, branches):
+    """A rule holding {default_branch} renders once per protected branch; any other, once."""
+    if "{default_branch}" not in rule:
+        return [_fill(rule, values)]
+    return [_fill(rule, {**values, "default_branch": b}) for b in branches]
+
+
+def protected_branches(repo, default_branch=None):
+    """The branches no worker may switch its worktree to (#989): the project's default branch,
+    looked up in `repo` when not given, plus main and master in case the lookup finds none."""
+    if default_branch is None:
+        from autopilot.worker import WorkerError, default_branch as lookup
+        try:
+            default_branch = lookup(repo)
+        except WorkerError:
+            default_branch = None
+    out = list(PROTECTED)
+    if default_branch and default_branch not in out:
+        out.append(default_branch)
+    for b in out:
+        if not BRANCH_RE.match(b) or ".." in b:
+            raise ConfigError(f"permissions: default branch {b!r} can't go into a permission "
+                              "rule (letters, digits and _./- only)")
+    return out
+
+
+def render_template(worktree, repo, state_dir=STATE_DIR, template=None, branches=PROTECTED):
+    """The template with its placeholders filled; no project additions yet. `branches` fills
+    {default_branch} (see protected_branches)."""
     t = _strip_private(template if template is not None else load_template())
     values = {"worktree": _safe_path("worktree", worktree), "repo": _safe_path("repo", repo),
               "state_dir": _safe_path("state_dir", state_dir)}
     perms = t.setdefault("permissions", {})
     for key in ("allow", "deny", "ask"):
         if key in perms:
-            perms[key] = [_fill(r, values) for r in perms[key]]
+            rendered = [x for r in perms[key] for x in _fill_all(r, values, branches)]
+            perms[key] = list(dict.fromkeys(rendered))
     return t
 
 
@@ -328,11 +359,189 @@ def wrappers(project, state_dir=STATE_DIR):
     return out
 
 
+# ---- grants (#979, docs/prd/ap-permission-grants.md 5.2 and 5.4) -------------------------------
+#
+# A grant is the operator's `grant: <action> <arg>` line (tasks.Grant). Each one opens exactly one
+# named action for one run: build_settings(grants=...) removes only the denies listed in the PRD
+# and adds one exact allow. With no grants, build_settings takes none of this code.
+
+REL_PATH_RE = re.compile(r"^[A-Za-z0-9_.@+-][A-Za-z0-9_./@+-]*$")
+GLOB_CHARS = set("*?[]{}")
+
+
+class GrantRefused(ValueError):
+    """A grant line that opens nothing; the message is the reason the operator is told."""
+
+
+@dataclass(frozen=True)
+class GrantFacts:
+    """What the grant checks need to know about the repo, read by the worker (git) at launch.
+    files: the worktree's tracked and untracked files, relative; checked_out: every branch a
+    worktree holds; worktrees: every path `git worktree list` gives."""
+    default_branch: str
+    own_branch: str
+    files: tuple = ()
+    checked_out: frozenset = frozenset()
+    worktrees: frozenset = frozenset()
+
+
+def protected_edit_denies(repo, state_dir, working_dirs=()):
+    """The Edit denies no grant ever removes: the main checkout, the state folder, ~/.claude and
+    the project's working_dirs."""
+    out = {f"Edit(/{repo}/**)", f"Edit(/{state_dir}/**)", "Edit(~/.claude/**)"}
+    return out | {f"Edit(/{_safe_path('working dir', d)}/**)" for d in working_dirs}
+
+
+def _edit_rule(rule):
+    m = re.match(r"^Edit\((.*)\)$", rule)
+    return m.group(1) if m else None
+
+
+def _check_edit_path(arg, worktree):
+    if arg.startswith(("/", "~")):
+        raise GrantRefused("an edit grant names a path relative to the worktree root")
+    if GLOB_CHARS & set(arg):
+        raise GrantRefused("an edit grant names one file, no glob characters")
+    if ".." in arg.split("/") or not REL_PATH_RE.match(arg):
+        raise GrantRefused("the path holds `..` or a character a permission rule can't hold")
+    full = os.path.normpath(os.path.join(worktree, arg))
+    if arg.endswith("/") or os.path.isdir(full):
+        raise GrantRefused("an edit grant names one file, not a folder")
+    return full
+
+
+def edit_relaxation(arg, deny, worktree, protected, files):
+    """(denies to drop, allow to add, exact denies to add back) for `grant: edit <arg>`.
+    Raises GrantRefused when a protected deny covers the path, or a file the dropped denies also
+    covered can't be named in an exact rule."""
+    full = _check_edit_path(arg, worktree)
+    for r in protected:
+        if _edit_matches(_edit_rule(r), full, worktree, True):
+            raise GrantRefused(f"{arg} is under a folder no grant opens ({r})")
+    drops = [r for r in deny if r not in protected and _edit_rule(r) is not None
+             and _edit_matches(_edit_rule(r), full, worktree, True)]
+    redeny = []
+    for f in files:
+        other = os.path.normpath(os.path.join(worktree, f))
+        if other == full or not any(_edit_matches(_edit_rule(r), other, worktree, True)
+                                    for r in drops):
+            continue
+        if not SAFE_PATH_RE.match(other):
+            raise GrantRefused(f"{f} would open with it and can't be named in an exact deny")
+        redeny.append(f"Edit(/{other})")
+    return drops, f"Edit(/{full})", redeny
+
+
+def denied_edit_globs(project, paths):
+    """[(path, glob)] for each repo-relative path one of the project's `deny_edit_globs` covers
+    (first matching glob). #1025: an operator told to `grant: edit` such a path still saw the
+    worker's Edit denied (#1001's projects.yaml), so the needs-operator text names these."""
+    ap = getattr(project, "autopilot", None)
+    globs = getattr(ap, "deny_edit_globs", ()) or ()
+    out = []
+    for p in paths:
+        hit = next((g for g in globs if _edit_matches(g, os.path.join("/wt", p), "/wt", True)),
+                   None)
+        if hit:
+            out.append((p, hit))
+    return out
+
+
+def deny_glob_note(project, paths):
+    """A paragraph for a needs-operator comment naming the paths `deny_edit_globs` covers, or ""."""
+    hits = denied_edit_globs(project, paths)
+    if not hits:
+        return ""
+    listed = "\n".join(f"- `{p}` (`{g}`)" for p, g in hits)
+    return ("\n\nThe project's `deny_edit_globs` in projects.yaml cover:\n" + listed + "\n\nA "
+            "`grant: edit` won't unlock these for a worker. Resolve them yourself in the "
+            "worktree, or change `deny_edit_globs` first.")
+
+
+def _check_branch_name(name):
+    if (not BRANCH_RE.match(name) or ".." in name or "//" in name or "@{" in name
+            or name.endswith(("/", ".", ".lock"))):
+        raise GrantRefused(f"`{name}` is not a valid branch name")
+
+
+def check_grant(g, project, worktree, facts, protected=(), deny=()):
+    """The relaxation (drops, allows, extra denies) one grant gives this run's profile, or
+    GrantRefused with the reason (PRD 5.2's argument rules). `merge` never reaches a profile."""
+    action, arg = g.action, g.arg
+    if action == "edit":
+        drops, allow, redeny = edit_relaxation(arg, deny, worktree, protected, facts.files)
+        return drops, [allow], redeny
+    if action == "delete branch":
+        _check_branch_name(arg)
+        if arg in protected_branches(project.repo, facts.default_branch):
+            raise GrantRefused(f"`{arg}` is the default branch")
+        if arg == facts.own_branch:
+            raise GrantRefused(f"`{arg}` is this task's own branch")
+        if arg in facts.checked_out:
+            raise GrantRefused(f"`{arg}` is checked out in a worktree")
+        return ([f"Bash(git -C {worktree} branch -d *)"],
+                [f"Bash(git -C {worktree} branch -d {arg})"], [])
+    if action == "delete worktree":
+        if not SAFE_PATH_RE.match(arg) or arg != os.path.normpath(arg):
+            raise GrantRefused("a worktree grant names an absolute path of letters, digits and "
+                               "._@+-/ only")
+        root = _safe_path("worktree_root", project.autopilot.worktree_root)
+        if arg == root or not _under(arg, root):
+            raise GrantRefused(f"{arg} is not under the project's worktree_root {root}")
+        if arg == worktree:
+            raise GrantRefused(f"{arg} is this task's own worktree")
+        if _under(arg, project.repo):
+            raise GrantRefused(f"{arg} is the main checkout")
+        if arg not in facts.worktrees:
+            raise GrantRefused(f"{arg} is not listed by `git worktree list`")
+        return (["Bash(git worktree remove *)"],
+                [f"Bash(git -C {worktree} worktree remove {arg})"], [])
+    if action == "merge":
+        raise GrantRefused("a merge grant goes to the merge queue, never to a worker")
+    raise GrantRefused(f"unknown grant `{action}`")
+
+
+def apply_grants(settings, grants, project, worktree, facts, state_dir=STATE_DIR):
+    """Relax `settings` in place, one grant at a time. Returns (applied grants, [(grant,
+    reason)] refused, allows added, denies dropped)."""
+    perms = settings["permissions"]
+    protected = protected_edit_denies(_safe_path("repo", project.repo),
+                                      _safe_path("state_dir", state_dir),
+                                      project.autopilot.working_dirs)
+    applied, refused, added, dropped = [], [], [], []
+    for g in grants:
+        try:
+            drops, allows, denies = check_grant(g, project, worktree, facts, protected,
+                                                perms["deny"])
+        except GrantRefused as e:
+            refused.append((g, str(e)))
+            continue
+        perms["deny"] = [r for r in perms["deny"] if r not in drops]
+        perms["deny"] += [r for r in denies if r not in perms["deny"]]
+        perms["allow"] += [r for r in allows if r not in perms["allow"]]
+        added += allows
+        dropped += drops
+        applied.append(g)
+    return applied, refused, added, dropped
+
+
 # ---- settings -----------------------------------------------------------------------------------
 
-def build_settings(project, worktree, state_dir=STATE_DIR, template=None):
+def build_settings(project, worktree, state_dir=STATE_DIR, template=None, default_branch=None,
+                   grants=(), facts=None):
     """The settings dict for one worker of `project` in `worktree`. Raises ConfigError when the
-    project entry would widen the template or a path can't go into a rule."""
+    project entry would widen the template or a path can't go into a rule. `default_branch`
+    is looked up in the main checkout when not given.
+
+    `grants` (#979) relax it, each by exactly what check_grant gives; `facts` (GrantFacts) is
+    then required. Use build_settings_with_grants to learn which were applied or refused."""
+    return build_settings_with_grants(project, worktree, state_dir, template, default_branch,
+                                      grants, facts)[0]
+
+
+def build_settings_with_grants(project, worktree, state_dir=STATE_DIR, template=None,
+                               default_branch=None, grants=(), facts=None):
+    """(settings, applied grants, [(grant, reason)] refused). See build_settings."""
     ap = project.autopilot
     if ap is None:
         raise ConfigError(f"projects.yaml: project '{project.id}': no autopilot block")
@@ -344,7 +553,8 @@ def build_settings(project, worktree, state_dir=STATE_DIR, template=None):
     if _under(worktree, repo):
         raise ConfigError(f"permissions: worktree {worktree} is inside the main checkout "
                           f"{repo}, which workers may only read")
-    s = render_template(worktree, repo, state_dir, template)
+    branches = protected_branches(repo, default_branch)
+    s = render_template(worktree, repo, state_dir, template, branches)
     check_project(project, s)
     perms = s["permissions"]
     ws = wrappers(project, state_dir)
@@ -356,19 +566,30 @@ def build_settings(project, worktree, state_dir=STATE_DIR, template=None):
     dirs += sorted({os.path.dirname(lk) for lk in _locks_for(ap, True)})
     dirs += [_safe_path("working dir", d) for d in ap.working_dirs]
     perms["additionalDirectories"] = list(dict.fromkeys(dirs))
-    check_narrowing(s, render_template(worktree, repo, state_dir, template), ws)
-    return s
+    applied, refused, added, dropped = [], [], (), ()
+    if grants:
+        if facts is None:
+            raise ConfigError("permissions: grants need the repo facts (GrantFacts)")
+        applied, refused, added, dropped = apply_grants(s, grants, project, worktree, facts,
+                                                        state_dir)
+    check_narrowing(s, render_template(worktree, repo, state_dir, template, branches), ws,
+                    added, dropped)
+    return s, applied, refused
 
 
-def check_narrowing(settings, template_rendered, wrapper_list):
+def check_narrowing(settings, template_rendered, wrapper_list, granted_allow=(),
+                    granted_drop=()):
     """Raise ConfigError unless `settings` allows no more than the rendered template plus the
-    wrappers, and keeps every template deny."""
+    wrappers plus `granted_allow`, and keeps every template deny but `granted_drop` (#979: the
+    allows and dropped denies this run's grants account for)."""
     p, t = settings.get("permissions", {}), template_rendered.get("permissions", {})
     allowed = set(t.get("allow", [])) | {r for w in wrapper_list for r in w.rules}
+    allowed |= set(granted_allow)
     extra = [r for r in p.get("allow", []) if r not in allowed]
     if extra:
         raise ConfigError(f"permissions: allow rules beyond the template: {extra}")
-    missing = [r for r in t.get("deny", []) if r not in p.get("deny", [])]
+    missing = [r for r in t.get("deny", []) if r not in p.get("deny", [])
+               and r not in granted_drop]
     if missing:
         raise ConfigError(f"permissions: template deny rules dropped: {missing}")
     if p.get("defaultMode") != t.get("defaultMode"):
@@ -400,10 +621,15 @@ def settings_path(project, worktree, state_dir=STATE_DIR, task_id=None):
     return os.path.join(state_dir, "settings", f"{project.id}-{tag}.json")
 
 
-def write(project, worktree, state_dir=STATE_DIR, task_id=None, template=None):
+def write(project, worktree, state_dir=STATE_DIR, task_id=None, template=None,
+          default_branch=None, grants=(), facts=None, refused=None):
     """Write the worker's settings file, its mcp.json and the project's wrappers under
-    `state_dir`. Returns (settings path, [Wrapper]). Installs nothing else."""
-    s = build_settings(project, worktree, state_dir, template)
+    `state_dir`. Returns (settings path, [Wrapper]). Installs nothing else. With `grants`
+    (#979), the refused ones are appended to the list `refused` as (grant, reason)."""
+    s, _, why = build_settings_with_grants(project, worktree, state_dir, template,
+                                           default_branch, grants, facts)
+    if refused is not None:
+        refused.extend(why)
     ws = write_wrappers(project, state_dir)
     path = settings_path(project, worktree, state_dir, task_id)
     write_mcp(os.path.dirname(path))

@@ -4,7 +4,7 @@
 
 ## What this is
 NOMAD — a personal AI orchestrator plus an autonomous multi-agent team that runs projects
-end-to-end. This is NOMAD's own repository; the v2 pipeline engine (`v2/`) drives the
+end-to-end. This is NOMAD's own repo; the v2 pipeline engine (`v2/`) drives the
 Capture→Clarify→Route→Process→Human-Gate→Execute→Log&Learn flow with a human approval gate on
 irreversible actions.
 
@@ -16,7 +16,6 @@ irreversible actions.
 
 ## Build & run
 ```bash
-# Full stack
 docker compose up -d                      # bring up the whole stack (see README "What runs where")
 docker compose up -d nomad-v2-engine      # v2 engine only (cockpit/API at 127.0.0.1:8099)
 docker compose build nomad-v2-engine      # rebuild the engine image after v2/ changes
@@ -31,32 +30,40 @@ python3 v2/setup_nocodb.py                # ensure the NocoDB schema/tables exis
 ```
 
 ## Test & verify
-v2 tests are plain Python scripts (no pytest harness); run them on the host with the NocoDB
-stack up and `NC_*` / `LITELLM_*` set in `.env`:
+v2 has a pytest suite (`v2/test_*.py`). Most of it runs offline; a few scripts need the live
+stack (NocoDB + LiteLLM up, `NC_*` / `LITELLM_*` set in `.env`).
 ```bash
-python3 v2/test_engine.py          # gate pauses; only the approved path executes (live NocoDB + LiteLLM)
-python3 v2/test_engine_states.py   # engine state-machine transitions
-python3 v2/test_2a.py              # multi-specialist routing + research-lane gate
-python3 v2/test_3c.py              # Phase 3 checks
+# Offline suite (~950 tests, under a minute): pytest in the engine image, no network.
+# test_engine.py, test_2a.py, test_3c.py need the live stack and are excluded. nomad_projects is
+# mounted over the image's copy so the tests run the checkout's, not the last build's (#1372).
+docker run --rm --network none -u "$(id -u):$(id -g)" -e PYTHONDONTWRITEBYTECODE=1 -e HOME=/tmp \
+  --mount type=tmpfs,destination=/app/generated_images,tmpfs-mode=1777 -v "$PWD/v2":/w -w /w \
+  -v "$PWD/nomad_projects":/app/lib/nomad_projects:ro \
+  --entrypoint sh nomad-nomad-v2-engine -c 'python -m pytest -p no:cacheprovider -q \
+  --ignore=test_engine.py --ignore=test_2a.py --ignore=test_3c.py'
 
+# Live checks (stack up): docs/GOTCHAS.md#live-test-scripts
 # Static checks safe for the dispatcher /verify (no mutation, no network):
 python3 -m py_compile v2/server.py v2/engine.py   # compile-check changed modules
 git diff                                          # confirm edits are additive/scoped
 ```
 
 ## Guardrails (NOMAD convention)
-- Make **uncommitted** edits by default. Run `git commit`/`merge`/`push` only when the user asks
-  for it in the session; never force-push.
+- What you may do on your own and what needs the operator is in `docs/SDLC.md` (read it from
+  master: `git -C ~/nomad show master:docs/SDLC.md`). Commit on a feature branch freely, merge
+  locally once the tests pass and then tell the operator, ask before a push. Never force-push.
 - Keep changes scoped; don't add dependencies without justification.
 - Secrets only in `.env` (never commit); agents reference LiteLLM **role aliases**
   (deep/balanced/gpt/fast/private/code), never raw model names.
-- Irreversible/external actions (send email, merge to main, publish, share, spend, delete)
+- Irreversible/external actions (send email, push, publish, share, spend, delete)
   must pass the human approval gate — do not bypass it.
-- **Diagrams & charts: use `render_diagram` (the `nomad-diagram` MCP tool → Kroki), never
-  matplotlib or an image model.** Write the spec — Mermaid/Graphviz/D2 for box-and-arrow diagrams,
-  Vega-Lite for data charts — and let the layout engine place it (arrows routed, text never
-  overflows). Image models (`generate_image`) are for *artistic* visuals only, not graphs.
-- v2 builds **alongside** v1; v1 (this repo's CLAUDE.md scope) is the rollback target — don't break it.
+- A new project is set up with the `create_project` tool (nomad-create), with the PRD the
+  operator approved. Never make its parts by hand: repo, `projects.yaml` entry, board, roadmap,
+  stream, mission-control row.
+- Diagrams and charts go through `render_diagram`, never matplotlib or an image model. How to
+  use it is in `docs/SHARED-RESOURCES.md`.
+- v1 (CrewAI in `crew/`, the n8n gate) is being retired; `docs/CUTOVER-RUNBOOK.md` tracks what
+  still depends on it. Don't break those paths until the runbook says they are gone.
 
 ## Git workflow (hard rule)
 
@@ -65,4 +72,4 @@ Unless the operator says otherwise for a specific piece of work:
 - Develop each new feature on its own branch, created from the default branch (`master` or
   `main`) before the first edit. Never build a feature directly on the default branch.
 - Merge into the default branch only when every item of the feature is done and all tests pass.
-  The merge, like commits and pushes, needs the operator's OK.
+  Tell the operator after the merge. A push needs their OK first.

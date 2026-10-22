@@ -10,6 +10,7 @@ import signal
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 
 import pytest
 
@@ -284,7 +285,9 @@ def test_main_composes_the_real_scheduler(monkeypatch):
     sch = sv.build_scheduler()
     assert isinstance(sch, AutopilotScheduler)
     assert sch._registry is projects.hub_get and sch.pool.project_of is projects.hub_get
-    assert sch.pool.settings_for.__qualname__.startswith("generated_settings")
+    # A hybrid project in the live registry wraps the worker pool in a HybridPool (#1488).
+    pool = getattr(sch.pool, "legacy", sch.pool)
+    assert pool.settings_for.__qualname__.startswith("generated_settings")
     assert sch.drafter is not None and sch.drafter.pm is sch.pm      # criteria drafts (#889)
 
 
@@ -418,6 +421,185 @@ def test_a_failed_run_that_left_the_task_ready_is_benched(one, monkeypatch):
     rig.sup.start_project("proj")                       # Run pressed: retried
     rig.sup.run_all()
     assert [w["task"] for w in rig.project()["workers"]] == ["101"]
+
+
+# ---- the operator's answer takes a task off the bench (#1025) --------------------------------
+
+class _AnswerPM(FakePM):
+    """FakePM with activities: comments by user id, and status moves."""
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self.acts = {}
+
+    def add(self, i, raw="", user=4, moved=None, at=None):
+        at = at or datetime.now(timezone.utc).isoformat()
+        self.acts.setdefault(i, []).append({
+            "id": 1000 + sum(len(v) for v in self.acts.values()), "createdAt": at,
+            "comment": {"raw": raw}, "_links": {"user": {"href": f"/api/v3/users/{user}"}},
+            "details": [{"raw": f"Status changed from Awaiting approval to {moved}"}] if moved else []})
+        if moved:
+            self.set_status(i, moved)
+
+    def activities(self, i):
+        return list(self.acts.get(i, []))
+
+    def comments(self, i):
+        return [a["comment"]["raw"] for a in self.activities(i)]
+
+    def manager_id(self):
+        return 99
+
+    def transition(self, i, status):
+        self.set_status(i, status)
+
+
+class _DonePool:
+    """A WorkerPool stand-in whose collect hands back the given finished runs once."""
+
+    def __init__(self, finished):
+        self.finished = list(finished)
+
+    def collect(self, ctx):
+        out, self.finished = self.finished, []
+        return out
+
+
+def _benched(tmp_path, status="Ready", project=None):
+    """Task #7 benched by a needs_operator run; the board shows it as `status`."""
+    p = project or make_project(tmp_path)
+    pm = _AnswerPM(tmp_path / "board", [wp(7, status)])
+    pool = _DonePool([{"task": "7", "outcome": "needs_operator", "detail": "asked a question"}])
+    s = AutopilotScheduler(pm=pm, registry={"proj": p}.get, pool=pool)
+    ctx = sv.PassContext(st.StateStore(str(tmp_path / "state" / "state.json")), "proj", {},
+                         {"workers": []})
+    s.collect(ctx)
+    return s, pm, ctx
+
+
+class _NoDirectPM(_AnswerPM):
+    """Like nomad-pm: Blocked and Ready cannot move straight to Awaiting approval."""
+
+    def transition(self, i, status):
+        if status == "Awaiting approval" and self.status(i) in ("Blocked", "Ready"):
+            raise RuntimeError(f"422 {self.status(i)} -> {status}")
+        super().transition(i, status)
+
+
+@pytest.mark.parametrize("status", ["In Progress", "Blocked"])
+def test_the_third_failed_run_goes_to_the_operator_not_a_fourth(tmp_path, status):
+    """#1109: three failed runs of one task in a row escalate it; no 4th run starts."""
+    p = make_project(tmp_path)
+    pm = _NoDirectPM(tmp_path / "board", [wp(7, status)])
+    pool = _DonePool([])
+    pool.state_dir = str(tmp_path / "state")
+    s = AutopilotScheduler(pm=pm, registry={"proj": p}.get, pool=pool)
+    ctx = sv.PassContext(st.StateStore(str(tmp_path / "state" / "state.json")), "proj", {},
+                         {"workers": []})
+    for n in range(1, 4):
+        pm.set_status(7, status)         # where the failed run left it
+        st.append_ledger(pool.state_dir, {"project": "proj", "task": "7", "outcome": "failed"})
+        pool.finished = [{"task": "7", "outcome": "failed", "detail": f"tests red ({n})",
+                          "branch": "feat/7"}]
+        s.collect(ctx)
+        s.start(ctx)                     # the operator presses Run: the bench alone would clear
+        if n < 3:
+            assert pm.status(7) == status and not pm.notes.get(7)
+    assert pm.status(7) == "Awaiting approval"
+    [note] = pm.notes[7]
+    assert "3 runs in a row failed" in note and "tests red (3)" in note and "feat/7" in note
+    assert _picked(s, ctx) == []
+    assert st.failed_streak(pool.state_dir, "proj", "7") == 0
+
+
+def test_no_state_dir_no_escalation(tmp_path):
+    p = make_project(tmp_path)
+    pm = _AnswerPM(tmp_path / "board", [wp(7, "In Progress")])
+    s = AutopilotScheduler(pm=pm, registry={"proj": p}.get,
+                           pool=_DonePool([{"task": "7", "outcome": "failed"}]))
+    ctx = sv.PassContext(st.StateStore(str(tmp_path / "state" / "state.json")), "proj", {},
+                         {"workers": []})
+    s.collect(ctx)
+    assert pm.status(7) == "In Progress" and not pm.notes.get(7)
+
+
+def _picked(s, ctx):
+    return [t["task"] for t in s.select_tasks(ctx)]
+
+
+def test_a_benched_task_nobody_touched_stays_benched(tmp_path):
+    s, pm, ctx = _benched(tmp_path)
+    pm.add(7, "grant: edit README", at="2026-01-01T00:00:00Z")     # before the bench: no answer
+    pm.add(7, "I looked at it", user=5)                             # an agent, not the operator
+    assert _picked(s, ctx) == []
+    assert _picked(s, ctx) == []
+    [sk] = s.selections["proj"].of_kind("operator")
+    assert sk.reason.startswith("last run needs_operator: asked a question")
+    assert sk.reason.endswith("press Run again to retry it")
+
+
+@pytest.mark.parametrize("answer", ["Ready", "Approved"])
+def test_a_status_move_takes_the_task_off_the_bench(tmp_path, answer):
+    s, pm, ctx = _benched(tmp_path, "Awaiting approval")
+    assert _picked(s, ctx) == []                        # the pass that records its status
+    pm.set_status(7, answer)                            # the operator answers on the board
+    assert _picked(s, ctx) == [7]
+    assert s.benched["proj"] == {}
+
+
+def test_a_status_move_before_the_first_pass_still_counts(tmp_path):
+    s, pm, ctx = _benched(tmp_path, "Awaiting approval")
+    pm.add(7, moved="Ready")                            # answered before any pass saw the bench
+    assert _picked(s, ctx) == [7]
+
+
+def test_a_new_grant_takes_the_task_off_the_bench(tmp_path):
+    s, pm, ctx = _benched(tmp_path)                     # left Ready by a crashed run
+    assert _picked(s, ctx) == []
+    pm.add(7, "grant: edit README")
+    assert _picked(s, ctx) == [7]
+    events = [e["msg"] for e in ctx._store.project("proj")["events"]]
+    assert "task 7: off the bench, new `grant: edit README`" in events
+
+
+def test_a_new_operator_comment_takes_the_task_off_the_bench(tmp_path):
+    s, pm, ctx = _benched(tmp_path)
+    assert _picked(s, ctx) == []
+    pm.add(7, "**Operator, via cockpit:** try again", user=99)    # relayed by the engine
+    assert _picked(s, ctx) == [7]
+
+
+def test_run_still_clears_the_bench(tmp_path):
+    s, pm, ctx = _benched(tmp_path)
+    assert _picked(s, ctx) == []
+    s.start(ctx)
+    assert _picked(s, ctx) == [7]
+
+
+def test_config_needs_operator_names_deny_edit_globs(tmp_path):
+    import dataclasses
+    p = make_project(tmp_path)
+    p = dataclasses.replace(p, autopilot=dataclasses.replace(
+        p.autopilot, deny_edit_globs=("projects.yaml", "**/*.prefab")))
+    s, pm, ctx = _benched(tmp_path, project=p)
+    s.pool = _DonePool([{"task": "7", "outcome": "merge", "branch": "b",
+                         "config_changes": ["projects.yaml", ".claude/settings.json"]}])
+    s.collect(ctx)
+    [text] = pm.notes[7]
+    assert "grant: edit <path>" in text and "`deny_edit_globs`" in text
+    assert "- `projects.yaml` (`projects.yaml`)" in text and ".claude/settings.json` (" not in text
+    assert pm.status(7) == "Awaiting approval"
+
+
+def test_deny_glob_note_only_for_covered_paths():
+    ap = Autopilot(test={"t": Command("true", ())}, pre_merge_gate=(), milestone_gate=(),
+                   deny_edit_globs=("projects.yaml", "**/*.prefab"))
+    p = Project(id="x", path="/x", autopilot=ap)
+    assert P.denied_edit_globs(p, ["projects.yaml", "a/b.prefab", "README", "x/projects.yml"]) \
+        == [("projects.yaml", "projects.yaml"), ("a/b.prefab", "**/*.prefab")]
+    assert P.deny_glob_note(p, ["README"]) == ""
+    assert "won't unlock" in P.deny_glob_note(p, ["projects.yaml"])
+    assert P.deny_glob_note(None, ["projects.yaml"]) == ""
 
 
 # ---- stop and draining (#866 note) ----------------------------------------------------------
@@ -708,6 +890,156 @@ def test_registry_resolves_against_the_hub_not_the_worktree(tmp_path, monkeypatc
     assert p.path == str(home / "runematch")
     # the dispatcher's own rule, for contrast, resolves against the file's grandparent
     assert projects.get("runematch", str(wt_copy / "projects.yaml")).path == str(home / "nomad-wt" / "runematch")
+
+
+def _hub_repo(home, branch_reg):
+    """~/nomad as a git repo: REG committed on master, the checkout left on another branch whose
+    working copy says something else."""
+    repo = home / "nomad"
+    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@x",
+           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@x"}
+    run = lambda *a: subprocess.run(["git", "-C", str(repo), *a], check=True, env=env,
+                                    capture_output=True)
+    run("init", "-q", "-b", "master")
+    (repo / "projects.yaml").write_text(REG)
+    run("add", "projects.yaml")
+    run("commit", "-qm", "registry")
+    run("switch", "-q", "-c", "someone-else")
+    (repo / "projects.yaml").write_text(branch_reg)
+
+
+def test_registry_is_read_from_master_not_the_working_copy(tmp_path, monkeypatch):
+    """#1020: the shared checkout sits on another branch with an edited projects.yaml."""
+    home = tmp_path / "home"
+    (home / "nomad").mkdir(parents=True)
+    (home / "runematch").mkdir()
+    _hub_repo(home, REG.replace("cap: 2", "cap: 5"))
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("NOMAD_PROJECTS_FILE", raising=False)
+    monkeypatch.delenv("NOMAD_PROJECTS_BASE", raising=False)
+    monkeypatch.delenv("NOMAD_PROJECTS_REF", raising=False)
+
+    f = projects.hub_file()
+    assert f == str(home / ".local/state/nomad-autopilot/projects.master.yaml")
+    assert projects.hub_get("runematch").autopilot.cap == 2
+    assert projects.hub_get("runematch").path == str(home / "runematch")
+    mtime = os.stat(f).st_mtime_ns
+    projects.hub_file()
+    assert os.stat(f).st_mtime_ns == mtime          # unchanged content: not rewritten
+
+    monkeypatch.setenv("NOMAD_PROJECTS_FILE", str(home / "nomad" / "projects.yaml"))
+    assert projects.hub_get("runematch").autopilot.cap == 5     # the override still wins
+
+
+def _commit_master(home, reg):
+    """A merge lands on master: the hub's master now says `reg`. The checkout stays elsewhere."""
+    repo = home / "nomad"
+    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@x",
+           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@x"}
+    git = lambda *a, **kw: subprocess.run(["git", "-C", str(repo), *a], check=True, env=env,
+                                          capture_output=True, **kw).stdout
+    blob = git("hash-object", "-w", "--stdin", input=reg.encode()).decode().strip()
+    tree = git("mktree", input=f"100644 blob {blob}\tprojects.yaml\n".encode()).decode().strip()
+    commit = git("commit-tree", tree, "-p", "master", "-m", "merge").decode().strip()
+    git("update-ref", "refs/heads/master", commit)
+
+
+BAD = REG + "      a_field_this_code_has_never_seen: 1\n"
+
+
+@pytest.fixture
+def hub(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    (home / "nomad").mkdir(parents=True)
+    (home / "runematch").mkdir()
+    _hub_repo(home, REG)
+    monkeypatch.setenv("HOME", str(home))
+    for v in ("NOMAD_PROJECTS_FILE", "NOMAD_PROJECTS_BASE", "NOMAD_PROJECTS_REF"):
+        monkeypatch.delenv(v, raising=False)
+    monkeypatch.setattr(projects, "_warned", set())
+    monkeypatch.setattr(projects, "_stale", [])
+    return home
+
+
+def _stale_warnings(caplog):
+    return [r for r in caplog.records if "doesn't parse with the running" in r.getMessage()]
+
+
+def test_a_master_the_running_code_rejects_keeps_the_last_good_registry(hub, caplog):
+    """#1026: a merge adds a registry field together with the code that reads it; the supervisor
+    still runs the old code. Its passes keep working on the last registry that parsed."""
+    cache = projects.hub_file()
+    good = str(hub / ".local/state/nomad-autopilot/projects.master.good.yaml")
+    assert os.path.isfile(good) and open(good).read() == REG
+    _commit_master(hub, BAD.replace("cap: 2", "cap: 7"))
+    with caplog.at_level("WARNING"):
+        for _ in range(3):
+            assert projects.hub_file() == good
+            assert projects.hub_get("runematch").autopilot.cap == 2
+    assert len(_stale_warnings(caplog)) == 1
+    msg = _stale_warnings(caplog)[0].getMessage()
+    assert "a_field_this_code_has_never_seen" in msg and "scripts/autopilot-deploy.sh" in msg
+    assert open(cache).read() == REG                 # the bad file never became the cache
+    assert "a_field_this_code_has_never_seen" in projects.registry_stale()
+
+    # the field is removed again (or the code was redeployed): the new content is used at once
+    _commit_master(hub, REG.replace("cap: 2", "cap: 4"))
+    assert projects.hub_file() == cache
+    assert projects.hub_get("runematch").autopilot.cap == 4
+    assert open(good).read() == REG.replace("cap: 2", "cap: 4")
+    assert projects.registry_stale() is None
+
+
+def test_a_redeploy_takes_the_new_master_and_updates_last_good(hub, monkeypatch):
+    cache = projects.hub_file()
+    _commit_master(hub, BAD)
+    good = projects.hub_file()
+    assert good != cache and projects.registry_stale()
+    # the redeploy: a fresh process whose code knows the field
+    monkeypatch.setattr(projects, "KEYS", projects.KEYS | {"a_field_this_code_has_never_seen"})
+    monkeypatch.setattr(projects, "_stale", [])
+    monkeypatch.setattr(projects, "_warned", set())
+    assert projects.hub_file() == cache             # the running code now knows the field
+    assert open(cache).read() == BAD and open(good).read() == BAD
+    assert projects.registry_stale() is None
+
+
+def test_a_bad_master_without_a_last_good_copy_still_raises(hub):
+    _commit_master(hub, BAD)
+    f = projects.hub_file()
+    assert f == str(hub / ".local/state/nomad-autopilot/projects.master.yaml")
+    assert not os.path.exists(str(hub / ".local/state/nomad-autopilot/projects.master.good.yaml"))
+    with pytest.raises(projects.ConfigError, match="a_field_this_code_has_never_seen"):
+        projects.hub_load()
+    assert projects.registry_stale() is None
+
+
+def test_health_reports_the_stale_registry_while_it_is_in_use(hub, tmp_path):
+    sup = sv.Supervisor(st.StateStore(str(tmp_path / "state.json")),
+                        registry_stale=projects.registry_stale)
+    projects.hub_file()
+    assert sup.health()["registry_stale"] is None
+    _commit_master(hub, BAD)
+    projects.hub_file()
+    assert "a_field_this_code_has_never_seen" in sup.health()["registry_stale"]
+    assert sup.health()["ok"] is True                # the passes still work
+    _commit_master(hub, REG)
+    projects.hub_file()
+    assert sup.health()["registry_stale"] is None
+
+
+def test_registry_falls_back_to_the_working_copy_without_git(tmp_path, monkeypatch, caplog):
+    home = tmp_path / "home"
+    (home / "nomad").mkdir(parents=True)
+    (home / "runematch").mkdir()
+    (home / "nomad" / "projects.yaml").write_text(REG)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("NOMAD_PROJECTS_FILE", raising=False)
+    with caplog.at_level("WARNING"):
+        assert projects.hub_file() == str(home / "nomad" / "projects.yaml")
+        projects.hub_file()
+    assert len([r for r in caplog.records if "working copy" in r.getMessage()]) == 1
+    assert projects.hub_get("runematch").autopilot.cap == 2
 
 
 # ---- the merge queue in task selection (#871) --------------------------------------------------

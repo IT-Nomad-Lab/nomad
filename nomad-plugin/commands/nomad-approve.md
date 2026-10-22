@@ -8,11 +8,13 @@ The operator is making the **human-gate decision** for a paused run. Parse `$ARG
 an email, dispatching a build) — confirm the run_id and decision with the operator before sending
 if there is any ambiguity.
 
-Run (map approve→approved, reject→rejected):
+Run this with the run_id and the decision filled in (approve→`approved`, reject→`rejected`).
+It needs no Python, so it works in WSL and in Git Bash on Windows:
 
 ```bash
-curl -s http://localhost:8099/resume -H 'Content-Type: application/json' \
-  -d "$(python3 -c 'import json,sys;a=sys.argv[1:];print(json.dumps({"run_id":a[0],"decision":"approved" if a[1].startswith("a") else "rejected"}))' $ARGUMENTS)"
+curl -s http://localhost:8099/resume -H 'Content-Type: application/json' --data-binary @- <<'JSON'
+{"run_id": "<run_id>", "decision": "approved|rejected"}
+JSON
 ```
 
 Report the result: on approve, the action that executed (and any outbox/knowledge/build output);

@@ -1,0 +1,18 @@
+{
+  "set": {
+    "permissions": {
+      "allow": [
+        "mcp__nomad-pm",
+        "Read(//tmp/**)"
+      ],
+      "additionalDirectories": [
+        "/home/jdelimam/nomad",
+        "/tmp"
+      ]
+    }
+  },
+  "retire": [
+    "/.claude/hooks/tier-gate.py",
+    "/.claude/hooks/nomad-track/track.py"
+  ]
+}

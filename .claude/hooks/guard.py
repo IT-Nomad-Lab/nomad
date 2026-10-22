@@ -31,7 +31,7 @@ import sys
 
 # Irreversible / outward-facing / destructive — pause for the operator.
 IRREVERSIBLE = [
-    r"\bgit\s+push\b", r"\bgit\s+merge\b", r"\bgit\s+rebase\b\s+.*\bmain\b",
+    r"\bgit\s+push\b", r"\bgit\s+rebase\b\s+.*\bmain\b",
     r"\bgit\s+reset\s+--hard\s+origin", r"\bgit\s+push\s+.*--force",
     r"\bgh\s+pr\s+merge\b", r"\bgh\s+release\s+create\b",
     r"\bnpm\s+publish\b", r"\b(twine|pip)\s+upload\b",
@@ -61,14 +61,17 @@ COMMIT_BYPASS = [
     r"\bgit\s+config\b[^|;&\n]*core\.hooksPath[ \t]+\S",
     r"\bgit\s+config\b[^|;&\n]*--unset[^|;&\n]*core\.hooksPath",
     r"\bgit\s+config\b[^|;&\n]*core\.hooksPath[^|;&\n]*--unset",
+    # A one-off override does the same for a single command.
+    r"\bgit\b[^|;&\n]*\s-c\s*core\.hooksPath\s*=",
+    r"\bgit\b[^|;&\n]*--config-env[= ]core\.hooksPath=",
     # Disarming the gate itself.
     r"\bchmod\b[^|;&\n]*-x[^|;&\n]*\.githooks",
     r"\brm\b[^|;&\n]*\.githooks/pre-commit",
     r"\brm\b[^|;&\n]*secret_scan\.py",
     # Editing the gate is as good as deleting it, and the shell has plenty of ways.
     # The Write/Edit tools are covered by PROTECTED_PATHS below; these are the Bash ones.
-    r"\b(sed|perl|ruby)\b[^|;&\n]*-i[^|;&\n]*(secret_scan|guard)\.py",
-    r"\b(sed|perl|ruby)\b[^|;&\n]*-i[^|;&\n]*(\.gitleaks\.toml|\.githooks/)",
+    r"\b(sed|perl|ruby)\b[^|;&\n]*(\s-[a-z]*i|--in-place)[^|;&\n]*(secret_scan|guard)\.py",
+    r"\b(sed|perl|ruby)\b[^|;&\n]*(\s-[a-z]*i|--in-place)[^|;&\n]*(\.gitleaks\.toml|\.githooks/)",
     r"\btee\b[^|;&\n]*(secret_scan|guard)\.py",
     r"\btee\b[^|;&\n]*(\.gitleaks\.toml|\.githooks/)",
     r">>?[ \t]*\S*(secret_scan|guard)\.py",
@@ -85,11 +88,27 @@ PROTECTED_PATHS = (
     ".githooks",                # pre-commit + pre-push
     ".gitleaks.toml",           # the ruleset the scan actually applies
 )
+# A guardrail is saved only by the operator, from the cockpit (#1396): the dispatcher wants the
+# cockpit token for it, and only the engine sends that. So no agent names the token file or the
+# route. A name match, so a speed bump rather than a wall (operator decision 2026-10-16); reads
+# are denied by the user-level tier gate, which sees the Read tool.
+COCKPIT_ONLY = re.compile(r"cockpit[-_]token|guardrail[-_]save|X-Nomad-Cockpit", re.I)
 # Tools that write files. NotebookEdit carries its path under a different key.
 WRITE_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
 # Commands that create a commit, and so must be scanned first (T0.3).
 COMMIT_CMD = re.compile(r"\bgit\s+(?:-\S+\s+)*commit\b")
 COMMIT_SAFE = re.compile(r"--dry-run|--amend\s+--no-edit\b.*--dry-run")
+# Git's global options sit between `git` and the subcommand (`git -C ~/nomad push`,
+# `git -c user.name=x commit`), and every git pattern here reads `git\s+<subcommand>`. So each
+# pattern is also tried against the command with those options folded away (#1022).
+GIT_GLOBAL_OPTS = re.compile(
+    r"""\bgit(?:\s+(?:-[Cc]|--git-dir|--work-tree|--namespace|--config-env)(?:\s+|=)"""
+    r"""(?:"[^"]*"|'[^']*'|\S+)|\s+-[pPh]\b|\s+--[\w-]+(?:=\S+)?)+""")
+
+
+def views(cmd):
+    """The command as typed, and again with git's global options folded away."""
+    return (cmd, GIT_GLOBAL_OPTS.sub("git", cmd))
 
 PROJECT_DIR = os.environ.get("CLAUDE_PROJECT_DIR") or os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -159,6 +178,8 @@ def main():
 
     if tool in WRITE_TOOLS:
         for key in ("file_path", "notebook_path"):
+            if COCKPIT_ONLY.search(str(tool_input.get(key) or "")):
+                decision("deny", "Blocked: the cockpit token is the operator's alone (#1396).")
             guarded = protected_hit(tool_input.get(key))
             if guarded:
                 decision("deny", "Blocked: {} is part of the secret gate ({}). No agent "
@@ -170,24 +191,31 @@ def main():
     if tool != "Bash":
         sys.exit(0)
     cmd = tool_input.get("command", "") or ""
+    seen = views(cmd)
+
+    def hit(pat):
+        return any(re.search(pat, c, re.I) for c in seen)
 
     def deny(reason):
         decision("deny", reason)
 
+    if COCKPIT_ONLY.search(cmd):
+        deny("Blocked: the cockpit token and the guardrail save are the operator's alone (#1396). "
+             "A guardrail is saved from the cockpit's Policies area.")
     for pat in COMMIT_BYPASS:
-        if re.search(pat, cmd, re.I):
+        if hit(pat):
             deny("Blocked: that would bypass the pre-commit secret gate ({}). "
                  "Fix the finding instead; only the operator bypasses, in their own "
                  "shell.".format(pat))
-    if COMMIT_CMD.search(cmd) and not COMMIT_SAFE.search(cmd):
+    if any(COMMIT_CMD.search(c) for c in seen) and not COMMIT_SAFE.search(cmd):
         scan_staged_or_deny(deny)
 
     for pat in SECRETS:
-        if re.search(pat, cmd, re.I):
+        if hit(pat):
             decision("deny", f"Blocked: looks like it would expose a secret ({pat}). "
                              f"Avoid reading/committing .env or printing tokens.")
     for pat in IRREVERSIBLE:
-        if re.search(pat, cmd, re.I):
+        if hit(pat):
             decision("ask", f"NOMAD human gate: this looks irreversible/outward-facing "
                             f"({pat}). Approve to proceed.")
     sys.exit(0)                                         # defer to normal permissions

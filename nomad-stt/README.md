@@ -57,6 +57,10 @@ pays no cold-kernel cost. Cold, the first frames run at ~136 ms; warm, ~18 ms.
 
 ## Notes
 
+- Shared GPU admission (#1462): the model load waits, up to `NOMAD_STT_ADMISSION_WAIT_SECONDS`
+  (600), for `/tmp/nomad-gpu.lock` and releases it once warm; past that the start fails and systemd
+  retries. Admission covers the load only. The warm model stays resident afterwards, so a job that
+  needs the whole card stops this service (`gpu_guard run --stop nomad-stt`), as before.
 - CPU-free on the voice side: the model runs here on the GPU; `nomad-voice` stays a thin client.
 - Contends with ComfyUI/FLUX2 for VRAM (the 1B model is ~2-3 GB, so there is headroom on 24 GB).
 - Phase 2b: Kyutai **TTS** can join this same sidecar to replace Piper for a fully-Kyutai speech

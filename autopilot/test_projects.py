@@ -88,8 +88,36 @@ def test_an_empty_block_gets_every_default(tmp_path):
     assert ap.flake_set == frozenset() and ap.known_failures == frozenset()
     assert ap.cap == projects.DEFAULT_CAP == 3
     assert ap.working_dirs == () and ap.deny_edit_globs == () and ap.requires_gpu is False
+    assert ap.gate_network == "none"
     assert (ap.results, ap.results_files) == ("exit", "") and ap.regenerated == ()
+    assert ap.noise == () and ap.lanes == ()
+    assert ap.model == "" and ap.max_budget_usd is None and ap.loop_tests == ()
     assert ap.worktree_root == os.path.realpath(tmp_path / "p") + "-wt"
+
+
+def test_cost_fields_parse(tmp_path):
+    ap = _one(tmp_path, """\
+        test: {EditMode: a, PlayMode: b}
+        model: opus
+        max_budget_usd: 4.5
+        loop_tests: [EditMode]
+    """).autopilot
+    assert (ap.model, ap.max_budget_usd, ap.loop_tests) == ("opus", 4.5, ("EditMode",))
+
+
+def test_noise_rules_parse(tmp_path):
+    ap = _one(tmp_path, """\
+        noise:
+          - {glob: "Assets/*.meta", rule: unity-default-platforms}
+          - {glob: ProjectSettings/ProjectSettings.asset, rule: only-keys, keys: [productName]}
+        """).autopilot
+    assert ap.noise == (
+        projects.Noise("Assets/*.meta", "unity-default-platforms"),
+        projects.Noise("ProjectSettings/ProjectSettings.asset", "only-keys", ("productName",)))
+
+
+def test_lanes_parse_lower_case_without_repeats(tmp_path):
+    assert _one(tmp_path, "lanes: [Comms, research, comms]\n").autopilot.lanes == ("comms", "research")
 
 
 def test_the_cap_default_comes_from_the_global_setting(tmp_path):
@@ -145,6 +173,7 @@ def test_relative_paths_resolve_against_the_repo(tmp_path):
     ("cap: two\n", "autopilot.cap"),
     ("cap: true\n", "autopilot.cap"),
     ("requires_gpu: yes please\n", "autopilot.requires_gpu"),
+    ("gate_network: off\n", "autopilot.gate_network"),
     ("flake_set: BLK6\n", "autopilot.flake_set"),
     ("flake_set: [BLK6, '']\n", r"autopilot.flake_set\[1\]"),
     ("test: 3\n", "autopilot.test"),
@@ -166,11 +195,28 @@ def test_relative_paths_resolve_against_the_repo(tmp_path):
     ("regenerated: [/abs/font.asset]\n", r"autopilot.regenerated\[0\]"),
     ("regenerated: [../other/font.asset]\n", r"autopilot.regenerated\[0\]"),
     ("regenerated: [.]\n", r"autopilot.regenerated\[0\]"),
+    ("noise: {glob: x, rule: only-keys}\n", "autopilot.noise: expected a list"),
+    ("noise: [x.meta]\n", r"autopilot.noise\[0\]: expected a mapping"),
+    ("noise: [{glob: x, rule: whatever}]\n", r"autopilot.noise\[0\].rule"),
+    ("noise: [{glob: x, rule: only-keys}]\n", r"autopilot.noise\[0\].keys"),
+    ("noise: [{glob: x, rule: unity-default-platforms, keys: [a]}]\n", r"autopilot.noise\[0\].keys"),
+    ("noise: [{glob: ../x, rule: unity-default-platforms}]\n", r"autopilot.noise\[0\].glob"),
+    ("noise: [{rule: unity-default-platforms}]\n", r"autopilot.noise\[0\].glob"),
+    ("noise: [{glob: x, rule: only-keys, keys: [a], path: y}]\n", r"autopilot.noise\[0\]: unknown key"),
+    ("lanes: dev\n", "autopilot.lanes"),
+    ("lanes: []\n", "autopilot.lanes: empty list"),
+    ("lanes: [dev, '']\n", r"autopilot.lanes\[1\]"),
     ("results: junit\n", "autopilot.results.format"),
     ("results: [nunit]\n", "autopilot.results"),
     ("results: {format: nunit, glob: x}\n", "autopilot.results: unknown key"),
     ("results: {format: nunit, files: /abs/*.xml}\n", "autopilot.results.files"),
     ("results: {format: nunit, files: ../up/*.xml}\n", "autopilot.results.files"),
+    ("model: claude-opus-5-5\n", "autopilot.model: expected one of"),
+    ("max_budget_usd: 0\n", "autopilot.max_budget_usd"),
+    ("max_budget_usd: lots\n", "autopilot.max_budget_usd"),
+    ("max_budget_usd: true\n", "autopilot.max_budget_usd"),
+    ("loop_tests: []\n", "autopilot.loop_tests: empty list"),
+    ("test: {EditMode: x}\nloop_tests: [PlayMode]\n", r"autopilot.loop_tests\[0\]: no test suite"),
 ])
 def test_invalid_blocks_name_project_and_field(tmp_path, block, field):
     with pytest.raises(ConfigError, match=f"project 'shop': {field}"):
@@ -181,6 +227,93 @@ def test_a_non_mapping_block_is_an_error(tmp_path):
     f = _registry(tmp_path, "projects:\n  - {id: shop, path: shop, autopilot: [x]}\n")
     with pytest.raises(ConfigError, match="project 'shop': autopilot: expected a mapping"):
         projects.load(f)
+
+
+# ---- the project type (#1369) ----------------------------------------------------------------
+
+class _FakeProfiles:
+    """Stands in for nomad_projects.profiles, so these tests need only the profile names."""
+    class ProfileError(ValueError):
+        pass
+
+    def __init__(self, ids):
+        self.ids = ids
+
+    def load(self, type_id):
+        if type_id not in self.ids:
+            raise self.ProfileError(f"profile '{type_id}': no such profile")
+        return type_id
+
+    def load_all(self):
+        return {i: i for i in self.ids}                  # like the real one: {id: profile}
+
+
+@pytest.fixture
+def fake_profiles(monkeypatch):
+    mod = _FakeProfiles(["generic", "website"])
+    pkg = type(sys)("nomad_projects")
+    pkg.profiles = mod
+    monkeypatch.setitem(sys.modules, "nomad_projects", pkg)
+    monkeypatch.setitem(sys.modules, "nomad_projects.profiles", mod)
+    return mod
+
+
+def test_a_missing_type_is_generic(tmp_path):
+    f = _registry(tmp_path, "projects:\n  - {id: a, path: a}\n  - {id: b, path: b, type: ~}\n")
+    assert [p.type for p in projects.load(f)] == ["generic", "generic"]
+
+
+def test_a_known_type_is_exposed_on_the_project(tmp_path, fake_profiles):
+    f = _registry(tmp_path, "projects:\n  - {id: a, path: a, type: website}\n"
+                            "  - {id: b, path: b, type: generic}\n")
+    assert [p.type for p in projects.load(f)] == ["website", "generic"]
+    assert projects.get("a", f).type == "website"
+
+
+def test_an_unknown_type_names_the_project_and_field(tmp_path, fake_profiles):
+    f = _registry(tmp_path, "projects:\n  - {id: a, path: a}\n  - {id: shop, path: s, type: ecommerce}\n")
+    with pytest.raises(ConfigError, match=r"project 'shop': type: .*'ecommerce'.*known types: generic, website"):
+        projects.load(f)
+
+
+@pytest.mark.parametrize("bad", ["''", "7", "[website]"])
+def test_a_non_string_type_is_an_error(tmp_path, bad):
+    f = _registry(tmp_path, f"projects:\n  - {{id: shop, path: s, type: {bad}}}\n")
+    with pytest.raises(ConfigError, match=r"project 'shop': type: expected a non-empty string"):
+        projects.load(f)
+
+
+def test_generic_never_needs_a_profile(tmp_path, monkeypatch):
+    """A broken or missing profiles package must not break a project that is (or defaults to)
+    generic."""
+    monkeypatch.setitem(sys.modules, "nomad_projects", None)     # any import raises
+    f = _registry(tmp_path, "projects:\n  - {id: a, path: a}\n  - {id: b, path: b, type: generic}\n")
+    assert [p.type for p in projects.load(f)] == ["generic", "generic"]
+
+
+def test_every_current_registry_entry_loads_as_generic_with_other_fields_unchanged():
+    """Adding the field changes nothing for the entries listed today: none sets `type:`, all
+    load as generic, and the rest of each entry is exactly what the file says."""
+    import yaml
+    with open(REAL, encoding="utf-8") as fh:
+        raw = [e for e in yaml.safe_load(fh)["projects"] if e.get("id") and e.get("path")]
+    assert all("type" not in e for e in raw)
+    ps = projects.load(REAL)
+    assert len(ps) == len(raw) > 10
+    for p, e in zip(ps, raw):
+        assert p.type == "generic", p.id
+        assert (p.id, p.group, p.aliases, p.dispatch) == (
+            str(e["id"]), str(e.get("group") or ""),
+            tuple(str(a).lower() for a in e.get("aliases") or []), e.get("dispatch", True) is not False)
+        assert p.path.endswith(str(e["path"]))
+        assert (p.autopilot is None) == ("autopilot" not in e)
+
+
+def test_the_real_profiles_decide_which_types_exist():
+    pytest.importorskip("nomad_projects.profiles")
+    assert projects.parse_type("p", "generic") == "generic"
+    with pytest.raises(ConfigError, match=r"project 'p': type: "):
+        projects.parse_type("p", "no-such-type")
 
 
 # ---- the RuneMatch block ----------------------------------------------------------------------
@@ -235,3 +368,31 @@ def test_runematch_paths_and_denies(rm):
         "Assets/TextMesh Pro/Resources/Fonts & Materials/LiberationSans SDF - Fallback.asset",)
     assert ap.regenerated == (
         "Assets/TextMesh Pro/Resources/Fonts & Materials/LiberationSans SDF - Fallback.asset",)
+
+
+# ── policies: attached to one project (#1373, PRD 6.5 layer 3) ──────────────────────────
+
+def test_no_policies_is_none(tmp_path):
+    f = _registry(tmp_path, "projects:\n  - {id: a, path: a}\n")
+    assert projects.load(f)[0].policies == ()
+
+
+def test_attached_policies_are_exposed_in_order(tmp_path):
+    f = _registry(tmp_path, "projects:\n  - {id: g, path: g, policies: [engine-unity, docs-audit]}\n")
+    assert projects.get("g", f).policies == ("engine-unity", "docs-audit")
+
+
+@pytest.mark.parametrize("v,want", [
+    ("engine-unity", r"policies: expected a list"),
+    ("[no-such-policy]", r"policies\[0\]: no policy 'no-such-policy'"),
+    ("['../x']", r"policies\[0\]: not a policy id"),
+    ("[engine-unity, engine-unity]", r"policies\[1\]: 'engine-unity' is listed twice"),
+])
+def test_bad_policies_name_the_project_and_field(tmp_path, v, want):
+    f = _registry(tmp_path, f"projects:\n  - {{id: g, path: g, policies: {v}}}\n")
+    with pytest.raises(ConfigError, match=rf"project 'g': {want}"):
+        projects.load(f)
+
+
+def test_gate_network_none_parses(tmp_path):
+    assert _one(tmp_path, "gate_network: none\n").autopilot.gate_network == "none"

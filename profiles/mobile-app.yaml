@@ -1,0 +1,33 @@
+# A phone app. No mobile project exists in projects.yaml yet, so the gates are a typed-JS
+# default (like content-creation-app), not copied from a live project.
+id: mobile-app
+title: Mobile app
+description: An iOS or Android app, native or cross-platform.
+
+interview:
+  ask:
+    - {id: platform, question: "iOS, Android or both?", kind: single, options: [iOS, Android, both]}
+    - {id: framework, question: "Framework?", kind: single, options: [React Native / Expo, Flutter, Swift, Kotlin, other]}
+    - {id: backend, question: "Does it need its own backend or use an existing API?", kind: single, options: [own backend, existing API, offline only]}
+    - {id: store, question: "Will it go to an app store?", kind: single, options: ['yes', internal only]}
+  skip: []
+
+stack:
+  language: typescript
+  framework: react-native
+
+policies: [mobile-app-default, design-read, docs-audit]
+
+agents:
+  - {role: frontend-ux, lane: dev}
+  - {role: backend-engineer, lane: dev}
+  - {role: qa-test, lane: dev}
+
+gates:
+  pre_merge: [npm ci, npx tsc --noEmit, npm test]
+  milestone: [npm ci, npx tsc --noEmit, npm test]
+
+files: [README.md, Nomad.md, CLAUDE.md]
+
+autopilot:
+  lanes: [dev]

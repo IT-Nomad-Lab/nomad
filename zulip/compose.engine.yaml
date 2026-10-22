@@ -1,0 +1,10 @@
+# Docker Engine only (#383). Turn on with COMPOSE_FILE=compose.yaml:compose.engine.yaml in
+# zulip/.env, at cut-over (docs/DOCKER-ENGINE-RUNBOOK.md). Leave it off under Docker Desktop.
+#
+# LiteLLM's fallback alert posts to host.docker.internal:8096. Under Docker Engine that's the bridge
+# gateway, 172.17.0.1, where a 127.0.0.1-only publish doesn't answer. Compose appends this to
+# `ports:`. Still not on the LAN: WSL NAT doesn't expose the bridge.
+services:
+  zulip:
+    ports:
+      - "172.17.0.1:8096:80"

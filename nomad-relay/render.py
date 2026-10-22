@@ -53,6 +53,21 @@ def clip(text, n):
 _BOARD = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
 
 
+# Per-project streams (#1123). A board's traffic (wp and run topics, autopilot) goes to #<board>.
+# A missing board, one that isn't a safe identifier, or one that would collide with a shared
+# channel falls back to the shared stream the caller names.
+RESERVED = set(CHANNELS) | {"autopilot", "general", "nomad-portfolio"}
+
+
+def project_stream(board, fallback: str) -> str:
+    board = str(board or "")
+    return board if _BOARD.match(board) and board not in RESERVED else fallback
+
+
+def project_stream_description(board: str) -> str:
+    return f"Everything NOMAD does on the {board} board: work packages, runs, autopilot."
+
+
 def run_topic(detail: dict) -> str:
     rid = f"run {(detail.get('run_id') or '?')[:12]}"
     board = ((detail.get("project") or {}).get("board") or "")

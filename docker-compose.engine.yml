@@ -1,0 +1,11 @@
+# Docker Engine only (#383). Turn on with COMPOSE_FILE=docker-compose.yml:docker-compose.engine.yml
+# in .env, at cut-over (docs/DOCKER-ENGINE-RUNBOOK.md). Leave it off under Docker Desktop.
+#
+# A container calling host.docker.internal:<port> lands on the bridge gateway, 172.17.0.1. A port
+# published on 127.0.0.1 alone doesn't answer there, so each one another container calls through
+# host.docker.internal is published on the gateway as well. Compose appends these to `ports:`.
+# Still not on the LAN: WSL NAT doesn't expose the bridge.
+services:
+  nomad-v2-engine:
+    ports:
+      - "172.17.0.1:8099:8099"   # OpenProject's webhook, host.docker.internal:8099/pm-hook (nomad-pm seed.rb)

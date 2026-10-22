@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+# nomad-run: the one bridge between a Claude Code session and NOMAD's hooks and MCP servers.
+#
+#   nomad-run tier-gate              PreToolUse: the SDLC red tier (claude-hooks/tier_gate.py)
+#   nomad-run track start|record|end nomad-pm session tracking (claude-hooks/track.py)
+#   nomad-run nomad-pm               the nomad-pm MCP server (mcp-local/nomad_pm.py), stdio
+#   nomad-run sync-settings ...      merge claude-config/ into a settings.json
+#   nomad-run graphify <command> ... the graphify CLI, in the caller's directory (#1049)
+#   nomad-run lane-mcp <lane>        a nomad v2 lane MCP server (nomad-plugin/mcp/), stdio (#1056)
+#
+# All logic runs in WSL. This script is the only code that knows which host it is on:
+#   - WSL (or plain Linux): run the target with the root this script sits in.
+#   - Windows (Git Bash, uname MINGW*/MSYS*): re-run this script inside WSL through wsl.exe,
+#     against the WSL copy of the marketplace, with MSYS_NO_PATHCONV=1 so Git Bash doesn't
+#     rewrite /home/... arguments into C:/Program Files/Git/home/....
+#
+# Failure on Windows (WSL down, distro missing, timeout): tier-gate asks, everything else exits
+# 0 in silence. A hook outage must never let a red action through, nor block a session.
+#
+# Environment:
+#   NOMAD_WSL_DISTRO  distro to run in (default Ubuntu-24.04)
+#   NOMAD_WSL_ROOT    marketplace root inside WSL (default ~/.local/share/nomad-marketplace); also
+#                     the fallback when this script runs from a copy without claude-hooks/
+#   NOMAD_RUN_TIMEOUT seconds before a Windows call gives up (default 25, under the 30 s hook limit)
+#   NOMAD_PY          Python with nomad_pm's dependencies (default ~/nomad/mcp-local/.venv/bin/python)
+#   NOMAD_PM_AS       nomad-pm identity (default nomad-dev)
+#   NOMAD_GRAPHIFY    graphify binary in WSL (default ~/.local/bin/graphify, then PATH)
+#   NOMAD_ENV_FILE    .env the lane MCPs read their NocoDB, LiteLLM and n8n settings from
+#                     (default ~/nomad/.env)
+#   NOMAD_DISPATCH_URL Builder dispatcher for the dev lane (default http://127.0.0.1:8090)
+set -u
+
+target="${1:-}"
+case "$target" in
+  tier-gate|track|nomad-pm|sync-settings|graphify|lane-mcp) ;;
+  *) echo "nomad-run: unknown target '${target}' (tier-gate, track, nomad-pm, sync-settings, graphify, lane-mcp)" >&2
+     exit 2 ;;
+esac
+
+ask_json='{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask", "permissionDecisionReason": "SDLC red tier: the tier gate could not reach WSL, so every gated call asks. Approve to proceed."}}'
+
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*)
+    export MSYS_NO_PATHCONV=1
+    distro="${NOMAD_WSL_DISTRO:-Ubuntu-24.04}"
+    # $1 is the WSL root (empty means the default), $2 the Windows directory this was run from
+    # (C:/..., translated in WSL by winpath.py), the rest is this script's own argv.
+    inner='r="${1:-$HOME/.local/share/nomad-marketplace}"; export NOMAD_WIN_CWD="$2"; shift 2
+NOMAD_HOST=windows exec "$r/nomad-operator/bin/nomad-run" "$@"'
+    wsl=(wsl.exe -d "$distro" -e bash -c "$inner" nomad-run "${NOMAD_WSL_ROOT:-}"
+         "$(pwd -W 2>/dev/null || pwd)" "$@")
+    case "$target" in
+      nomad-pm|sync-settings|graphify|lane-mcp) exec "${wsl[@]}" ;;   # a stdio server, or a slow command
+    esac
+    # wsl.exe reports its own errors in UTF-16 on stdout; the braces mute bash's null-byte warning.
+    { out="$(timeout "${NOMAD_RUN_TIMEOUT:-25}" "${wsl[@]}" 2>/dev/null)"; rc=$?; } 2>/dev/null
+    if [ "$rc" -eq 0 ]; then
+      [ -n "$out" ] && printf '%s\n' "$out"
+      exit 0
+    fi
+    [ "$target" = tier-gate ] && printf '%s\n' "$ask_json"
+    exit 0
+    ;;
+esac
+
+# In WSL from here on.
+export NOMAD_HOST="${NOMAD_HOST:-wsl}"
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+root="$(cd "$here/../.." && pwd)"
+# Claude Code may run a copy of the plugin from plugins/cache/, with no claude-hooks/ beside it
+# (#1054). The WSL export the installer made has everything.
+[ -d "$root/claude-hooks" ] || root="${NOMAD_WSL_ROOT:-$HOME/.local/share/nomad-marketplace}"
+if [ ! -d "$root/claude-hooks" ]; then
+  echo "nomad-run: no NOMAD export at $root. Run ~/nomad/claude-hooks/install.sh in WSL." >&2
+  [ "$target" = tier-gate ] && printf '%s\n' "$ask_json"
+  case "$target" in nomad-pm|sync-settings|graphify|lane-mcp) exit 1 ;; esac
+  exit 0
+fi
+py="${NOMAD_PY:-$HOME/nomad/mcp-local/.venv/bin/python}"
+shift
+
+case "$target" in
+  tier-gate)
+    exec python3 "$root/claude-hooks/tier_gate.py" ;;
+  track)
+    export NOMAD_PM_DIR="${NOMAD_PM_DIR:-$root/mcp-local}"
+    [ -x "$py" ] || exit 0                            # tracking fails open
+    exec "$py" "$root/claude-hooks/track.py" "$@" ;;
+  nomad-pm)
+    export NOMAD_PM_AS="${NOMAD_PM_AS:-nomad-dev}"
+    exec "$py" "$root/mcp-local/nomad_pm.py" "$@" ;;
+  sync-settings)
+    exec python3 "$root/claude-config/sync_settings.py" "$@" ;;
+  graphify)
+    if [ -n "${NOMAD_WIN_CWD:-}" ]; then
+      dir="$(python3 "$root/claude-hooks/winpath.py" "$NOMAD_WIN_CWD")"
+      cd "$dir" || { echo "nomad-run graphify: no such directory in WSL: $dir" >&2; exit 1; }
+    fi
+    bin="${NOMAD_GRAPHIFY:-$HOME/.local/bin/graphify}"
+    [ -x "$bin" ] || bin="$(command -v graphify 2>/dev/null)"
+    if [ -z "$bin" ]; then
+      echo "nomad-run graphify: graphify isn't installed in WSL. Install it there with" \
+           "'uv tool install graphifyy', never in Windows Python." >&2
+      exit 1
+    fi
+    exec "$bin" "$@" ;;
+  lane-mcp)
+    lane="${1:-}"
+    case "$lane" in
+      comms|research|content|dev) ;;
+      *) echo "nomad-run lane-mcp: unknown lane '$lane' (comms, research, content, dev)" >&2; exit 1 ;;
+    esac
+    export NOMAD_ENV_FILE="${NOMAD_ENV_FILE:-$HOME/nomad/.env}"
+    export NOMAD_DISPATCH_URL="${NOMAD_DISPATCH_URL:-http://127.0.0.1:8090}"
+    exec "$py" "$root/nomad-plugin/mcp/mcp_$lane.py" ;;
+esac

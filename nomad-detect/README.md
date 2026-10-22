@@ -1,6 +1,6 @@
 # nomad-detect — does this text read as machine-written?
 
-A real detector, running on your GPU. No API key, no draft leaving the box, no monthly bill.
+A real detector, running locally on the CPU. No API key, no draft leaving the box, no monthly bill.
 
 Two independent detectors answer two different questions, and you need both.
 
@@ -27,8 +27,19 @@ The performer is an instruction-tuned model, the observer is the same model befo
 denominator asks how surprising the text is to one model given what the other expected, which
 cancels the topic out and leaves the machine-ness. **Low score = machine. High score = human.**
 
-Default pair is Qwen2.5-1.5B base + instruct, about 6 GB of VRAM in bf16. Point the env at the 3B
-or 7B pair for more separation if the card is free.
+Default pair is Qwen2.5-1.5B base + instruct. It runs on the CPU (`NOMAD_DETECT_DEVICE=cpu`, #1037):
+about 13 GB of RAM in float32, ~9 s per check on average and up to ~45 s on a long document. On the
+GPU it took ~2 GB of VRAM and 0.6 s, but that pushed the card over once Ollama's `private` model
+loaded. Scores on CPU land within 0.007 of the GPU calibration in `thresholds.json`. Set `cuda` and
+point the env at the 3B or 7B pair for more separation only if the card has room.
+
+On `cuda` the pair never stays resident (#1462). Each `/detect`, `/calibrate`, `check.py` or
+`evaluate.py` run takes shared GPU admission (`/tmp/nomad-gpu.lock`, `dispatcher/gpu_admission.py`)
+without waiting, loads, scores, drops the models and releases. That adds the ~15 s load to every
+check. If another workload holds the GPU, or a `gpu_guard` restore is pending, `/detect` returns
+the style report with a binoculars error instead of loading anyway, and the CLI tools exit with
+`gpu_admission.Busy`. The eager preload is skipped on `cuda`. On the CPU nothing changes.
+Tests: `uv run --no-project --with pytest --with fastapi --with httpx --with uvicorn python -m pytest -q nomad-detect/test_binoculars_admission.py`.
 
 ## Install
 

@@ -11,8 +11,10 @@ Every write carries the name of the agent doing it. Each lane is an OpenProject 
 This module only talks to OpenProject. It decides nothing about the gate; the engine calls it
 to mirror what already happened, and a failure here must never stop a run (see Engine._pm).
 """
+import copy
 import json
 import os
+import time
 import urllib.parse
 from collections import deque
 
@@ -23,6 +25,11 @@ TOKENS = os.path.expanduser(os.environ.get(
     "/term-secret/openproject-tokens.json" if os.path.exists("/term-secret")
     else "~/.config/nomad/openproject-tokens.json"))
 PROJECT = os.environ.get("NOMAD_PM_PROJECT", "nomad-work")
+# How long a board read is reused (#1110). The relay asks /project once per goal every pass, and
+# each of those read the whole board: ~36 full reads a minute held OpenProject near 90% CPU. Any
+# write through this client drops the cache, and the engine drops it on every OpenProject webhook,
+# so the TTL only bounds what a missed webhook can leave stale.
+WPS_TTL = float(os.environ.get("NOMAD_PM_WPS_TTL", "30"))
 _CANDIDATES = [c for c in (
     os.environ.get("NOMAD_PM_URL"),
     "http://localhost:8097",
@@ -113,11 +120,13 @@ def next_order(wp):
             PRIORITY_RANK.get(_title(wp, "priority"), PRIORITY_RANK["Normal"]), wp["id"])
 
 
-def pick_next(wps, open_blockers):
+def pick_next(wps, open_blockers, statuses=NEXT_STATUSES):
     """The WP "next" takes from `wps`, or None. `open_blockers(id)` is asked only in pick order,
-    and only until one comes back empty, since on the real client each ask is a request."""
+    and only until one comes back empty, since on the real client each ask is a request.
+    `statuses` narrows the pool: the unattended sweep passes ("Ready",), because Backlog is where
+    the operator parks work (#990)."""
     cands = [w for w in wps
-             if _title(w, "type") in NEXT_TYPES and _title(w, "status") in NEXT_STATUSES]
+             if _title(w, "type") in NEXT_TYPES and _title(w, "status") in statuses]
     for w in sorted(cands, key=next_order):
         if not open_blockers(w["id"]):
             return w
@@ -159,6 +168,8 @@ class OpenProject:
         return tok
 
     def call(self, method, path, body=None, as_=MANAGER, ok=(200, 201, 204)):
+        if method != "GET":
+            self.invalidate_wps()
         url = self.base() + (path if path.startswith("/api/v3") else "/api/v3" + path)
         try:
             r = requests.request(method, url, json=body, auth=("apikey", self._token(as_)), timeout=30)
@@ -271,6 +282,11 @@ class OpenProject:
             body[cf["Cockpit link"]] = link
         return self.call("PATCH", f"/work_packages/{wp['id']}", body)
 
+    def run_of(self, wp):
+        """The Run ID a work package carries, or ""."""
+        cf = self._fields((wp["_links"].get("schema") or {}).get("href")).get("Run ID")
+        return (wp.get(cf) or "") if cf else ""
+
     def move(self, wp_id, target, comment="", as_=MANAGER):
         """Walk the work package to `target` through legal moves, one PATCH per hop. The comment,
         if any, goes on once at the end so the reason sits next to where it landed."""
@@ -306,6 +322,25 @@ class OpenProject:
     def watcher_ids(self, wp_id):
         return [e["id"] for e in self.call("GET", f"/work_packages/{int(wp_id)}/watchers")["_embedded"]["elements"]]
 
+    def user_id_of(self, login):
+        """The OpenProject user id behind `login`'s own token, or None when it has none (the
+        manager fallback in _token would answer with the manager's id instead)."""
+        self._token(MANAGER)                            # loads the token file
+        if not self._tokens.get(login):
+            return None
+        ids = self._cache.setdefault("user_ids", {})
+        if login not in ids:
+            ids[login] = self.call("GET", "/users/me", as_=login).get("id")
+        return ids[login]
+
+    def board_of(self, wp):
+        """The identifier of a work package's project (the board name nomad-pm uses)."""
+        href = (wp.get("_links", {}).get("project") or {}).get("href")
+        idents = self._cache.setdefault("project_idents", {})
+        if href and href not in idents:
+            idents[href] = self.call("GET", href).get("identifier")
+        return idents.get(href) if href else None
+
     def user_name(self, href):
         """A user's display name. Members cannot read another user's login, but they can read
         the name, and seed.rb names every agent "<Lane> (agent)"."""
@@ -331,9 +366,20 @@ class OpenProject:
 
     # ── the board as the engine sees it ──
     def project_wps(self, pid=None):
-        """Every work package on board `pid`, NOMAD_PM_PROJECT's when none is given."""
-        return self._all([{"project": {"operator": "=",
-                                       "values": [str(pid or self.project()["id"])]}}])
+        """Every work package on board `pid`, NOMAD_PM_PROJECT's when none is given. A read is
+        reused for WPS_TTL seconds; callers get their own copy, so they may change it."""
+        key = str(pid or self.project()["id"])
+        boards = self._cache.setdefault("wps", {})
+        hit = boards.get(key)
+        if hit and time.monotonic() - hit[0] < WPS_TTL:
+            return copy.deepcopy(hit[1])
+        wps = self._all([{"project": {"operator": "=", "values": [key]}}])
+        boards[key] = (time.monotonic(), wps)
+        return copy.deepcopy(wps)
+
+    def invalidate_wps(self):
+        """Drop every cached board read: a work package changed."""
+        self._cache.pop("wps", None)
 
     @staticmethod
     def tree(wps, root_id):

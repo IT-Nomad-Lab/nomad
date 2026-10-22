@@ -89,6 +89,27 @@ def is_auth_error(err):
                                 "account is not active", "invalid subdomain"))
 
 
+# At boot on 2026-10-01 the relay started before Zulip answered, zulip.Client raised
+# `AssertionError: self.zulip_version is not None`, five quick restarts hit systemd's start limit,
+# and the unit sat in `failed` for ~24 h (#993). A Zulip that isn't up yet is a blip like any other,
+# so startup waits for it. Auth errors still raise: a wrong key should crash-loop into `failed`.
+CONNECT_FIRST, CONNECT_CAP = 5, 60
+
+
+def until_up(connect, what="zulip", sleep=None):
+    """Call connect() until it returns, backing off 5, 10, 20… up to 60 s between tries."""
+    sleep, delay = sleep or time.sleep, CONNECT_FIRST
+    while True:
+        try:
+            return connect()
+        except Exception as e:
+            if is_auth_error(e):
+                raise
+            log(f"{what} not ready ({type(e).__name__}: {e}); retrying in {delay} s")
+            sleep(delay)
+            delay = min(delay * 2, CONNECT_CAP)
+
+
 def log(*a):
     print(time.strftime("%H:%M:%S"), *a, flush=True)
 
@@ -145,6 +166,8 @@ class Chat:
     def __init__(self, client):
         self.c = client
         self.lock = threading.Lock()
+        self.principals = []                    # operator + bot, set once both ids are known
+        self.streams = set()                    # project streams this process has made sure of
 
     def _ok(self, res, what):
         if res.get("result") != "success":
@@ -155,6 +178,23 @@ class Chat:
         with self.lock:
             res = self.c.send_message({"type": "stream", "to": channel, "topic": topic, "content": content})
         return self._ok(res, "send")["id"]
+
+    def stream_for(self, board, fallback):
+        """The project's own stream (#1123), created and subscribed on first use. Subscribing is
+        idempotent, so an existing stream costs one call per process. If Zulip refuses, the post
+        goes to the shared stream instead: a lost message is worse than a misfiled one."""
+        name = R.project_stream(board, fallback)
+        if name == fallback or name in self.streams:
+            return name
+        with self.lock:
+            res = self.c.add_subscriptions(
+                streams=[{"name": name, "description": R.project_stream_description(name)}],
+                principals=self.principals or None, announce=False)
+        if res.get("result") != "success":
+            log("project stream", name, "unavailable, using", fallback + ":", res.get("msg"))
+            return fallback
+        self.streams.add(name)
+        return name
 
     def dm(self, user_id, content):
         with self.lock:
@@ -291,7 +331,9 @@ class Relay:
             entry["gate_msg"] = mid
         self.st.d["runs"][rid] = entry                   # recorded before the optional posts below
         try:
-            self.chat.send(R.RUNS, topic, R.status_message(d, status, cockpit=self.cockpit))
+            board = (d.get("project") or {}).get("board")
+            self.chat.send(self.chat.stream_for(board, R.RUNS), topic,
+                           R.status_message(d, status, cockpit=self.cockpit))
         except Exception as e:                           # the lifecycle feed is nice-to-have
             log("runs feed post failed:", e)
         if status != "awaiting-approval":
@@ -316,15 +358,18 @@ class Relay:
             if not seeding and prev != cur:
                 self.chat.send(R.PROJECTS, R.project_topic(gid), R.progress_message(p, prev))
             # A rejected task goes Blocked without moving the done count, so check every pass.
-            self._sync_blocked(gid, p.get("title"), post=not seeding)
+            self._sync_blocked(gid, p.get("title"), post=not seeding, tasks=p.get("blocked"))
             self.st.d["projects"][gid] = cur
         self.st.d["projects_seeded"] = True
         self.st.save()
 
-    def _sync_blocked(self, gid, title, post=True):
-        detail = self.eng.get("/project", goal_id=gid)
-        now = {str(t["task_id"]): t for m in detail.get("milestones", []) for t in m.get("tasks", [])
-               if t.get("status") == "Blocked"}
+    def _sync_blocked(self, gid, title, post=True, tasks=None):
+        """`tasks`: the goal's Blocked tasks from /project-goals (#1130). An engine that doesn't
+        list them there is asked for the goal's detail instead, one board read per goal."""
+        if tasks is None:
+            detail = self.eng.get("/project", goal_id=gid)
+            tasks = [t for m in detail.get("milestones", []) for t in m.get("tasks", [])]
+        now = {str(t["task_id"]): t for t in tasks if t.get("status") == "Blocked"}
         seen = self.st.d["blocked"].get(gid, [])
         for tid, t in now.items():
             # A board task may already have been alerted from its OpenProject webhook (sync_pm).
@@ -337,7 +382,7 @@ class Relay:
     # outbound: OpenProject (PM-01 P4) ───────────────────────────────────────────────────────
     def sync_pm(self):
         """Webhook events the engine turned into facts → Zulip. A watched work package gets its own
-        topic in #projects; becoming Blocked or mentioning the operator also goes to #alerts, which
+        topic in its board's stream (#projects without one); becoming Blocked or mentioning the operator also goes to #alerts, which
         pushes to the phone. Replies in either topic go back as comments (comment_wp)."""
         pm = self.st.d["pm"]
         try:
@@ -364,8 +409,9 @@ class Relay:
         wid = str(ev["wp_id"])
         topic, ref = R.wp_topic(wid), {"kind": "wp", "wp_id": wid}
         if ev.get("watched") or ev.get("mention"):
-            mid = self.chat.send(R.PROJECTS, topic, R.pm_event_message(ev))
-            self.st.link(mid, R.PROJECTS, topic, ref)
+            stream = self.chat.stream_for(ev.get("board"), R.PROJECTS)
+            mid = self.chat.send(stream, topic, R.pm_event_message(ev))
+            self.st.link(mid, stream, topic, ref)
         known = wid in self.st.d["pm_blocked"] or any(wid in v for v in self.st.d["blocked"].values())
         if ev.get("blocked") and not known:
             mid = self.chat.send(R.ALERTS, topic, R.pm_alert(ev, "blocked"))
@@ -789,6 +835,12 @@ def _sha(text):
     return hashlib.sha256(norm.encode()).hexdigest()
 
 
+def connect(zulip):
+    """The startup calls that need Zulip up: client, operator lookup, our own id."""
+    chat = Chat(zulip.Client(config_file=ZULIPRC))
+    return chat, chat.user_id(OPERATOR), chat.whoami()
+
+
 def main():
     import zulip
     if "--unlock" in sys.argv:
@@ -798,18 +850,18 @@ def main():
         return print("unlocked; restart with: systemctl --user restart nomad-relay")
     if not OPERATOR or not OPERATOR_ID:
         raise SystemExit("NOMAD_ZULIP_OPERATOR and NOMAD_ZULIP_OPERATOR_ID are required (bootstrap.py writes them)")
-    client = zulip.Client(config_file=ZULIPRC)
-    chat = Chat(client)
-    operator_id = chat.user_id(OPERATOR)
+    chat, operator_id, bot_id = until_up(lambda: connect(zulip))
     if str(operator_id) != OPERATOR_ID:            # an email can be reassigned; the id can't
         raise SystemExit(f"{OPERATOR} is user {operator_id}, not the pinned {OPERATOR_ID}; refusing to start")
-    relay = Relay(Engine(), chat, State(), operator_id=operator_id, bot_id=chat.whoami())
+    chat.principals = [operator_id, bot_id]       # who a new project stream is made for
+    relay = Relay(Engine(), chat, State(), operator_id=operator_id, bot_id=bot_id)
     relay.check_org()
     log(f"nomad-relay up: engine {ENGINE}, operator {OPERATOR} ({relay.operator_id})")
     for fn in (relay.sse_loop, relay.runs_loop, relay.slow_loop):
         threading.Thread(target=fn, daemon=True).start()
     relay.wake.set()
-    relay.event_loop(zulip.Client(config_file=ZULIPRC))   # its own client: long-polls hold a connection
+    # its own client: long-polls hold a connection
+    relay.event_loop(until_up(lambda: zulip.Client(config_file=ZULIPRC)))
 
 
 if __name__ == "__main__":

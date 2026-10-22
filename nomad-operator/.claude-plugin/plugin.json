@@ -1,0 +1,7 @@
+{
+  "name": "nomad-operator",
+  "version": "0.1.0",
+  "description": "The operator's Claude Code setup, the same on WSL and Windows: the SDLC tier gate, nomad-pm tracking and MCP, ntfy pushes, the SDLC rules as session context, the brand agents, the Supabase skills and graphify (run in WSL). All logic runs in WSL through bin/nomad-run.",
+  "author": { "name": "Josias" },
+  "keywords": ["nomad", "sdlc", "guardrails", "nomad-pm", "windows", "wsl"]
+}

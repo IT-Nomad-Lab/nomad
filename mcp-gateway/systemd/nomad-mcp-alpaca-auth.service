@@ -1,0 +1,12 @@
+[Unit]
+Description=NOMAD MCP gateway: bearer-token proxy for the alpaca wrapper
+After=nomad-mcp-alpaca.service
+Requires=nomad-mcp-alpaca.service
+
+[Service]
+ExecStart=%h/nomad/mcp-local/.venv/bin/python %h/nomad/mcp-gateway/auth_proxy.py --listen 172.17.0.1:8310 --upstream http://127.0.0.1:18310
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

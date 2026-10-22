@@ -1,0 +1,27 @@
+# NOMAD MCP gateway (Epic #1264, PRD docs/prd/mcp-gateway.md): a LiteLLM instance that only serves
+# MCP. Projects are keys; an MCP is granted to a project by adding it to that key. Separate from the
+# model gateway on :4000 so a change here cannot take model routing down.
+# Secrets: ~/.config/nomad/mcp-gateway.env (LITELLM_MASTER_KEY, PG_PASSWORD), never in the repo.
+name: nomad-mcp-gateway
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: litellm
+      POSTGRES_PASSWORD: ${PG_PASSWORD}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck: {test: ["CMD-SHELL", "pg_isready -U postgres"], interval: 5s, retries: 20}
+  gateway:
+    image: ghcr.io/berriai/litellm:main-latest
+    restart: unless-stopped
+    depends_on: {db: {condition: service_healthy}}
+    ports: ["127.0.0.1:4010:4000"]
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      DATABASE_URL: postgresql://postgres:${PG_PASSWORD}@db:5432/litellm
+      STORE_MODEL_IN_DB: "True"
+    volumes: [./config.yaml:/app/config.yaml:ro]
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+volumes:
+  pgdata:

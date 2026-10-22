@@ -15,7 +15,7 @@ actions** — send email, merge to main, publish, share externally, spend, delet
 
 ## Architecture
 
-![NOMAD architecture — hardware, remote access, user interfaces, the human-gated mission pipeline, the Claude Agent SDK team, model/memory/control planes, MCP integrations, and n8n automation](assets/nomad-architecture.png)
+![NOMAD architecture: operator surfaces, the v2 engine pipeline with its human gate, autopilot and dispatcher, the n8n approval gate, the LiteLLM model layer, data and tracking, capability services and MCP tools, every managed project, and ops guardrails](assets/nomad-architecture.png)
 
 The orchestration is an **explicit state machine** (the "mission pipeline"):
 
@@ -76,9 +76,9 @@ In practice:
 | Path | What it is | Docs |
 |---|---|---|
 | [`v2/`](v2/) | **The v2 pipeline engine** — state machine, lane specialists, skills, MCP tools, tests | [README](v2/README.md) |
-| [`nomad-console/`](nomad-console/) | Operator dashboard (LCARS UI): telemetry, projects, agents, chat, voice | [README](nomad-console/README.md) |
+| [`nomad-console/`](nomad-console/) | v1 operator dashboard (LCARS UI), retired: not in compose since #351 | [README](nomad-console/README.md) |
 | [`nomad-vscode/`](nomad-vscode/) | VS Code extension: per-project status (git · tasks · approvals · health) + dispatch + chat, in the editor | [README](nomad-vscode/README.md) |
-| [`crew/`](crew/) | v1 CrewAI agent team + the engineering crew that builds NOMAD itself | [README](crew/README.md) |
+| [`crew/`](crew/) | v1 CrewAI agent team, retired: not in compose since #351 | [README](crew/README.md) |
 | [`dispatcher/`](dispatcher/) | Builder handoff (headless Claude Code in a repo) + interactive terminal daemon | [README](dispatcher/README.md) |
 | [`mcp-local/`](mcp-local/) | Local MCP servers (local-LLM bridge, scraper, image gen, diagram/chart render) | [README](mcp-local/README.md) |
 | [`nomad-plugin/`](nomad-plugin/) | NOMAD packaged as a Claude Code plugin (agents + skills + MCP + hooks) | [README](nomad-plugin/README.md) |
@@ -132,7 +132,6 @@ Key local endpoints once up:
 | Service | URL | Purpose |
 |---|---|---|
 | v2 engine / cockpit | http://127.0.0.1:8099 | The mission pipeline + human gate |
-| Operator console (LCARS) | http://127.0.0.1:1701 | Telemetry, projects, chat, voice |
 | Open WebUI | http://localhost:3000 | Talk to every model |
 | LiteLLM gateway | http://localhost:4000 | The model router |
 | n8n | http://localhost:5678 | Integrations & approval gate |
@@ -140,8 +139,8 @@ Key local endpoints once up:
 | Qdrant | http://localhost:6333 | Vector memory |
 | Kroki | http://127.0.0.1:8231 | Render diagrams/charts from text |
 
-See each module's README for service-specific setup. v2 tests are plain Python scripts (no
-pytest harness) — see [`v2/README.md`](v2/README.md) and [`AGENTS.md`](AGENTS.md).
+See each module's README for service-specific setup. v2 has a pytest suite; how to run it is in
+[`v2/README.md`](v2/README.md) and [`AGENTS.md`](AGENTS.md).
 
 ## How autonomy + approvals work
 

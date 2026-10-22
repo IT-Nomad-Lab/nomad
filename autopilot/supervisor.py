@@ -34,7 +34,15 @@ States (PRD 5.7), decided at the end of each project's pass, first match wins:
   error          a worker ended `error` (sticky until Run is pressed again), or the pass failed:
                  nomad-pm or the repo unreachable, a bad projects.yaml entry, a hook raised
   budget_paused  the daily cap is reached and a task qualifies that could not start
+  waiting        also: the Max usage limit was hit and a task qualifies that could not start
   running / waiting / needs_you / idle   the Scheduler's `outcome`, else running (workers) or idle
+
+The Max usage limit (#960). A worker that ends on the plan's usage limit comes back from collect
+as `resume` with a `reset_at`. The supervisor then starts no worker on any project until reset_at
+plus LIMIT_MARGIN_SECS, and the task is picked up again after that like any `resume`. The pause
+is global (one Claude account) and persisted in the state file. One alert goes out when it starts
+and one when it ends; a second hit during the pause only moves the end. Nothing falls back to a
+paid model.
   off            autopilot off; its last workers are still collected, nothing new starts
 
 The switch and run mode "once" (#890). Each project has a persisted `autopilot` switch, separate
@@ -71,9 +79,11 @@ from urllib.parse import parse_qs, urlsplit
 
 try:
     from . import state as st
+    from .usage_limit import clock
 except ImportError:  # run as a script: python3 autopilot/supervisor.py
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import state as st
+    from usage_limit import clock
 
 log = logging.getLogger("autopilot")
 
@@ -82,7 +92,9 @@ PORT = int(os.environ.get("NOMAD_AUTOPILOT_PORT", "8092"))
 PASS_SECS = float(os.environ.get("NOMAD_AUTOPILOT_PASS_SECS", "60"))
 TOKEN_PATH = os.path.expanduser("~/.config/nomad/autopilot-token")
 MAX_LOOP_FAILURES = 5
-NOMAD = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# #960: after a Max usage-limit hit nothing starts until the reset plus this margin
+LIMIT_MARGIN_SECS = float(os.environ.get("NOMAD_AUTOPILOT_LIMIT_MARGIN_SECS", "300"))
+NOMAD =os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PROJECT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 
@@ -218,15 +230,19 @@ class Scheduler:
 
 class Supervisor:
     def __init__(self, store, scheduler=None, pass_secs=PASS_SECS, budget=None, alerter=None,
-                 digest=None):
+                 digest=None, limit_margin=LIMIT_MARGIN_SECS, now=time.time, registry_stale=None):
         """budget: budget.Budget (None = the store's plain spend count); alerter: alerts.Alerter
-        (None = no alerts); digest: digest.Digest, ticked once per pass (None = no digest).
-        main() passes all three."""
+        (None = no alerts); digest: digest.Digest, ticked once per pass (None = no digest);
+        registry_stale: returns why the registry in use is an old one, or None (#1026).
+        main() passes all four."""
         self.store = store
+        self.registry_stale = registry_stale
         self.scheduler = scheduler or Scheduler()
         self.budget = budget
         self.alerter = alerter
         self.digest = digest
+        self.limit_margin = limit_margin
+        self.now = now                   # the clock the usage-limit pause reads (tests set it)
         self.pass_secs = pass_secs
         self.heartbeat = time.time()     # start counts as a beat; the first pass runs at once
         self.passes = 0
@@ -267,7 +283,55 @@ class Supervisor:
             ctx.event("finished", f"task {f.get('task')}: {outcome}" + (f" ({detail})" if detail else ""))
             if outcome == "error":
                 self.store.set_fault(ctx.project_id, f"task {f.get('task')}: {detail or 'worker error'}")
+            if f.get("reset_at"):
+                self.usage_hit(ctx.project_id, f)
         return workers
+
+    # -- the Max usage limit (#960) --
+
+    def usage_hit(self, pid, f):
+        """A run ended on the usage limit: pause every project until its reset plus the margin.
+        A hit during a pause moves the end (later only) and alerts nothing new."""
+        until = float(f["reset_at"]) + self.limit_margin
+        pause = self.store.usage_pause()
+        if pause:
+            if until > pause["until"]:
+                pause.update(until=until, reset_at=float(f["reset_at"]))
+                self.store.set_usage_pause(pause)
+            return
+        now = self.now()
+        pause = {"reset_at": float(f["reset_at"]), "until": until, "since": now,
+                 "project": pid, "task": str(f.get("task"))}
+        self.store.set_usage_pause(pause)
+        self.store.event(pid, "limit", f"Claude usage limit reached (task {f.get('task')}); "
+                                      f"no worker starts before {clock(until)}")
+        if self.alerter is not None:
+            self.alerter.notify(pid, f"usage:{int(now)}:pause",
+                                f"Claude usage limit reached; autopilot paused until {clock(until)}",
+                                f"Task #{f.get('task')} hit the Max plan limit and is requeued "
+                                "with `resume`. No worker starts on any project before then; "
+                                "nothing falls back to a paid model.")
+
+    def usage_paused(self):
+        """The live usage-limit pause, or None. The first call past its end lifts it and posts
+        the one resume alert."""
+        pause = self.store.usage_pause()
+        if not pause:
+            return None
+        if self.now() < pause["until"]:
+            return pause
+        self.store.set_usage_pause(None)
+        self.store.event(pause["project"], "limit", "Claude usage limit reset; autopilot resumes")
+        if self.alerter is not None:
+            self.alerter.notify(pause["project"], f"usage:{int(pause['since'])}:resume",
+                                "Claude usage limit reset; autopilot resumes",
+                                f"Paused since {clock(pause['since'])}. Requeued tasks start "
+                                "again on this pass.")
+        return None
+
+    def _limit_detail(self, pause, waiting, workers):
+        return (f"Claude usage limit reached; resuming at {clock(pause['until'])}; "
+                f"{waiting} task(s) wait" + (f"; {len(workers)} worker(s) finishing" if workers else ""))
 
     def _collect(self, ctx):
         """Reap finished workers and hand them to the merge queue. merge is called on every pass,
@@ -309,9 +373,10 @@ class Supervisor:
             paused = not decision.allowed
         else:
             decision, paused = None, self.budget_exhausted(cfg)
+        limit = self.usage_paused()
         tasks = sch.select_tasks(ctx) or []
         cap = self.project_cap(ctx, cfg)
-        ctx.slots = 0 if paused else self._slots(pid, cfg, cap)
+        ctx.slots = 0 if paused or limit else self._slots(pid, cfg, cap)
         if tasks and ctx.slots:
             started = list(sch.start_workers(ctx, tasks[:ctx.slots]) or [])
             for w in started:
@@ -320,7 +385,9 @@ class Supervisor:
 
         held = {str(w.get("task")) for w in workers}
         waiting = [t for t in tasks if str(t.get("task")) not in held]
-        if paused and waiting:
+        if limit and waiting:
+            state, detail = "waiting", self._limit_detail(limit, len(waiting), workers)
+        elif paused and waiting:
             state, detail = "budget_paused", (
                 f"daily cap ${cfg['daily_cap_usd']:.2f} reached; {len(waiting)} task(s) wait; "
                 "resumes at midnight or when the budget is raised"
@@ -349,6 +416,12 @@ class Supervisor:
         """A pass of a run_mode "once" run: start the one task, or follow it to a final outcome."""
         sch, pid = self.scheduler, ctx.project_id
         once = ctx.project.get("once")
+        if once and any(str(f.get("task")) == str(once["task"]) and f.get("reset_at")
+                        for f in finished):
+            # #960: the usage limit is not the task's outcome. The run stays on and takes the top
+            # task again once the pause is over.
+            self.store.set_once(pid, None)
+            once = None
         if once:
             tid = str(once["task"])
             f = next((f for f in finished if str(f.get("task")) == tid), None)
@@ -394,6 +467,11 @@ class Supervisor:
                 self.budget.mark_paused(pid)
             self.store.finish_pass(pid, "budget_paused", detail, workers)
             return self._alert(pid, finished, [], "budget_paused", detail)
+        limit = self.usage_paused()
+        if limit:
+            detail = self._limit_detail(limit, 1, workers)
+            self.store.finish_pass(pid, "waiting", detail, workers)
+            return self._alert(pid, finished, [], "waiting", detail)
         ctx.slots = min(1, self._slots(pid, cfg, self.project_cap(ctx, cfg)))
         if not ctx.slots:
             detail = f"one task: #{top} ready, every worker slot is taken"
@@ -516,7 +594,8 @@ class Supervisor:
         age = time.time() - self.heartbeat
         return {"ok": self.fatal is None and age <= 3 * self.pass_secs,
                 "heartbeat_age_s": round(age, 1), "pass_secs": self.pass_secs,
-                "passes": self.passes, "fatal": self.fatal}
+                "passes": self.passes, "fatal": self.fatal,
+                "registry_stale": self.registry_stale() if self.registry_stale else None}
 
     def status(self):
         snap = self.store.snapshot()
@@ -538,6 +617,8 @@ class Supervisor:
             except Exception:
                 boards[pid] = None
         boards.update(runnable)
+        # #1093: per-task cost and turns from the ledger beside state.json
+        out["task_costs"] = st.task_totals(os.path.dirname(self.store.path))
         out["runnable"] = sorted(runnable)
         out["boards"] = boards
         return out
@@ -752,7 +833,18 @@ def build_scheduler(alerter=None):
     queue = MergeQueue(project_of=projects.hub_get)
     with_milestones(queue, alert=milestone_alert(alerter) if alerter is not None else None)
     pm = PMClient()
-    return AutopilotScheduler(pm=pm, merger=queue, drafter=CriteriaDrafter(pm))
+    pool = None
+    from autopilot import hybrid
+    try:
+        opted_in = hybrid.any_hybrid(projects.hub_load())
+    except (OSError, projects.ConfigError):
+        opted_in = False    # the pass reports a broken registry itself, as before
+    if opted_in:
+        # #1488: only when a project opts in; otherwise the scheduler builds the legacy pool.
+        from autopilot import worker as wk
+        legacy = wk.WorkerPool(project_of=projects.hub_get, tracker=wk.tracker_reader())
+        pool = hybrid.build_pool(legacy, projects.hub_load, pm)
+    return AutopilotScheduler(pm=pm, merger=queue, drafter=CriteriaDrafter(pm), pool=pool)
 
 
 def main():
@@ -761,13 +853,23 @@ def main():
     token = load_or_make_token()
     if NOMAD not in sys.path:
         sys.path.insert(0, NOMAD)
-    from autopilot import alerts, budget, digest
+    from autopilot import alerts, budget, digest, projects
     store = st.StateStore()
     alerter = alerts.from_env(store)
     sch, bud = build_scheduler(alerter), budget.Budget(store)
     sup = Supervisor(store, sch, budget=bud, alerter=alerter,
-                     digest=digest.Digest(store, alerter, scheduler=sch, budget=bud))
-    srv = make_server(sup, token)
+                     digest=digest.Digest(store, alerter, scheduler=sch, budget=bud),
+                     registry_stale=projects.registry_stale)
+    # Loopback, plus the Docker bridge gateway if NOMAD_BRIDGE_IP names it (#383): the engine
+    # container reaches this API through host.docker.internal.
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "bridge_bind", os.path.join(NOMAD, "dispatcher", "bridge_bind.py"))
+    bridge_bind = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bridge_bind)
+    servers = bridge_bind.http_servers(HOST, PORT, make_handler(sup, token))
+    bridge_bind.start_extra(servers)
+    srv = servers[0]
 
     def run_loop():
         sup.loop()
@@ -782,7 +884,8 @@ def main():
         pass
     finally:
         sup.halt()
-        srv.server_close()
+        for s in servers:
+            s.server_close()
     if sup.fatal:
         sys.exit(3)
 

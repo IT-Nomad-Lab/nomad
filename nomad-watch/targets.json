@@ -6,7 +6,6 @@
     "`hint` is printed inside the alert, so it should say the first thing to try, not describe",
     "the problem again. Set enabled:false to mute a target without losing why it was here."
   ],
-
   "targets": [
     {
       "name": "relay loop",
@@ -55,7 +54,12 @@
       "url": "http://127.0.0.1:5678/webhook/approval",
       "method": "POST",
       "body": {},
-      "status_ok": [200, 400, 401, 403],
+      "status_ok": [
+        200,
+        400,
+        401,
+        403
+      ],
       "hint": "404 here means the Approval Gate workflow is DEACTIVATED, not that n8n is down. This is the outage that hid for three and a half months. `n8n update:workflow --active=true`."
     },
     {
@@ -80,6 +84,8 @@
       "name": "console",
       "type": "http",
       "url": "http://127.0.0.1:1701/healthz",
+      "enabled": false,
+      "_why_off": "v1 nomad-console stopped on purpose 2026-10-02 (#350). Removal from compose is #351; drop this target then.",
       "hint": "`docker compose logs --tail=50 nomad-console`."
     },
     {
@@ -128,7 +134,9 @@
       "name": "OpenProject API",
       "type": "http",
       "url": "http://localhost:8097/api/v3",
-      "status_ok": [401],
+      "status_ok": [
+        401
+      ],
       "hint": "nomad-pm, the work tracker (ADR-011). 401 means it answered and wants a token. Otherwise `cd ~/nomad-pm && docker compose ps && docker compose logs --tail 50 openproject`. A 400 means the Host header is not in OPENPROJECT_ADDITIONAL__HOST__NAMES, which is why this uses localhost, not 127.0.0.1."
     },
     {
@@ -137,6 +145,19 @@
       "path": "~/.local/state/nomad-watch/heartbeat/nomad-pm-backup",
       "max_age_s": 108000,
       "hint": "The nightly OpenProject backup has not succeeded in 30 hours. `journalctl --user -u nomad-pm-backup -n 30`, then rerun with `systemctl --user start nomad-pm-backup`. Backups are in ~/backups/nomad-pm."
+    },
+    {
+      "name": "vault (openbao)",
+      "type": "http",
+      "url": "http://127.0.0.1:8205/v1/sys/health",
+      "hint": "Sealed (503) or down. `docker ps | grep vault`; `systemctl --user status nomad-vault-unseal`; `~/nomad/vault/unseal.sh`. Google MCP is down until it is unsealed."
+    },
+    {
+      "name": "vault backup",
+      "type": "heartbeat",
+      "path": "~/.local/state/nomad-watch/heartbeat/nomad-vault-backup",
+      "max_age_s": 93600,
+      "hint": "The nightly OpenBao raft snapshot did not run. `systemctl --user status nomad-vault-backup.service`; `~/nomad/vault/backup.sh`."
     }
   ]
 }

@@ -3,4 +3,10 @@ uvicorn[standard]>=0.29
 # torchaudio.save() delegates to torchcodec unless soundfile is present; torchcodec has no build for
 # FFmpeg 8, so we install soundfile (libsndfile) to save wavs directly and bypass torchcodec.
 soundfile>=0.12
+# /sfx: Stable Audio Open via diffusers' StableAudioPipeline; its CosineDPMSolver scheduler
+# needs torchsde, without which diffusers swaps in a dummy that raises on load.
+diffusers>=0.30
+torchsde>=0.2.6
+# smoke_test.py
+requests>=2.31
 # torch (CUDA) + acestep are installed by install.sh (they need the cu128 wheel index / git source)

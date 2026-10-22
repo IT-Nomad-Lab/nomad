@@ -5,11 +5,14 @@ argument-hint: <goal text>
 
 Capture the operator's goal into NOMAD v2 by calling the engine, then report what happened.
 
-Run:
+Run this, with the goal text `$ARGUMENTS` written into the JSON body yourself, escaped as a JSON
+string (quotes, backslashes, newlines). The quoted heredoc keeps the shell out of it, and it needs
+no Python, so it works in WSL and in Git Bash on Windows:
 
 ```bash
-curl -s http://localhost:8099/capture -H 'Content-Type: application/json' \
-  -d "$(python3 -c 'import json,sys;print(json.dumps({"goal":" ".join(sys.argv[1:])}))' "$ARGUMENTS")"
+curl -s http://localhost:8099/capture -H 'Content-Type: application/json' --data-binary @- <<'JSON'
+{"goal": "<the goal, JSON-escaped>"}
+JSON
 ```
 
 Then summarize the JSON for the operator: the **run_id**, the **lane** it routed to, the proposed

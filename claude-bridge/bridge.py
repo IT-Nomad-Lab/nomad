@@ -8,7 +8,7 @@ Anthropic API. LiteLLM's `deep` and `balanced` aliases point here.
 - Pure stdlib (no pip installs). Runs NATIVELY in WSL (needs the `claude`
   binary + your ~/.claude login), NOT in a container.
 - Each request shells out to:  claude -p <prompt> --model <opus|sonnet>
-  --system-prompt <sys> --allowedTools "" --setting-sources "" --output-format json
+  --system-prompt <sys> --tools "" --allowedTools "" --setting-sources "" --output-format json
   run in an empty workdir so no project CLAUDE.md / tools leak in.
 
 Caveat: this consumes your Claude Code subscription quota (5-hour windows), not
@@ -20,7 +20,7 @@ import shutil
 import subprocess
 import time
 import uuid
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 
 HOST = os.environ.get("CLAUDE_BRIDGE_HOST", "127.0.0.1")   # loopback only (#821); LiteLLM reaches it via host.docker.internal
 PORT = int(os.environ.get("CLAUDE_BRIDGE_PORT", "8088"))
@@ -37,7 +37,7 @@ BASE_SYSTEM = (
     "as 'Action:' / 'Action Input:' blocks). Do not add commentary that breaks a "
     "requested format."
 )
-# NOTE: Claude Code's own tools are already disabled via --allowedTools "" at the
+# NOTE: Claude Code's own tools are already disabled via --tools "" at the
 # call site, so we must NOT tell the model to avoid tools here — that would fight
 # CrewAI's text-based tool protocol and make agents narrate instead of act.
 
@@ -89,6 +89,7 @@ def call_claude(model, system, prompt):
         CLAUDE, "-p", prompt,
         "--model", model,
         "--system-prompt", system,
+        "--tools", "",  # drops the built-in tool definitions from the request (~20k tokens)
         "--allowedTools", "",
         "--setting-sources", "",
         "--output-format", "json",
@@ -111,6 +112,29 @@ class Handler(BaseHTTPRequestHandler):
         body = json.dumps(obj).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _reply(self, req, completion):
+        """The completion as JSON, or as SSE when the caller asked to stream (#1132). The CLI
+        gives the whole answer at once, so the stream is one content chunk, a stop chunk with
+        usage, and [DONE]. Without this LiteLLM reads the JSON body as an empty stream."""
+        if not req.get("stream"):
+            self._send(200, completion)
+            return
+        base = {k: completion[k] for k in ("id", "created", "model")}
+        base["object"] = "chat.completion.chunk"
+        content = completion["choices"][0]["message"]["content"]
+        chunks = [{**base, "choices": [{"index": 0, "finish_reason": None,
+                                        "delta": {"role": "assistant", "content": content}}]},
+                  {**base, "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                   "usage": completion.get("usage")}]
+        body = b"".join(b"data: " + json.dumps(c).encode() + b"\n\n" for c in chunks)
+        body += b"data: [DONE]\n\n"
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -146,7 +170,7 @@ class Handler(BaseHTTPRequestHandler):
 
         pt = usage.get("input_tokens", 0) + usage.get("cache_read_input_tokens", 0)
         ct = usage.get("output_tokens", 0)
-        self._send(200, {
+        self._reply(req, {
             "id": f"chatcmpl-{uuid.uuid4().hex[:24]}",
             "object": "chat.completion",
             "created": int(time.time()),
@@ -162,5 +186,10 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    import importlib.util   # dispatcher/bridge_bind.py, by path: loopback + NOMAD_BRIDGE_IP (#383)
+    spec = importlib.util.spec_from_file_location("bridge_bind", os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "dispatcher", "bridge_bind.py"))
+    bridge_bind = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bridge_bind)
     print(f"NOMAD Claude bridge on http://{HOST}:{PORT}  (claude={CLAUDE})", flush=True)
-    ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
+    bridge_bind.serve_http(HOST, PORT, Handler)

@@ -1,0 +1,184 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//tmp/**)",
+      "WebSearch",
+      "Read(//mnt/c/Users/josia/AppData/Roaming/Docker/**)",
+      "WebFetch(domain:www.undp.org)",
+      "WebFetch(domain:www.ebrd.com)",
+      "WebFetch(domain:euaci.eu)",
+      "WebFetch(domain:www.eib.org)",
+      "Bash(cd /mnt/c/Users/josia/Projects/RuneMerge *)",
+      "Bash(claude --version)",
+      "Bash(gh auth *)",
+      "mcp__supabase__get_advisors",
+      "mcp__supabase__query_logs",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git switch:*)",
+      "Bash(git checkout:*)",
+      "Bash(git merge:*)",
+      "Bash(git -C:*)",
+      "Bash(/home/jdelimam/nomad/scripts/pm-nocodb-lock.sh:*)",
+      "Bash(~/nomad/scripts/pm-nocodb-lock.sh:*)",
+      "Bash(docker compose:*)",
+      "Bash(blender:*)",
+      "Bash(/home/jdelimam/bin/blender:*)",
+      "Bash(python3 /home/jdelimam/vendor/CLI-Anything/*)",
+      "Bash(bash -n:*)",
+      "Bash(uv run --no-project --with opencv-python-headless *)",
+      "Read(//home/jdelimam/**)",
+      "Read(//mnt/c/Users/josia/Projects/**)",
+      "Bash(git status:*)",
+      "Bash(git log:*)",
+      "Bash(git diff:*)",
+      "Bash(git show:*)",
+      "Bash(git branch:*)",
+      "Bash(git worktree:*)",
+      "Bash(git fetch:*)",
+      "Bash(git rev-parse:*)",
+      "Bash(git merge-base:*)",
+      "Bash(git stash list:*)",
+      "Bash(uvx pytest:*)",
+      "Bash(python3 -m pytest:*)",
+      "Bash(python3 -m unittest:*)",
+      "Bash(docker ps:*)",
+      "Bash(docker logs:*)",
+      "Bash(docker inspect:*)",
+      "Bash(systemctl --user status:*)",
+      "Bash(journalctl --user:*)",
+      "Bash(claude mcp add:*)",
+      "mcp__nomad-pm",
+      "Bash(/home/jdelimam/bin/hostinger-get:*)"
+    ],
+    "deny": [
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(git push --force-with-lease:*)",
+      "Bash(git reset --hard:*)",
+      "Bash(git push --mirror:*)",
+      "Bash(git clean -fdx:*)"
+    ],
+    "defaultMode": "auto",
+    "additionalDirectories": [
+      "/mnt/c/Users/josia/Projects/RuneMerge/Assets/Scripts/UI",
+      "/mnt/c/Users/josia/Projects/RuneMerge/Assets/Scripts/Editor",
+      "/mnt/c/Users/josia/Projects/RuneMerge/Assets/Resources/Levels",
+      "/mnt/c/Users/josia/Projects/RuneMerge/Assets/Resources/Story",
+      "/mnt/c/Users/josia/Projects/RuneMerge/Assets/Scripts/Core/Tiles",
+      "/mnt/c/Users/josia/Projects/RuneMerge/Assets/Scripts/Core",
+      "/home/jdelimam/nomad",
+      "/mnt/c/Users/josia/AppData/Roaming/Docker",
+      "/mnt/c/Users/josia/Projects/RuneMerge/Assets/Tests/PlayMode",
+      "/home/jdelimam/.shift-rec",
+      "/tmp",
+      "/mnt/c/Users/josia/Projects/RuneMerge/Assets/Scripts/Game/Controllers",
+      "/mnt/c/Users/josia/Projects/RuneMerge/Assets/Scripts/Services/Save",
+      "/home/jdelimam/content-creation-backend",
+      "/home/jdelimam/content-creation-app",
+      "/home/jdelimam/bin",
+      "/home/jdelimam/vendor",
+      "/home/jdelimam/nomad-3d"
+    ],
+    "ask": [
+      "Bash(docker compose up:*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Read|Grep|Glob|Edit|Write|NotebookEdit|WebFetch|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$HOME/.claude/hooks/tier-gate.py\""
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/nomad/mcp-local/.venv/bin/python\" \"$HOME/.claude/hooks/nomad-track/track.py\" start",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/nomad/mcp-local/.venv/bin/python\" \"$HOME/.claude/hooks/nomad-track/track.py\" record",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/nomad/mcp-local/.venv/bin/python\" \"$HOME/.claude/hooks/nomad-track/track.py\" end",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  },
+  "enabledPlugins": {
+    "unity@claude-plugins-official": false,
+    "pyright-lsp@claude-plugins-official": true,
+    "typescript-lsp@claude-plugins-official": true,
+    "context7@claude-plugins-official": true,
+    "frontend-design@claude-plugins-official": true,
+    "playwright@claude-plugins-official": false,
+    "gopls-lsp@claude-plugins-official": false,
+    "claude-security@claude-plugins-official": true,
+    "duckdb-skills@claude-plugins-official": false,
+    "productivity@synced": false,
+    "engineering@synced": false,
+    "product-management@synced": false,
+    "searchfit-seo@synced": false,
+    "marketing@synced": false,
+    "product-tracking-skills@synced": false
+  },
+  "tui": "fullscreen",
+  "theme": "dark",
+  "agentPushNotifEnabled": true,
+  "autoMode": {
+    "soft_deny": [
+      "$defaults",
+      "Bash(systemctl stop:*) in this project — systemctl seen 6× in transcripts with no default coverage for service-stop actions",
+      "Bash(crontab -r) in this project — crontab seen only once; removal of all cron jobs is destructive and unverified as intentional"
+    ],
+    "environment": [
+      "### Org-wide",
+      "<trimmed for the fixture>"
+    ]
+  },
+  "env": {
+    "CLAUDE_CODE_DISABLE_1M_CONTEXT": "<redacted>",
+    "CLAUDE_CODE_SUBAGENT_MODEL": "<redacted>",
+    "CLAUDE_CODE_SKIP_PLUGIN_MCP_SERVERS": "<redacted>"
+  },
+  "deniedMcpServers": [
+    {
+      "serverName": "claude.ai Slack"
+    },
+    {
+      "serverName": "claude.ai Claude Docs"
+    },
+    {
+      "serverName": "claude.ai Microsoft 365"
+    },
+    {
+      "serverName": "claude.ai monday.com"
+    }
+  ]
+}

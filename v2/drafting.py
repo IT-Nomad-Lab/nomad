@@ -103,7 +103,7 @@ def _web_search(query: str = "", **_) -> str:
     g = scraper.gather(query, query)
     if not g.get("ok"):
         return f"search failed: {g.get('error') or 'no result'}"
-    return scraper.as_evidence(g) or "search returned nothing"
+    return scraper.as_evidence(g, total=MAX_OBSERVATION) or "search returned nothing"
 
 
 def _read_url(url: str = "", prompt: str = "", **_) -> str:
@@ -117,7 +117,7 @@ def _read_url(url: str = "", prompt: str = "", **_) -> str:
     g = scraper.gather(prompt or "Extract the facts relevant to the request.", url.strip())
     if not g.get("ok"):
         return f"could not read that page: {g.get('error') or 'no result'}"
-    return scraper.as_evidence(g) or "that page returned nothing"
+    return scraper.as_evidence(g, total=MAX_OBSERVATION) or "that page returned nothing"
 
 
 def _recall(query: str = "", **_) -> str:

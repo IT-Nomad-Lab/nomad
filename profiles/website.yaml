@@ -1,0 +1,32 @@
+# A website: static site or CMS front end. Schema and checks: nomad_projects/profiles.py.
+# Gates follow mlv-site (npm ci && npm run build); a project with its own gate keeps it.
+id: website
+title: Website
+description: A marketing, portfolio or content site, static or built from a framework.
+
+interview:
+  ask:
+    - {id: domain, question: "Domain or hosting target? (none yet is fine)", kind: text}
+    - {id: framework, question: "Framework?", kind: single, options: [plain HTML, Astro, Next.js, other]}
+    - {id: design, question: "Is there a Figma or Penpot design to follow?", kind: single, options: [Figma, Penpot, no design yet]}
+    - {id: forms, question: "Does it need a contact form or any server code?", kind: single, options: ['no', 'yes']}
+  skip: []
+
+stack:
+  language: typescript
+  package_manager: npm
+
+policies: [website-default, design-read, docs-audit]
+
+agents:
+  - {role: frontend-ux, lane: dev}
+  - {role: qa-test, lane: dev}
+
+gates:
+  pre_merge: [npm ci, npm run build]
+  milestone: [npm ci, npm run build, npm run lint --if-present]
+
+files: [README.md, Nomad.md, CLAUDE.md]
+
+autopilot:
+  lanes: [dev]

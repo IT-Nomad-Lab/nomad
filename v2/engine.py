@@ -25,9 +25,11 @@ from mcp_content import save_content_impl       # 3B
 from mcp_dev import dispatch_build_impl, check_project, project_ids   # 3B; #851
 from mcp_image import generate_image_impl        # multi-provider: ComfyUI(local) → OpenAI → Firefly (gated)
 from specialists import SPECIALISTS, _IMAGE_WORDS, _prompt   # 3B: config-driven, all lanes (+ visual-ask words)
+from specialists import is_ads_audit, is_ad_account_audit   # T3.1: audit-only ads mode
 import memory                                     # 3C: episodic recall
 import llm
-from pm_openproject import OpenProject, MANAGER, _title, parent_id, pick_next, project_id
+from pm_openproject import (OpenProject, MANAGER, NEXT_STATUSES, _title, parent_id, pick_next,
+                            project_id)
 
 MANAGER_MODEL = "balanced"
 
@@ -84,6 +86,13 @@ _CLAIM = threading.Lock()
 _IN_FLIGHT: set = set()
 
 
+def delete_project_impl(project: str, summary: str = "") -> dict:
+    """The gate's yes for `delete project <id>` from an Open WebUI chat (#1200). Approving runs
+    nothing: the chat runs the steps and reports each one (owui_delete), so this only records the
+    approval. Without the chat's own saved plan, an approved run deletes nothing."""
+    return {"ok": True, "summary": f"approved for {project}; the steps run from the chat"}
+
+
 class Engine:
     def __init__(self, db=None, pm=None, op=None):
         self.db = db or NocoDB()
@@ -93,7 +102,8 @@ class Engine:
         self.specialists = SPECIALISTS
         self.tools = {"send_message": send_message_impl, "save_brief": save_brief_impl,
                       "save_content": save_content_impl, "dispatch_build": dispatch_build_impl,
-                      "generate_image": generate_image_impl}
+                      "generate_image": generate_image_impl,
+                      "delete_project": delete_project_impl}
         # The dispatcher's registry, asked before the gate (#851). Attributes, like `tools`, so a
         # test can stand in for the dispatcher.
         self.check_project, self.project_ids = check_project, project_ids
@@ -154,6 +164,25 @@ class Engine:
                       "failed", f"comms#{cid}")
             raise
 
+    def file_gate(self, goal_title: str, action: str, args: dict, target: str = "",
+                  preview: str = "", lane: str = "dev") -> dict:
+        """File a proposal at the Human Gate directly, with no Manager or specialist: for an action
+        the operator typed as a command (owui_delete, #1200). It waits as `awaiting-approval` like
+        any run and resumes through resume_run with the proposal's hash."""
+        run_id = uuid.uuid4().hex[:12]
+        goal = self.db.create("goals", {"title": goal_title, "status": "routed", "created_at": _now()})
+        proposal = {"action": action, "args": args, "target": target, "preview": preview}
+        comms = self.db.create("comms", {
+            "goal_id": goal["Id"], "run_id": run_id, "from_agent": "operator", "lane": lane,
+            "assigned_agent": lane, "type": "proposal", "status": "awaiting-approval",
+            "priority": "normal", "created_at": _now(),
+            "payload": json.dumps({**proposal, "goal": goal_title, "intent": goal_title,
+                                   "target": target, "task_ref": None})})
+        self._log(run_id, lane, f"{action} filed at the gate", goal_title[:160],
+                  "awaiting approval", f"comms#{comms['Id']}")
+        return {"run_id": run_id, "comms_id": comms["Id"], "goal_id": goal["Id"], "lane": lane,
+                "status": "awaiting-approval", "proposal": proposal}
+
     def _route_and_propose(self, run_id, cid, gid, goal_title, task_ref, task_pm=None):
         task = {"task_ref": task_ref, "task_pm": task_pm} if task_ref else {}
         # Clarify + Route (Manager) — classify the goal to a lane/specialist
@@ -166,7 +195,8 @@ class Engine:
             MANAGER_MODEL,
             "You are NOMAD's Manager. Clarify a goal and ROUTE it to one lane. Lanes: "
             "'comms'=draft/send a message; 'research'=answer a question or gather info; "
-            "'support'=reply to a support request; 'ads'=write marketing copy; "
+            "'support'=reply to a support request; 'ads'=write marketing copy, or audit an ad "
+            "account or campaigns (read-only); "
             "'dev'=a coding task in a repo. Fields: lane, intent (one line), target — "
             "comms/support → recipient email or 'operator'; research/ads → the topic; "
             "dev → the project's registry id, copied exactly (e.g. 'nomad', 'civis-poc'): "
@@ -194,6 +224,13 @@ class Engine:
             lane = "ads"
             if not any(w in intent.lower() for w in _IMAGE_WORDS):
                 intent = goal_title
+        # T3.1: an ad-account audit goes to the ads lane, and its intent is the goal as typed. The
+        # Manager's one-line intent drops the account data the operator pasted, and the audit-only
+        # Skill may only report figures that were supplied, so it must see the original text.
+        if is_ad_account_audit(goal_title):
+            lane = "ads"
+        if lane == "ads" and is_ads_audit(goal_title):
+            intent = goal_title
         if lane == "dev":
             target = self._repick_project(run_id, cid, goal_title, target, ids)
         specialist = self.specialists[lane]
@@ -278,7 +315,7 @@ class Engine:
         # Idempotency for BOTH push + poll: engine-set states (lock/terminal) are never re-processed.
         # These are distinct from the operator's decision states (approved/rejected), so the reject
         # decision is actually handled instead of being mistaken for "already done".
-        if row.get("status") in ("executing", "executed", "declined", "failed"):
+        if row.get("status") in ("executing", "executed", "declined", "failed", "withdrawn"):
             return {"run_id": run_id, "status": row["status"], "note": "already resolved (idempotent)"}
         proposal = json.loads(row.get("payload") or "{}")
         args = proposal.get("args", {})
@@ -401,6 +438,39 @@ class Engine:
                   "operator retried a failed run", "re-queued at the human gate", f"comms#{row['Id']}")
         return {"run_id": run_id, "status": "awaiting-approval", "retried": True}
 
+    def withdraw_run(self, run_id: str, reason: str = "") -> dict:
+        """Close a proposal that should never have been filed, and leave its task where it is.
+
+        Rejecting is a decision about the work: it sets an OpenProject task to Won't do. A stray
+        proposal is no decision at all (#990: a cron queued a parked task and an operator-only
+        one), and by the time anyone sees it the task has usually been moved back by hand. So this
+        only closes the run, as `withdrawn`, and says so on the task. Only a run still waiting at
+        the gate can be withdrawn."""
+        with _CLAIM:
+            if run_id in _IN_FLIGHT:
+                return {"run_id": run_id, "status": "executing", "note": "already being resolved"}
+            _IN_FLIGHT.add(run_id)
+        try:
+            row = self.db.find("comms", "run_id", run_id)
+            if not row:
+                return {"run_id": run_id, "error": "run not found"}
+            if row.get("status") != "awaiting-approval":
+                return {"run_id": run_id, "status": row.get("status"),
+                        "note": "only a run awaiting approval can be withdrawn"}
+            proposal = json.loads(row.get("payload") or "{}")
+            why = (reason or "").strip()[:300] or "no reason given"
+            self.db.update("comms", row["Id"], {"status": "withdrawn"})
+            if proposal.get("task_ref") and proposal.get("task_pm") == OP:
+                self._mirror(self.op.comment, proposal["task_ref"],
+                             f"Run {run_id} was withdrawn: {why}. Nothing ran, and this task's "
+                             "status was left as it is.", as_=row.get("lane") or MANAGER)
+            self._log(run_id, row.get("lane", "?"), proposal.get("action", "action") + " (withdrawn)",
+                      why, "withdrawn — no action taken, task left alone", f"comms#{row['Id']}")
+            return {"run_id": run_id, "status": "withdrawn"}
+        finally:
+            with _CLAIM:
+                _IN_FLIGHT.discard(run_id)
+
     # ── Phase 1A: project → milestone → task orchestration ──────────
     def plan_project(self, title: str, description: str = "") -> dict:
         """Decompose a project goal into milestones + tasks (mission control) via the Manager LLM.
@@ -410,7 +480,8 @@ class Engine:
             MANAGER_MODEL,
             "You are NOMAD's Manager/Planner. Break a PROJECT into a concrete, ordered plan: 2-4 "
             "milestones, each with 1-4 tasks. Each task is ONE actionable unit assignable to a lane "
-            "(comms=send a message; research=gather/answer; support=reply; ads=marketing copy; "
+            "(comms=send a message; research=gather/answer; support=reply; ads=marketing copy or a "
+            "read-only ad account audit; "
             "dev=a coding task in a repo). Give every task a short unique key (t1, t2, ...). In "
             "`after`, list the keys of the tasks that must finish before this one can start; leave "
             "it empty when the order does not matter. Return JSON only: "
@@ -514,11 +585,13 @@ class Engine:
         out.sort(key=lambda x: x["goal_id"], reverse=True)
         return out
 
-    def run_next_task(self, goal_id=None, project=None) -> dict:
+    def run_next_task(self, goal_id=None, project=None, ready_only=False) -> dict:
         """Run the task next_task names through the pipeline (it routes + gates like any run; its
-        execution then marks the task Done). One task at a time — each gets a human gate."""
+        execution then marks the task Done). One task at a time — each gets a human gate.
+        `ready_only` leaves Backlog alone on OpenProject; the NocoDB board has no Ready, so there
+        Backlog stays the queue."""
         if self.pm == OP:
-            return self._op_next(goal_id, project)
+            return self._op_next(goal_id, project, ready_only=ready_only)
         if project is not None:
             return {"error": "a board to pick from needs NOMAD_PM=openproject"}
         return self._nocodb_next(goal_id)
@@ -554,7 +627,12 @@ class Engine:
         or a loop should not be able to fill the gate faster than an operator can read it. One task
         per project rather than `limit` from the first one, so a long project cannot starve the rest.
 
-        A project that fails is reported and stepped over: one broken goal must not stop the sweep."""
+        A project that fails is reported and stepped over: one broken goal must not stop the sweep.
+
+        On OpenProject it takes Ready tasks only (#990). The cockpit's "next" falls back to Backlog
+        because the operator pressed it; nobody presses this one. Backlog is where the operator and
+        the autopilot park work, and the 2026-10-02 run queued a parked task and an operator-only
+        one from there. A task with an open blocker is never taken either way (pick_next)."""
         n = max(1, min(int(limit or 1), self.BACKLOG_MAX))
         started, skipped = [], []
         for g in self.project_goals():
@@ -563,7 +641,7 @@ class Engine:
             if g["total"] and g["done"] >= g["total"]:      # nothing left to pick up
                 continue
             try:
-                r = self.run_next_task(g["goal_id"])
+                r = self.run_next_task(g["goal_id"], ready_only=True)
             except Exception as e:
                 skipped.append({"goal_id": g["goal_id"], "error": str(e)[:200]})
                 continue
@@ -701,7 +779,7 @@ class Engine:
         the moves and comments themselves need no board."""
         return self.op.project_wps(project_id(wp))
 
-    def _op_pick(self, goal_id=None, project=None):
+    def _op_pick(self, goal_id=None, project=None, statuses=NEXT_STATUSES):
         """(the Task or Bug "next" takes, or None; the board by id). Under the Feature `goal_id`,
         or across the whole board `project` (an OpenProject project id) for the cockpit's per-project
         "next". The order is pm_openproject.pick_next's: Ready before Backlog, then priority, then
@@ -715,7 +793,7 @@ class Engine:
             epics, tasks = op.tree(wps, goal_id)
             cands = [t for e in epics for t in tasks[e["id"]]]
         by_id = {w["id"]: w for w in wps}
-        return pick_next(cands, lambda i: op.open_blockers(i, by_id)), by_id
+        return pick_next(cands, lambda i: op.open_blockers(i, by_id), statuses), by_id
 
     def next_task(self, goal_id=None, project=None) -> dict:
         """What "next" would take in this project, without taking it. The chat's and the
@@ -732,16 +810,40 @@ class Engine:
         return {"task_id": t["id"], "task_title": t["subject"], "status": _title(t, "status"),
                 "priority": _title(t, "priority") or "Normal"}
 
-    def _op_next(self, goal_id=None, project=None) -> dict:
+    def _op_next(self, goal_id=None, project=None, ready_only=False) -> dict:
         """Take the task next_task names and send it to the gate."""
         op = self.op
-        nxt, by_id = self._op_pick(goal_id, project)
+        nxt, by_id = self._op_pick(goal_id, project, ("Ready",) if ready_only else NEXT_STATUSES)
         if not nxt:
-            return {"done": True, "note": "no Ready or Backlog task without an open blocker"}
+            return {"done": True, "note": "no Ready " + ("" if ready_only else "or Backlog ")
+                    + "task without an open blocker"}
         if _title(nxt, "status") == "Backlog":
             # The board says why a Backlog task jumped: nothing in the project was Ready.
             op.move(nxt["id"], "Ready", "Picked by \"next\": nothing in this project was Ready, "
                     "so it takes the first Backlog task by priority, then number.")
+        return self._op_gate(nxt, by_id)
+
+    def run_task(self, task_id) -> dict:
+        """Send one named Task or Bug to the gate, as "next" would (an Open WebUI chat's "build
+        that fix", #1146). Only an open task with no open blocker; the run stops at the gate."""
+        if self.pm != OP:
+            return {"error": "running a named task needs NOMAD_PM=openproject"}
+        op = self.op
+        wp = op.get(task_id)
+        kind, status = _title(wp, "type"), _title(wp, "status")
+        if kind not in ("Task", "Bug", "User story"):    # the Dispatch panel sends stories too (#1441)
+            return {"error": f"#{wp['id']} is a {kind}; only a Task, Bug or User story can be built"}
+        if status not in ("New", "Backlog", "Ready", "Blocked", "Changes requested"):
+            return {"error": f"#{wp['id']} is {status}, so it isn't started again"}
+        if op.open_blockers(wp["id"]):
+            return {"error": f"#{wp['id']} has an open blocker"}
+        by_id = {w["id"]: w for w in self._op_board(wp)}
+        if status in ("New", "Backlog"):
+            op.move(wp["id"], "Ready", "Asked for from an Open WebUI chat.")
+        return self._op_gate(wp, by_id)
+
+    def _op_gate(self, nxt, by_id) -> dict:
+        op = self.op
         # The claim is strict: if the task cannot move to In Progress, no run starts for it.
         op.move(nxt["id"], "In Progress", "Picked up by the engine. Routing it through the gate.")
         epic = by_id.get(parent_id(nxt))
@@ -834,9 +936,13 @@ class Engine:
                 continue
             ts = [t for e in epics for t in tasks[e["id"]]]
             done = sum(1 for t in ts if op.closed(_title(t, "status")))
+            # The relay alerts on Blocked tasks every pass; listing them here spares it a /project
+            # call, and a board read, per goal (#1130).
+            blocked = [{"task_id": t["id"], "title": t["subject"], "status": "Blocked",
+                        "lane": op.lane_of(t)} for t in ts if _title(t, "status") == "Blocked"]
             out.append({"goal_id": f["id"], "title": f["subject"], "milestones": len(epics),
                         "done": done, "total": len(ts),
-                        "pct": round(100 * done / len(ts)) if ts else 0})
+                        "pct": round(100 * done / len(ts)) if ts else 0, "blocked": blocked})
         out.sort(key=lambda x: x["goal_id"], reverse=True)
         return out
 

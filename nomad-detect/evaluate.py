@@ -44,6 +44,11 @@ def collect(label: str) -> dict[str, list[tuple[float, int]]]:
 
 
 def main():
+    with binoculars.admitted():
+        _main()
+
+
+def _main():
     eng = binoculars.engine()
     human = collect("human").get("human", [])
     ai = collect("ai")

@@ -1,0 +1,9 @@
+id: game-default
+role: permission
+description: >-
+  Game projects, any engine. One worker at a time (engine test runs are slow and share the GPU).
+  Engine-specific rules come from the engine's policy (e.g. engine-unity), attached once the PRD
+  settles the engine. No extra MCP: local image and audio generation (nomad-image, nomad-audio)
+  are owned by the video service, so a game asks for them by name.
+settings:
+  cap: 1

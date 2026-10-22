@@ -1,0 +1,94 @@
+id: guardrail-agent-bridge
+role: guardrail
+description: >-
+  Layer 1 (PRD docs/prd/project-types-and-inline-asks.md 6.5), imported from the rules of
+  agent-bridge/policy_hook.py (#1392), the PreToolUse hook the agent bridge passes to every
+  Claude Code session it starts for an Open WebUI chat. Patterns are regular expressions (kind
+  command) matched against a Bash command line. Not enforced from here: policy_hook.py stays the
+  live hook, and nomad_policy/compiler.py renders its rule lists from this file and checks they
+  are identical. The hook matches case-sensitively except the database-delete rule; the
+  evaluator matches every command pattern case-insensitively, so it is the stricter of the two.
+  What does not fit a statement stays in policy_hook.py: the shared-checkout commit rule (a
+  commit in ~/nomad without --only, which depends on the working directory), the reason text of
+  each ask, that only Bash calls are checked (but for the cockpit rule), and that a call it cannot parse is let through to
+  the project's own guard and Claude Code's permission rules.
+statements:
+  - sid: bridge-stash
+    effect: deny
+    kind: command
+    # policy_hook.py STASH: the stash stack is shared by every worktree.
+    match:
+      - '\bgit\b(?:\s+-C\s+\S+)?\s+stash\b(?!\s+(?:list|show)\b)'
+  - sid: bridge-cockpit-only
+    effect: deny
+    kind: command
+    # policy_hook.py COCKPIT (#1396): a guardrail is saved only by the operator, from the cockpit.
+    # The hook also denies it in any other tool's path or URL, which a command statement can't say.
+    match:
+      - 'cockpit[-_]token|guardrail[-_]save|X-Nomad-Cockpit'
+  - sid: bridge-force-push
+    effect: deny
+    kind: command
+    # policy_hook.py FORCE.
+    match:
+      - '\bgit\b.*\bpush\b.*(?:\s--force\b|\s-f\b|--force-with-lease|--mirror)'
+  - sid: bridge-ask-git-push
+    effect: ask
+    kind: command
+    # policy_hook.py ASK: "git push".
+    match:
+      - '\bgit\b.*\bpush\b'
+  - sid: bridge-ask-github-pr-release-repo-change
+    effect: ask
+    kind: command
+    # policy_hook.py ASK: "GitHub PR/release/repo change".
+    match:
+      - '\bgh\s+(pr|release|repo)\s+(create|merge|delete)\b'
+  - sid: bridge-ask-recursive-or-forced-delete
+    effect: ask
+    kind: command
+    # policy_hook.py ASK: "recursive or forced delete".
+    match:
+      - '\brm\s+(-[a-zA-Z]*[rf][a-zA-Z]*\s+)+'
+  - sid: bridge-ask-destructive-git
+    effect: ask
+    kind: command
+    # policy_hook.py ASK: "destructive git".
+    match:
+      - '\bgit\b.*\b(reset\s+--hard|clean\s+-[a-z]*f|branch\s+-D|worktree\s+remove)\b'
+  - sid: bridge-ask-docker-delete
+    effect: ask
+    kind: command
+    # policy_hook.py ASK: "docker delete".
+    match:
+      - '\bdocker\s+(compose\s+down\s+.*-v|volume\s+rm|system\s+prune|rm\b)'
+  - sid: bridge-ask-docker-deploy
+    effect: ask
+    kind: command
+    # policy_hook.py ASK: "docker deploy".
+    match:
+      - '\bdocker\s+compose\s+(up|build)\b'
+  - sid: bridge-ask-service-change
+    effect: ask
+    kind: command
+    # policy_hook.py ASK: "service change".
+    match:
+      - '\bsystemctl\b.*\b(restart|stop|disable|enable|start)\b'
+  - sid: bridge-ask-database-delete
+    effect: ask
+    kind: command
+    # policy_hook.py ASK: "database delete" (re.I in the hook).
+    match:
+      - '\b(drop|truncate)\s+(table|database)\b|\bdelete\s+from\b'
+  - sid: bridge-ask-network-exposure
+    effect: ask
+    kind: command
+    # policy_hook.py ASK: "network exposure".
+    match:
+      - '\btailscale\s+(funnel|serve)\b'
+  - sid: bridge-ask-deploy-publish
+    effect: ask
+    kind: command
+    # policy_hook.py ASK: "deploy/publish".
+    match:
+      - '\b(deploy|publish|kubectl\s+(apply|delete)|npm\s+publish|twine\s+upload)\b'

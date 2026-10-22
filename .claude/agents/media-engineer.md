@@ -17,7 +17,7 @@ video, and you own the scheduling problem underneath all of it.
 ## The constraint that defines this role
 
 **There is one RTX 5090 with 24 GB of VRAM, and the models evict each other.** `private`
-(qwen3.6:35b-a3b) takes about 22 GB. `nomad-detect` takes about 6 GB. ComfyUI needs its own. Any two
+(qwen3.6-heretic:35b-a3b) takes about 22 GB. `nomad-detect` takes about 6 GB. ComfyUI needs its own. Any two
 of them cannot coexist, so alternating between them costs a 20 to 60 second reload that shows up as
 unexplained latency somewhere else in the stack.
 

@@ -133,7 +133,8 @@ def detect(inp: DetectIn):
         return {"ok": False, "error": "empty text"}
     sty = style.lint(text)
     try:
-        bino = binoculars.engine().score(text)
+        with binoculars.admitted():
+            bino = binoculars.engine().score(text)
     except Exception as e:                       # a dead GPU must not block the style report
         bino = {"ok": False, "error": str(e)[:300]}
     ext = external.check(text, inp.providers) if inp.external else {}
@@ -159,5 +160,13 @@ def calibrate(inp: CalibrateIn):
 if __name__ == "__main__":
     if EAGER:
         import binoculars
-        binoculars.engine()
-    uvicorn.run(app, host=HOST, port=PORT, log_level="info")
+        if binoculars.DEVICE.startswith("cuda"):     # loads per request under admission (#1462)
+            print("[nomad-detect] eager load skipped on cuda", flush=True)
+        else:
+            binoculars.engine()
+    import importlib.util   # dispatcher/bridge_bind.py, by path: loopback + NOMAD_BRIDGE_IP (#383)
+    spec = importlib.util.spec_from_file_location("bridge_bind", os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "dispatcher", "bridge_bind.py"))
+    bridge_bind = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bridge_bind)
+    bridge_bind.serve_uvicorn(app, HOST, PORT, log_level="info")

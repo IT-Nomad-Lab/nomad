@@ -13,6 +13,8 @@ Environment=OPENAI_API_KEY=
 # Pin a model here only on purpose; empty means the CLI's own default.
 Environment=CODEX_BRIDGE_MODEL=
 Environment=CODEX_BRIDGE_PORT=8089
+# Also listen on the Docker bridge gateway: LiteLLM reaches it there under Docker Engine (#383).
+Environment=NOMAD_BRIDGE_IP=172.17.0.1
 ExecStart=/usr/bin/python3 /home/jdelimam/nomad/codex-bridge/bridge.py
 Restart=always
 RestartSec=3

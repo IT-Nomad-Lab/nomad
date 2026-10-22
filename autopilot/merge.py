@@ -12,7 +12,10 @@ per-project background thread works the queue one branch at a time:
      CONFLICT_LIMIT conflicts in a row the task goes to Blocked instead.
 2. Run the full pre-merge gate in the worktree, step by step, through the same generated
    wrappers the workers use (permissions.write_wrappers), so locks and env apply. `post_test`
-   runs after every test step and every rerun, pass or fail.
+   runs after every test step and every rerun, pass or fail. The entry is marked `gate_started`
+   first: if a restart cuts the gate short, the next pass runs `post_test` and resets the
+   `regenerated` paths before the dirty check (#985). Files whose whole change is the project's
+   `noise` (Unity import noise, #996) are reset before the dirty check on every pass.
    - Results per test suite come from the project's `autopilot.results` format: `exit` (the
      exit code only) or `nunit` (NUnit 3 XML: counts and failing test names). Other steps
      (compile, build) are exit code only.
@@ -21,8 +24,10 @@ per-project background thread works the queue one branch at a time:
      the first green gate records the baseline).
    - A real failure: the first time, `autopilot: resume` with the failing tests (a worker fixes
      it); the second time in a row, Blocked with the failing tests named.
-3. Fast-forward the default branch in the main checkout: `git -C <repo> merge --ff-only <sha>`.
-   - The main checkout must already be on the default branch; nothing is ever checked out.
+3. Fast-forward the default branch, never checking anything out (#1010): `merge --ff-only <sha>`
+   where it is checked out (the main checkout, else any worktree that has it); when nobody has it
+   checked out (the shared main checkout sits on someone's feature branch), a compare-and-swap
+   `git update-ref refs/heads/<default> <sha> <old>`, only when <old> is an ancestor of <sha>.
    - Refused because of local changes (or any reason but "not a fast-forward"): the task goes
      to Awaiting approval (needs operator) with git's reason. Uncommitted files are checksummed
      before and after; nothing is stashed, reset or cleaned. Never pushes.
@@ -47,6 +52,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -61,7 +67,13 @@ if NOMAD not in sys.path:
 
 from autopilot import permissions  # noqa: E402
 from autopilot import projects as projects_mod  # noqa: E402
-from autopilot.worker import default_branch  # noqa: E402
+from autopilot.worker import (  # noqa: E402
+    GrantLedger,
+    config_changes,
+    default_branch,
+    reset_noise,
+    reset_regenerated,
+)
 
 log = logging.getLogger("autopilot.merge")
 
@@ -221,6 +233,37 @@ def merge_in_progress(worktree):
     return bool(f and os.path.exists(f))
 
 
+def checkouts_of(repo, branch):
+    """Every worktree of `repo` (the main checkout included) that has `branch` checked out."""
+    rc, out, _ = git(repo, "worktree", "list", "--porcelain")
+    paths, cur = [], None
+    for line in (out.splitlines() if rc == 0 else []):
+        if line.startswith("worktree "):
+            cur = line[len("worktree "):]
+        elif line == f"branch refs/heads/{branch}":
+            paths.append(cur)
+    return paths
+
+
+def move_ref(repo, branch, sha):
+    """Fast-forward `branch`, checked out nowhere, to `sha` (#1010). Same answers as
+    MergeQueue.fast_forward. `update-ref <ref> <new> <old>` is a compare-and-swap: if the branch
+    moved after we read it, git refuses and the queue's not_ff retry merges again."""
+    ref = f"refs/heads/{branch}"
+    rc, old, err = git(repo, "rev-parse", "--verify", "--quiet", ref)
+    if rc != 0:
+        return "refused", f"`{branch}` does not exist in {repo}"
+    if old == sha:
+        return "merged", ""
+    if git(repo, "merge-base", "--is-ancestor", old, sha)[0] != 0:
+        return "not_ff", f"`{branch}` is at {old[:10]}, which {sha[:10]} does not contain"
+    rc, out, err = git(repo, "update-ref", "-m", f"autopilot: fast-forward to {sha[:10]}",
+                       ref, sha, old)
+    if rc != 0:
+        return "not_ff", _tail(f"{out}\n{err}", 4)
+    return "merged", ""
+
+
 def dirty_checksums(repo):
     """sha256 of every modified or untracked (not ignored) file in a checkout: AC7's proof that
     the operator's local edits are untouched."""
@@ -288,8 +331,22 @@ def _tail(text, n=15):
     return "\n".join(lines[-n:])
 
 
+def gate_argv(network, argv):
+    """argv for one supervisor gate step under the project's `gate_network` (#1530). host: as is.
+    none: in a network namespace of its own (bwrap --unshare-net), which cuts TCP and UDP,
+    loopback included. Unix sockets (Docker's too), the filesystem and the environment are not
+    cut. None when bubblewrap is missing: the caller fails the step and never runs argv."""
+    if network == "host":
+        return list(argv)
+    bwrap = shutil.which("bwrap")
+    if not bwrap:
+        return None
+    return [bwrap, "--unshare-net", "--dev-bind", "/", "/", "--die-with-parent", "--", *argv]
+
+
 class GateRunner:
-    """Runs one project's pre-merge gate in one worktree through its wrappers."""
+    """Runs one project's pre-merge gate in one worktree through its wrappers. Every step,
+    solo rerun and post-test goes through _run, so `gate_network` covers them all."""
 
     def __init__(self, project, wrappers, log_dir, runner=run_command, timeout=GATE_SECS):
         self.project = project
@@ -318,7 +375,15 @@ class GateRunner:
         safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", label)[:80]
         path = os.path.join(self.log_dir, f"{self._n:02d}-{safe}.log")
         start = time.time()
-        code, out = self.runner([wrapper.path, *args], wt, path, self.timeout)
+        argv = gate_argv(self.ap.gate_network, [wrapper.path, *args])
+        if argv is None:
+            out = (f"gate_network is none but bubblewrap (bwrap) is not installed: `{label}` "
+                   "was not run, so it can't run with the network on\n")
+            os.makedirs(self.log_dir, exist_ok=True)
+            with open(path, "w") as f:
+                f.write(out)
+            return 126, out, start, path
+        code, out = self.runner(argv, wt, path, self.timeout)
         return code, out, start, path
 
     def post_test(self, wt):
@@ -335,6 +400,9 @@ class GateRunner:
         """Every gate step in order; stops at the first step with a real failure."""
         baseline = baseline or {}
         steps = []
+        if self.ap.gate_network == "none":
+            log.info("%s: gate network none: TCP and UDP cut, loopback included; Unix sockets "
+                     "(Docker's too), files and the environment are not", self.project.id)
         for i, cmd in enumerate(self.ap.pre_merge_gate):
             suite = self.suite_name(cmd)
             step = Step(name=suite or cmd.render(), test=suite is not None)
@@ -637,13 +705,31 @@ class MergeQueue:
                                             "Recreate it from the branch and report ready to merge again.")
         if merge_in_progress(wt):           # left by an interrupted queue run: ours to abort
             git(wt, "merge", "--abort")
+        ws = permissions.write_wrappers(project, self.state_dir)
+        log_dir = os.path.join(self.state_dir, "merge", pid, f"{tid}-{time.strftime('%Y%m%d-%H%M%S')}")
+        if entry.get("gate_started"):
+            self._clean_interrupted_gate(ctx, entry, project, ws, log_dir)
+        noise = reset_noise(wt, project.autopilot.noise)
+        if noise:
+            ctx.event("merge", f"task {tid}: reset noise {', '.join(noise)}")
         if git(wt, "status", "--porcelain", "--untracked-files=no")[1]:
             return self._resume(ctx, entry, "the worktree has uncommitted changes to tracked files. "
                                             "Commit or restore them, then report ready to merge.")
 
-        ws = permissions.write_wrappers(project, self.state_dir)
-        log_dir = os.path.join(self.state_dir, "merge", pid, f"{tid}-{time.strftime('%Y%m%d-%H%M%S')}")
         pstate = self.state.project(pid)
+
+        # #979, PRD 5.6: a branch that changed agent config without the operator's grant never
+        # merges, whatever the worker reported. Every edit grant the task used in any run counts.
+        granted = GrantLedger(os.path.join(self.state_dir, "grants.json")).granted_edits(pid, tid)
+        config = config_changes(project, wt, granted, self.state_dir, base=default)
+        if config:
+            listed = "\n".join(f"- `{p}`" for p in config)
+            return self._finish(ctx, entry, "needs_operator", OPERATOR,
+                                f"autopilot: needs operator: `{branch}` changed agent config "
+                                f"that no grant named:\n{listed}\n\nNot merged. To accept it, "
+                                "comment `grant: edit <path>` for each path and move the task "
+                                "to Ready; otherwise ask for it to be reverted."
+                                + permissions.deny_glob_note(project, config))
 
         for attempt in (1, 2):
             rc, out, err = git(wt, "merge", "--no-edit", default)
@@ -652,11 +738,12 @@ class MergeQueue:
                 if merge_in_progress(wt):
                     git(wt, "merge", "--abort")
                 if files:
-                    return self._conflict(ctx, entry, default, files.splitlines())
+                    return self._conflict(ctx, entry, default, files.splitlines(), project)
                 return self._resume(ctx, entry, f"merging `{default}` into `{branch}` failed: "
                                                 f"{_tail(err or out, 5)}")
             ctx.event("merge", f"task {tid}: gate running on {branch} (attempt {attempt})")
-            gate = GateRunner(project, ws, log_dir, self.runner, self.gate_secs).run(
+            self._mark_gate_started(pid, tid)
+            gate =GateRunner(project, ws, log_dir, self.runner, self.gate_secs).run(
                 wt, dict(pstate["baseline"]))
             if not gate.ok:
                 return self._gate_failed(ctx, entry, gate, log_dir)
@@ -673,27 +760,52 @@ class MergeQueue:
                                 f"autopilot: needs operator: the gate passed but the fast-forward "
                                 f"of `{default}` in {repo} was refused: {why}\n\n"
                                 f"Nothing was stashed, reset or checked out, and nothing was pushed. "
-                                f"Commit or move the local changes in the main checkout, then move "
+                                f"Commit or move the local changes where `{default}` is checked out, then move "
                                 f"this task back to Ready: a worker resumes on `{branch}` "
                                 f"({sha[:10]}, gate green) and reports it ready to merge again."
                                 "\n\n" + format_table(gate),
                                 gate=gate)
 
+    def _mark_gate_started(self, pid, tid):
+        """Persist that the gate is running on this entry, so a supervisor stopped mid-gate (#985)
+        knows on restart that post_test never ran."""
+        with self.state.lock:
+            for e in self.state.project(pid)["queue"]:
+                if e["task"] == tid:
+                    e["gate_started"] = time.time()
+            self.state.save()
+
+    def _clean_interrupted_gate(self, ctx, entry, project, ws, log_dir):
+        """A restart cut the last gate short (#985): its test process may have outlived the
+        supervisor and rewritten files after post_test should have run. Run post_test and reset
+        the `regenerated` paths now, before the dirty check, so tool output isn't mistaken for
+        uncommitted work. Anything else stays dirty and is reported as before."""
+        wt = entry["worktree"]
+        GateRunner(project, ws, log_dir, self.runner, self.gate_secs).post_test(wt)
+        reset = reset_regenerated(wt, project.autopilot.regenerated)
+        ctx.event("merge", f"task {entry['task']}: cleaned up after an interrupted gate"
+                           + (f" (reset {', '.join(reset)})" if reset else ""))
+
     def fast_forward(self, repo, default, sha):
-        """("merged", "") | ("not_ff", msg) | ("refused", msg). Only ever `merge --ff-only`."""
+        """("merged", "") | ("not_ff", msg) | ("refused", msg). Never checks anything out (#1010).
+
+        Where the default branch is checked out (the main checkout first, else any worktree),
+        `merge --ff-only` runs there. When nobody has it checked out, which is the usual case
+        while other sessions keep the shared main checkout on their own branches, the ref moves
+        with a compare-and-swap `update-ref`, and only forward."""
         rc, cur, _ = git(repo, "branch", "--show-current")
-        if rc != 0 or cur != default:
-            return "refused", (f"the main checkout is on `{cur or 'a detached HEAD'}`, not "
-                               f"`{default}`; the queue never checks out a branch there")
-        before = dirty_checksums(repo)
-        rc, out, err = git(repo, "merge", "--ff-only", sha)
-        after = dirty_checksums(repo)
+        where = repo if rc == 0 and cur == default else next(iter(checkouts_of(repo, default)), None)
+        if where is None:
+            return move_ref(repo, default, sha)
+        before = dirty_checksums(where)
+        rc, out, err = git(where, "merge", "--ff-only", sha)
+        after = dirty_checksums(where)
         changed = [p for p, h in before.items() if after.get(p) != h]
         if changed:     # git promises this can't happen; say so loudly if it ever does
-            log.error("%s: uncommitted files changed during ff-only: %s", repo, changed)
+            log.error("%s: uncommitted files changed during ff-only: %s", where, changed)
         msg = _tail(f"{out}\n{err}", 8)
         if rc == 0:
-            head = git(repo, "rev-parse", "HEAD")[1]
+            head = git(where, "rev-parse", "HEAD")[1]
             if head != sha:
                 return "refused", f"after the fast-forward HEAD is {head[:10]}, expected {sha[:10]}"
             return "merged", ""
@@ -714,7 +826,7 @@ class MergeQueue:
             p["baseline"].update(gate.totals())
             p["tasks"].pop(str(tid), None)
             self.state.save()
-        lines = [f"autopilot: merged `{entry['branch']}` into `{default}` with --ff-only: "
+        lines = [f"autopilot: merged `{entry['branch']}` into `{default}` as a fast-forward: "
                  f"{default} is now {sha}. Not pushed.", "", format_table(gate), ""]
         if gate.known:
             lines.append("Known failures (allowed): " + ", ".join(gate.known))
@@ -730,9 +842,39 @@ class MergeQueue:
             except Exception as e:
                 log.exception("after_merge hook failed")
                 ctx.event("error", f"task {tid}: after-merge hook failed: {type(e).__name__}: {e}")
+        res["cleanup"] = self.clean_up(ctx, project, entry, default)
         return res
 
-    def _conflict(self, ctx, entry, default, files):
+    def clean_up(self, ctx, project, entry, default):
+        """After a merge, and after the after_merge hook (the milestone gate may run in the
+        worktree): remove the task's own `ap-<id>` worktree and its branch (#1011). Returns
+        "removed", "kept" or "skipped". Never forced: a worktree git refuses to remove (local
+        changes, untracked or root-owned files) is kept and logged; the task is Done either way.
+        Only a worktree named ap-<task> under the project's worktree root is ever touched."""
+        tid, branch, wt = entry["task"], entry.get("branch", ""), entry.get("worktree", "")
+        repo, root = project.repo, project.autopilot.worktree_root
+        real = os.path.realpath
+        if not (wt and root and os.path.basename(wt.rstrip("/")) == f"ap-{tid}"
+                and os.path.dirname(real(wt)) == real(root) and real(wt) != real(repo)):
+            return "skipped"
+        if os.path.isdir(wt):
+            rc, out, err = git(repo, "worktree", "remove", wt)
+            if rc != 0 or os.path.exists(wt):
+                ctx.event("merge", f"task {tid}: kept the worktree {wt}: "
+                                   + (_tail(f"{out}\n{err}", 2) or "the directory is still there"))
+                return "kept"
+        ref = f"refs/heads/{branch}"
+        rc, tip, _ = git(repo, "rev-parse", "--verify", "--quiet", ref)
+        if branch and rc == 0 and not checkouts_of(repo, branch) \
+                and git(repo, "merge-base", "--is-ancestor", tip, f"refs/heads/{default}")[0] == 0:
+            rc, out, err = git(repo, "update-ref", "-d", ref, tip)
+            if rc != 0:
+                why = _tail(f"{out}\n{err}", 2)
+                ctx.event("merge", f"task {tid}: kept the branch {branch}: {why}")
+        ctx.event("merge", f"task {tid}: removed the worktree {wt}")
+        return "removed"
+
+    def _conflict(self, ctx, entry, default, files, project=None):
         with self.state.lock:
             ts = self._task_state(ctx.project_id, entry["task"])
             ts["conflicts"] += 1
@@ -753,7 +895,8 @@ class MergeQueue:
                             "conflicts keeping both sides' intent, run the pre-merge gate, commit, "
                             "and report ready to merge. The queue aborted its own merge; the "
                             f"branch is as the worker left it. (Conflict {n} of {CONFLICT_LIMIT} "
-                            "before the task is Blocked.)", conflicts=files)
+                            "before the task is Blocked.)"
+                            + permissions.deny_glob_note(project, files), conflicts=files)
 
     def _gate_failed(self, ctx, entry, gate, log_dir):
         with self.state.lock:

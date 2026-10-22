@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- NOMAD cockpit mark. Same style as the content-creation and Open WebUI marks
+       (owui/brand/nomad-owui-logo.svg): a rounded square (radius 25%), a white lucide-style line
+       icon at half its size (24-unit grid, stroke 2, round caps). Blue instead of orange so the
+       tab is told apart. The icon: lucide "gauge", the cockpit instrument. -->
+  <rect width="512" height="512" rx="128" fill="#2f6fed"/>
+  <g transform="translate(128 128) scale(10.6667)" fill="none" stroke="#ffffff" stroke-width="2"
+     stroke-linecap="round" stroke-linejoin="round">
+    <path d="m12 14 4-4"/>
+    <path d="M3.34 19a10 10 0 1 1 17.32 0"/>
+  </g>
+</svg>

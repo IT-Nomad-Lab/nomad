@@ -2,7 +2,8 @@
 
 No Instagram request is made: metadata, comments, frames and transcripts are read back from the
 batch folder. Only items whose analysis failed are retried (pass --all to redo every item), then
-report.md / items.json / metrics.csv are rewritten.
+report.md / items.json / metrics.csv are rewritten. The output being replaced is copied to
+prev-<time>/ first.
 
 Written 2026-09-22 after Gemini's free tier (20 requests/day) ran out 16 items into an 80-link
 batch. Pick the model with NOMAD_SOCIAL_VISION_MODELS, e.g. `private` when the GPU is free:
@@ -15,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
 import time
 from pathlib import Path
 
@@ -52,6 +54,21 @@ def main():
     results = json.loads((root / "items.json").read_text())
     todo = [r for r in results if r.get("media") and (a.all or r["analysis"].get("error"))]
     print(f"{len(todo)} of {len(results)} to analyse with {analyze.VISION_MODELS}", flush=True)
+
+    # Everything below rewrites in place, so keep the run being replaced: batch files plus each
+    # per-item analysis.json, under prev-<time>/ with the item folder names.
+    if todo:
+        prev = root / time.strftime("prev-%Y%m%d-%H%M%S")
+        prev.mkdir()
+        for name in ("items.json", "report.md", "metrics.csv"):
+            if (root / name).exists():
+                shutil.copy2(root / name, prev / name)
+        for rec in todo:
+            src = Path(rec["dir"]) / "analysis.json"
+            if src.exists():
+                (prev / src.parent.name).mkdir(exist_ok=True)
+                shutil.copy2(src, prev / src.parent.name / "analysis.json")
+        print(f"prior output kept in {prev.name}/", flush=True)
 
     for n, rec in enumerate(todo, 1):
         t0 = time.time()

@@ -37,7 +37,7 @@ still gates).
 | `server.py` | FastAPI/uvicorn HTTP service + the human-gate entry. Cockpit `/`, API, SSE `/events`. |
 | `engine.py` | The pipeline state machine: `start_run`, `resume_run`, `retry_run`, project planning. |
 | `specialists.py` | One generic, config-driven `Specialist` per lane. Add a lane = a skill file + an MCP tool + one `LANES` entry. |
-| `skills/` | Per-lane skill briefs (system prompts): `comms`, `research`, `dev`, `support`, `ads`. |
+| `skills/` | Per-lane skill briefs (system prompts): `comms`, `research`, `dev`, `support`, `ads`, plus `ads_audit` ("Claude Ads", T3.1: the ads lane's read-only audit of Google, Meta and LinkedIn ad accounts). |
 | `runtime.py` | Pluggable specialist runtime — **Claude Agent SDK** native (default) with automatic **LiteLLM** fallback. |
 | `llm.py` | LiteLLM gateway helper (role aliases only). |
 | `nocodb.py` | Minimal stdlib NocoDB client (the source of truth). |
@@ -60,6 +60,7 @@ still gates).
 | `POST /resume {run_id, decision}` | Resume a paused run (`approved`/`rejected`). |
 | `POST /nocodb-hook` | **The gate:** a comms status flip resumes the run. |
 | `POST /retry` | Re-queue a failed run at the gate. |
+| `POST /withdraw` | `{run_id, reason}`: close a stray proposal without deciding it; the task keeps its status. Local only. |
 | `GET /runs` · `GET /run?id=` | Recent runs / run drill-down for the cockpit. |
 | `GET /events` | SSE push for live cockpit refresh. |
 | `POST /generate-image` | Gated image generation (ComfyUI → OpenAI → Firefly fallback chain). |
@@ -87,7 +88,8 @@ python3 setup_nocodb.py                      # ensure the NocoDB schema/tables e
 
 ## Tests
 
-Plain Python scripts (no pytest harness). Run on the host with the NocoDB stack up and
+Most tests run offline under pytest; the offline command is in [`../AGENTS.md`](../AGENTS.md)
+(Test & verify). These four need the live stack, on the host with NocoDB up and
 `NC_*` / `LITELLM_*` set in `.env`:
 
 ```bash
@@ -117,7 +119,11 @@ NOMAD_PM_LIVE=1 python3 -m pytest test_pm_live.py -q          # real OpenProject
 | `NOMAD_AUTO_ADVANCE` | `1` | Auto-queue the next task in a project (still gates). |
 | `NOMAD_PM` | `nocodb` | Where projects live: `nocodb` (mc_goals, milestones, tasks) or `openproject` (Feature > Epic > Task). Reversible. |
 | `NOMAD_PM_URL` / `NOMAD_PM_PROJECT` | `localhost:8097` / `nomad-work` | The OpenProject instance and the project the engine plans into. A task on any other board the manager can read runs, moves and closes on its own board. Lane tokens come from `openproject-tokens.json`. |
-| `NOMAD_PM_OPERATOR_ID` | `4` in compose | The operator's OpenProject user id: their watches and @mentions reach Zulip, their own edits are skipped. Unset, nothing is watched. |
+| `NOMAD_PM_OPERATOR_ID` | `4` in compose | The operator's OpenProject user id: their watches and @mentions reach Zulip, their own edits are skipped. Unset, nothing is watched. It is also whose queue the chat's `pm_my_queue` reads. |
+| `NOMAD_CHAT_PM_AS` | `nomad-chat` | The token the chat's read-only nomad-pm tools (`chat_pm_tools.py`) read OpenProject with; `nomad-manager`'s when the file has none. The tools send GET only, whatever the token allows. |
+| `NOMAD_CHAT_MAX_TURNS` | `6` | Most model turns one chat reply may take on the Agent SDK. The chat's tools are `server.CHAT_TOOL_ALLOWLIST`, nothing else (#970). Past the cap the reply says it stopped and gives what it has. With the tool-result cap below, this is a reply's cost bound: the chat runs on the local Claude login, so a reply costs turns and tool output read, not billed tokens. |
+| `NOMAD_CHAT_TIMEOUT_S` | `60` | Wall-clock limit for one chat reply, on the SDK path and on the no-tools LiteLLM fallback. Past it the operator gets a message saying the chat stopped, not silence. Closing the SDK after a cut may take up to 10 s more. |
+| `NOMAD_CHAT_TOOL_RESULT_MAX` | `8000` | Characters of one tool result the chat model reads. A longer result is cut and says so. |
 | `NOMAD_PM_PUBLIC_URL` | `http://localhost:8097` | Base of the OpenProject links posted to Zulip and the cockpit. |
 | `NOMAD_PM_HOOK_SECRET_FILE` | `/term-secret/openproject-webhook.secret` | The webhook secret, made by `~/nomad-pm/seed.sh`. |
 | `NOMAD_COCKPIT_URL` | `http://localhost:8099` | Base of the run link written into a task's Cockpit link field. |

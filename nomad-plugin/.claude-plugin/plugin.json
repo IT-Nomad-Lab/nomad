@@ -1,7 +1,7 @@
 {
   "name": "nomad",
   "version": "0.1.0",
-  "description": "NOMAD v2 — explicit pipeline orchestrator. Capture → Clarify → Route → Process → Human Gate → Execute → Log&Learn across specialist lanes (comms/research/support/ads/dev), on NocoDB-on-Postgres. Bundles the build-team agents, the irreversible-action guard hook, operator slash-commands, and the lane MCP servers.",
+  "description": "NOMAD v2 — explicit pipeline orchestrator. Capture → Clarify → Route → Process → Human Gate → Execute → Log&Learn across specialist lanes (comms/research/support/ads/dev), on NocoDB-on-Postgres. Bundles the build-team agents, operator slash-commands, and the lane MCP servers (run in WSL through nomad-operator's launcher, on both hosts). The red tier is nomad-operator's tier gate.",
   "author": { "name": "Josias" },
   "homepage": "http://localhost:8099",
   "keywords": ["nomad", "orchestrator", "agents", "pipeline", "human-in-the-loop"]

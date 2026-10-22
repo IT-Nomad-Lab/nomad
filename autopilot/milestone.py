@@ -2,7 +2,7 @@
 5.6, 5.7; task #872).
 
 It plugs into the merge queue's `after_merge(ctx, result)` hook, so it runs in the queue's own
-thread right after a local `--ff-only` merge, before the next branch is merged:
+thread right after a local fast-forward, before the next branch is merged:
 
     q = MergeQueue(...)
     with_milestones(q)                      # q.after_merge = MilestoneGate(... shared with q)

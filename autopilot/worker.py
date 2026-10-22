@@ -21,7 +21,8 @@ permission_denials) and finds the `autopilot: result <outcome>` marker the share
 (AUTONOMY.template.md section 7) make every run leave. Outcomes returned to the supervisor:
 
     merge            "ready to merge"
-    resume           "resume", the time limit ran out, or the operator killed the run
+    resume           "resume", the time limit ran out, the operator killed the run, or the run
+                     hit the Max usage limit (#960: it also carries `reset_at`, see usage_limit.py)
     needs_operator   "needs operator"
     failed           "failed", no marker, or the run crashed
     error            the run's first shell command was refused and no later one got through
@@ -31,6 +32,7 @@ Workers never merge; the merge queue (#871) does.
 
 Run the tests: uv run --no-project --with pytest --with pyyaml python -m pytest autopilot -q
 """
+import fnmatch
 import glob
 import importlib.util
 import json
@@ -46,8 +48,14 @@ from dataclasses import dataclass, field
 
 try:
     from . import projects as projects_mod
+    from . import state as state_mod
+    from .adapters import ClaudeAdapter
+    from .usage_limit import clock, usage_limited
 except ImportError:  # imported as a top-level module (tests, scripts)
     import projects as projects_mod
+    import state as state_mod
+    from adapters import ClaudeAdapter
+    from usage_limit import clock, usage_limited
 
 log = logging.getLogger("autopilot.worker")
 
@@ -60,6 +68,25 @@ KILL_GRACE_SECS = 10
 RULES = os.path.expanduser(os.environ.get("NOMAD_AUTOPILOT_RULES", "~/nomad/docs/AUTONOMY.md"))
 RULES_DRAFT = os.path.join(NOMAD, "autopilot", "AUTONOMY.template.md")
 SHELL_TOOLS = ("Bash",)
+# Set on every worker run. A key blanked so the run bills the MAX login, not the API. Background
+# tasks off (#985): `claude -p` exits when its turn ends and kills what it started, so a test run
+# with run_in_background died with the worker and the run posted no result.
+# Token budget (#1088): the 1M window off so a run compacts at 200K instead of ~967K (two ap-888
+# subagents ran at 525-934K context per call), subagents on Sonnet instead of inheriting the
+# run's model, and no fast mode (2x Opus rates, billed to usage credits).
+WORKER_ENV = {"ANTHROPIC_API_KEY": "", "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1",
+              "CLAUDE_CODE_DISABLE_1M_CONTEXT": "1", "CLAUDE_CODE_SUBAGENT_MODEL": "sonnet",
+              "CLAUDE_CODE_DISABLE_FAST_MODE": "1"}
+# Per-run caps (#1088). Set from 378 runs to 2026-10-12: turns p99 99, max 144; list-price cost
+# p99 $4.74. On the Max plan the budget is Claude Code's list-price estimate, used as a token meter.
+# An empty value drops the flag.
+WORKER_MODEL = os.environ.get("NOMAD_AUTOPILOT_MODEL", "sonnet")
+WORKER_MAX_TURNS = os.environ.get("NOMAD_AUTOPILOT_MAX_TURNS", "150")
+WORKER_MAX_BUDGET_USD = os.environ.get("NOMAD_AUTOPILOT_MAX_BUDGET_USD", "10")
+FOREGROUND_RULE = ("Run every command in the foreground, with a timeout long enough for the whole "
+                   "run (up to 600000 ms). Never use run_in_background or Monitor, and never end "
+                   "your turn while a command is still running: your session exits when your turn "
+                   "ends, and anything it started is killed with it.")
 
 OUTCOMES = {"ready to merge": "merge", "resume": "resume",
             "needs operator": "needs_operator", "failed": "failed"}
@@ -137,6 +164,101 @@ def reset_regenerated(path, regenerated):
     return reset
 
 
+def reset_noise(path, noise):
+    """Reset tracked files whose whole change is noise (#996) to HEAD in the worktree at `path`,
+    index and working tree. `noise` is the project's Noise rules: a modified file matching a rule's
+    glob is reset only when its content differs from HEAD by nothing but what the rule allows
+    (see projects.NOISE_RULES). A file with any other change is left alone, so real edits still
+    block the dirty check or get committed. Returns the paths that were reset."""
+    if not noise:
+        return []
+    changed = git(path, "diff", "HEAD", "--name-only", "--diff-filter=M", "--no-renames", "-z")
+    reset = []
+    for rel in (p for p in changed.split("\0") if p):
+        rules = [n for n in noise if fnmatch.fnmatchcase(rel, n.glob)]
+        if not rules:
+            continue
+        head = subprocess.run(["git", "-C", path, "show", f"HEAD:{rel}"], capture_output=True, timeout=60)
+        try:
+            with open(os.path.join(path, rel), "rb") as f:
+                work = f.read().decode("utf-8")
+            old = head.stdout.decode("utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if head.returncode != 0 or old == work:
+            continue
+        if any(_is_noise(n, old, work) for n in rules):
+            git(path, "restore", "--source=HEAD", "--staged", "--worktree", "--", rel, check=True)
+            reset.append(rel)
+    if reset:
+        log.info("%s: reset noise %s", path, ", ".join(reset))
+    return reset
+
+
+def _is_noise(rule, old, new):
+    if rule.rule == "only-keys":
+        return _only_keys_changed(old, new, rule.keys)
+    if rule.rule == "unity-default-platforms":
+        return _only_default_platforms_added(old, new)
+    return False
+
+
+def _only_keys_changed(old, new, keys):
+    """Same lines, except lines `<indent><key>: ...` with a listed key and the same indent."""
+    a, b = old.splitlines(keepends=True), new.splitlines(keepends=True)
+    if len(a) != len(b):
+        return False
+    pat = re.compile(r"^(\s*)([^\s:#][^:]*):")
+    for x, y in zip(a, b):
+        if x == y:
+            continue
+        mx, my = pat.match(x), pat.match(y)
+        if not (mx and my and mx.groups() == my.groups() and mx.group(2) in keys):
+            return False
+    return True
+
+
+def _platform_settings(text):
+    """(lines before, [entry text], lines after) for the first block `<indent>platformSettings:`
+    whose list entries sit at the key's indent (Unity's style), or None when there is none."""
+    lines = text.splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        m = re.match(r"^( *)platformSettings:\s*$", line)
+        if m:
+            break
+    else:
+        return None
+    ind, j, entries = m.group(1), i + 1, []
+    while j < len(lines) and lines[j].startswith(ind + "- "):
+        k = j + 1
+        while k < len(lines) and lines[k].startswith(ind + "  "):
+            k += 1
+        entries.append("".join(lines[j:k]))
+        j = k
+    return "".join(lines[:i + 1]), entries, "".join(lines[j:])
+
+
+def _only_default_platforms_added(old, new):
+    """The new .meta is the old one plus whole `platformSettings` entries, each for a platform
+    the old one lacks and each with `overridden: 0`; everything else byte-identical."""
+    a, b = _platform_settings(old), _platform_settings(new)
+    if a is None or b is None or a[0] != b[0] or a[2] != b[2]:
+        return False
+    target = re.compile(r"^\s+buildTarget:\s*(\S+)\s*$", re.MULTILINE)
+    have = {t for e in a[1] for t in target.findall(e)}
+    p, added = 0, 0
+    for e in b[1]:
+        if p < len(a[1]) and e == a[1][p]:
+            p += 1
+            continue
+        t = target.findall(e)
+        if len(t) != 1 or t[0] in have or not re.search(r"^\s+overridden: 0\s*$", e, re.MULTILINE):
+            return False
+        have.add(t[0])
+        added += 1
+    return p == len(a[1]) and added > 0
+
+
 @dataclass
 class Worktree:
     path: str
@@ -147,7 +269,7 @@ class Worktree:
     dirty: bool            # an existing worktree held uncommitted changes; kept as is
 
 
-def ensure_worktree(repo, root, task_id, title="", regenerated=()):
+def ensure_worktree(repo, root, task_id, title="", regenerated=(), noise=()):
     """`<root>/ap-<id>` on `feat/<id>-<slug>` from the default branch.
 
     - The worktree already exists: keep it exactly as it is (dirty or not) and report.
@@ -155,7 +277,8 @@ def ensure_worktree(repo, root, task_id, title="", regenerated=()):
     - Neither: new branch from the default branch.
     Never resets, stashes, cleans or deletes anything, with one exception: before an existing
     worktree's dirty check, the project's `regenerated` paths are reset to HEAD (see
-    reset_regenerated). Those are tool output nobody edits by hand."""
+    reset_regenerated), and so are files whose whole change is `noise` (see reset_noise). Those
+    are tool output nobody edits by hand."""
     if git(repo, "rev-parse", "--is-inside-work-tree") != "true":
         raise WorkerError(f"{repo} is not a git repository")
     base = default_branch(repo)
@@ -167,6 +290,7 @@ def ensure_worktree(repo, root, task_id, title="", regenerated=()):
         if not branch:
             raise WorkerError(f"{path} is on a detached HEAD; left alone")
         reset_regenerated(path, regenerated)
+        reset_noise(path, noise)
         return Worktree(path, branch, base, created=False, new_branch=False, dirty=is_dirty(path))
     os.makedirs(root, exist_ok=True)
     branch = existing_task_branch(repo, task_id)
@@ -180,6 +304,7 @@ def ensure_worktree(repo, root, task_id, title="", regenerated=()):
                 raise WorkerError(f"{branch} is checked out in the main checkout {repo}; "
                                   "switch it back to the default branch to let the autopilot resume")
             reset_regenerated(held, regenerated)
+            reset_noise(held, noise)
             if is_dirty(held):
                 raise WorkerError(f"{branch} is checked out in {held} with uncommitted changes; "
                                   "commit or free that worktree to let the autopilot resume")
@@ -208,13 +333,150 @@ def generated_settings(state_dir):
     """settings_for(project, worktree_path, task_id) -> (settings path, [Wrapper]): the reviewed
     template plus the project's entry, and its command wrappers, written under `state_dir`.
     Raises projects.ConfigError when the entry would widen the template."""
-    def settings_for(project, worktree, task_id):
-        return _permissions().write(project, worktree, state_dir=state_dir, task_id=task_id)
+    def settings_for(project, worktree, task_id, grants=(), facts=None, refused=None):
+        return _permissions().write(project, worktree, state_dir=state_dir, task_id=task_id,
+                                    grants=grants, facts=facts, refused=refused)
     return settings_for
 
 
 def cli_args(settings_path):
     return _permissions().cli_args(settings_path)
+
+
+# ---- grants (#979, docs/prd/ap-permission-grants.md 5.4) --------------------------------------
+
+def _grant(d):
+    """A tasks.Grant from the dict a selected task carries."""
+    try:
+        from .tasks import Grant
+    except ImportError:
+        from tasks import Grant
+    return Grant.of(d)
+
+
+def grant_facts(repo, worktree, branch):
+    """permissions.GrantFacts for a run in `worktree` on `branch`: the default branch, every file
+    in the worktree (tracked and untracked, ignored ones too: an exact re-deny must cover them),
+    the branches worktrees hold and the worktree paths."""
+    files = git(worktree, "ls-files", "-c", "-o").splitlines()
+    held, paths = set(), set()
+    for line in git(repo, "worktree", "list", "--porcelain").splitlines():
+        if line.startswith("worktree "):
+            paths.add(os.path.normpath(line[len("worktree "):]))
+        elif line.startswith("branch refs/heads/"):
+            held.add(line[len("branch refs/heads/"):])
+    return _permissions().GrantFacts(default_branch(repo), branch, tuple(dict.fromkeys(files)),
+                                     frozenset(held), frozenset(paths))
+
+
+def _iso_epoch(s):
+    """An OpenProject createdAt (ISO 8601, `Z` or an offset) as epoch seconds; 0 if unreadable."""
+    from datetime import datetime
+    try:
+        return datetime.fromisoformat((s or "").replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return 0.0
+
+
+class GrantLedger:
+    """grants.json in the state folder: per task, the grants a run used (each opens one run
+    only), the refused lines already reported (one `grant ignored` comment per line) and when
+    its last run started (edit grants count only from comments posted after that)."""
+
+    def __init__(self, path):
+        self.path = path
+
+    def _load(self):
+        try:
+            with open(self.path) as f:
+                d = json.load(f)
+            return d if isinstance(d, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def _save(self, d):
+        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        _write_json(self.path, d)
+
+    def task(self, pid, tid):
+        t = self._load().get(f"{pid}/{tid}") or {}
+        return {"used": t.get("used") or [], "reported": t.get("reported") or [],
+                "started": t.get("started") or 0.0}
+
+    def _update(self, pid, tid, fn):
+        d = self._load()
+        t = d.setdefault(f"{pid}/{tid}", {"used": [], "reported": [], "started": 0.0})
+        fn(t)
+        self._save(d)
+
+    def use(self, pid, tid, grants, started=None):
+        """Record `grants` as used by a run that started at `started` (now when None)."""
+        def fn(t):
+            for g in grants:
+                if g.key not in [u["key"] for u in t["used"]]:
+                    t["used"].append({**g.as_dict(), "key": g.key})
+            t["started"] = time.time() if started is None else started
+        self._update(pid, tid, fn)
+
+    def report(self, pid, tid, keys):
+        def fn(t):
+            t["reported"] = list(dict.fromkeys(t["reported"] + list(keys)))
+        self._update(pid, tid, fn)
+
+    def used_keys(self, pid, tid):
+        return {u["key"] for u in self.task(pid, tid)["used"]}
+
+    def granted_edits(self, pid, tid):
+        """Paths every edit grant this task used, in any run, names (PRD 5.6)."""
+        return {u["arg"] for u in self.task(pid, tid)["used"] if u.get("action") == "edit"}
+
+    def unreported(self, pid, tid, refused):
+        """The refused lines not reported yet and not a grant some run already used."""
+        t = self.task(pid, tid)
+        seen = set(t["reported"]) | {u["key"] for u in t["used"]}
+        return [r for r in refused if r["key"] not in seen]
+
+
+def changed_paths(worktree, base):
+    """Paths the branch changed against `base` (three-dot: its own changes only, not what a
+    merge of `base` brought in) plus uncommitted and untracked ones, relative, sorted."""
+    out = set(git(worktree, "diff", "--name-only", f"{base}...HEAD").splitlines())
+    for line in git(worktree, "status", "--porcelain", "--untracked-files=all").splitlines():
+        p = line[3:]
+        out.update(x.strip('"') for x in p.split(" -> "))
+    return sorted(p for p in out if p)
+
+
+def config_changes(project, worktree, granted, state_dir, base=None):
+    """The changed paths (changed_paths) that a template Edit deny covers and no edit grant in
+    `granted` names: agent config the branch changed without the operator's grant (PRD 5.6).
+    Project deny_edit_globs are left out: those guard tool-made files, not config (#979)."""
+    P = _permissions()
+    base = base or default_branch(project.repo)
+    t = P.render_template(worktree, project.repo, state_dir)["permissions"]
+    rules = [r[len("Edit("):-1] for r in t.get("deny", []) if r.startswith("Edit(")]
+    out = []
+    for p in changed_paths(worktree, base):
+        if p in granted:
+            continue
+        full = os.path.normpath(os.path.join(worktree, p))
+        if any(P._edit_matches(r, full, worktree, True) for r in rules):
+            out.append(p)
+    return out
+
+
+def usable_grants(task, ledger, pid, last_start):
+    """The task's grants a run may use now: not used before, no merge (the queue's), and an
+    edit only from a comment posted after the task's last run started."""
+    used = ledger.used_keys(pid, task["task"])
+    out = []
+    for g in (_grant(d) for d in task.get("grants") or ()):
+        if g.key in used or g.action == "merge":
+            continue
+        if g.action == "edit" and _iso_epoch(g.created) <= last_start:
+            continue
+        out.append(g)
+    return out
 
 
 # ---- the prompt -------------------------------------------------------------------------------
@@ -234,6 +496,10 @@ def _describe(cmd):
     if cmd.env:
         extra.append("env " + " ".join(f"{k}={v}" for k, v in cmd.env.items()))
     return f"`{cmd.run}`" + (f" ({'; '.join(extra)})" if extra else "")
+
+
+GATE_ONLY_NOTE = ("  PRE-MERGE GATE ONLY: never run it while building; it runs once, in the "
+                  "pre-merge gate, before you report ready to merge.")
 
 
 def commands_block(project, wrappers=None):
@@ -259,7 +525,9 @@ def commands_block(project, wrappers=None):
                      "filter; the raw command is refused by your permissions. `[filter]` is one "
                      "optional test filter argument.")
     for name, c in ap.test.items():
-        lines.append(f"- test `{name}`: {call(c)}" + ("" if wrappers else "  ({filter} = optional test filter)"))
+        gate_only = ap.loop_tests and name not in ap.loop_tests
+        lines.append(f"- test `{name}`: {call(c)}" + ("" if wrappers else "  ({filter} = optional test filter)")
+                     + (GATE_ONLY_NOTE if gate_only else ""))
     if ap.pre_merge_gate:
         lines.append("- pre-merge gate, in order: " + ", ".join(call(c) for c in ap.pre_merge_gate))
     if ap.build:
@@ -270,10 +538,20 @@ def commands_block(project, wrappers=None):
         lines.append(f"- known failures: {', '.join(sorted(ap.known_failures))}")
     if ap.flake_set:
         lines.append(f"- flake set: {', '.join(sorted(ap.flake_set))}")
+    lines.append(FOREGROUND_RULE)
     return "\n".join(lines)
 
 
-def build_prompt(project, task, wt, deadline, wrappers=None):
+def grants_block(grants):
+    """The prompt's grant paragraph (PRD 5.4), or "" when the run has none."""
+    if not grants:
+        return ""
+    return ("For this run only, the operator granted:\n"
+            + "\n".join(f"- `{g.line}`" for g in grants)
+            + "\nUse each once, for the named target only. Nothing else in section 2 changes.")
+
+
+def build_prompt(project, task, wt, deadline, wrappers=None, grants=()):
     tid = task["task"]
     title = task.get("title") or task.get("subject") or ""
     parts = [
@@ -312,6 +590,8 @@ def build_prompt(project, task, wt, deadline, wrappers=None):
     elif not wt.new_branch:
         parts.append("The branch already existed: an earlier run worked on this task. Read the "
                      "task's latest `autopilot: resume` comment and continue from there.")
+    if grants:
+        parts.append(grants_block(grants))
     if wt.dirty:
         parts.append("The worktree holds uncommitted changes from an earlier run. They are that "
                      "run's work: review them, keep what belongs to the task, and commit.")
@@ -382,6 +662,9 @@ def parse_stream(path):
         elif t == "result":
             out["result"] = ev.get("result")
             out["cost_usd"] = float(ev.get("total_cost_usd") or 0)
+            out["num_turns"] = ev.get("num_turns")
+            out["model_usage"] = ev.get("modelUsage") or {}
+            out["session_id"] = ev.get("session_id")
             out["is_error"] = bool(ev.get("is_error"))
             out["subtype"] = ev.get("subtype")
             out["denials"] = [
@@ -401,6 +684,25 @@ def parse_stream(path):
     return out
 
 
+def project_caps(project):
+    """cap_args with the project's own `model` and `max_budget_usd`, where it sets them."""
+    ap = project.autopilot
+    return cap_args(model=(ap and ap.model) or None,
+                    max_budget_usd=ap.max_budget_usd if ap else None)
+
+
+def cap_args(model=None, max_turns=None, max_budget_usd=None):
+    """--model, --max-turns and --max-budget-usd for a worker run; an empty value leaves its flag out."""
+    out = []
+    for flag, val in (("--model", WORKER_MODEL if model is None else model),
+                      ("--max-turns", WORKER_MAX_TURNS if max_turns is None else max_turns),
+                      ("--max-budget-usd", WORKER_MAX_BUDGET_USD if max_budget_usd is None
+                       else max_budget_usd)):
+        if str(val).strip():
+            out += [flag, str(val).strip()]
+    return out
+
+
 def judge(parsed, tracker_marker=None, returncode=None, stderr_tail="", tracker_checked=False):
     """(outcome, detail) for a run that ended by itself."""
     calls = parsed["shell_calls"]
@@ -417,6 +719,12 @@ def judge(parsed, tracker_marker=None, returncode=None, stderr_tail="", tracker_
     if marker and text and marker != text:
         notes.append(f"final message says {text!r}, tracker says {marker!r}; using the tracker")
     outcome = marker or text
+    if not outcome and parsed["is_error"] and str(parsed["subtype"] or "").startswith("error_max_"):
+        # #1088: stopped by --max-turns or --max-budget-usd. The branch holds real work, so the
+        # operator decides whether to raise the cap, split the task or drop it.
+        return "needs_operator", "; ".join([f"run stopped at its cap ({parsed['subtype']}); "
+                                            f"raise NOMAD_AUTOPILOT_MAX_TURNS/_MAX_BUDGET_USD or "
+                                            f"split the task"] + notes[1:])
     if not outcome:
         return "failed", "; ".join(["no `autopilot: result` marker in the final message"
                                     + (" or the task's nomad-pm comments" if tracker_checked else "")] + notes)
@@ -562,7 +870,7 @@ class WorkerPool:
     (default: generated_settings, the #875 profile); tracker(task_id) -> outcome or None."""
 
     def __init__(self, project_of=None, settings_for=None, tracker=None, claude=None,
-                 run_secs=None, state_dir=None):
+                 run_secs=None, state_dir=None, adapter=None):
         self.project_of = project_of or projects_mod.hub_get
         self.state_dir = state_dir or STATE_DIR
         self.settings_for = settings_for or generated_settings(self.state_dir)
@@ -571,6 +879,40 @@ class WorkerPool:
         self.run_secs = RUN_SECS if run_secs is None else run_secs
         self.runs = {}          # (project, task) -> Run
         self.start_errors = {}  # project -> the last start_workers' failures
+        self.ledger = GrantLedger(os.path.join(self.state_dir, "grants.json"))
+        self.adapter = adapter or ClaudeAdapter(parse_stream=parse_stream, kill_group=_kill_group,
+                                               adopt=Adopted)
+
+    def last_start(self, pid, tid):
+        """When the task's last run started (epoch seconds), from the ledger and the run records
+        on disk; 0 if it never ran."""
+        out = self.ledger.task(pid, tid)["started"]
+        for f in glob.glob(os.path.join(self.state_dir, "runs", pid, f"{tid}-*.run.json")):
+            try:
+                with open(f) as fh:
+                    out = max(out, float(json.load(fh).get("started") or 0))
+            except (OSError, ValueError, TypeError):
+                continue
+        return out
+
+    def _grant_settings(self, project, task, wt):
+        """(settings, wrappers, applied grants, refused [{key, line, reason}]) for a task whose
+        grants open something this run, or None when it has none to use (#979)."""
+        tid = str(task["task"])
+        usable = usable_grants(task, self.ledger, project.id, self.last_start(project.id, tid))
+        if not usable:
+            return None
+        refused = []
+        try:
+            settings, wrappers = self.settings_for(project, wt.path, tid, grants=usable,
+                                                   facts=grant_facts(project.repo, wt.path,
+                                                                     wt.branch),
+                                                   refused=refused)
+        except (projects_mod.ConfigError, _permissions().ConfigError) as e:
+            raise WorkerError(f"the grants for task {tid} gave no valid profile: {e}") from e
+        bad = {g.key for g, _ in refused}
+        return (settings, wrappers, [g for g in usable if g.key not in bad],
+                [{"key": g.key, "line": g.line, "reason": why} for g, why in refused])
 
     def live(self, pid=None):
         return [r for r in self.runs.values()
@@ -595,8 +937,9 @@ class WorkerPool:
         planned = os.path.join(root, f"ap-{tid}")
         if settings is None:
             settings, wrappers = self.settings_for(project, planned, tid)
+        ap = project.autopilot
         wt = ensure_worktree(project.repo, root, tid, task.get("title") or task.get("subject") or "",
-                             regenerated=project.autopilot.regenerated if project.autopilot else ())
+                             regenerated=ap.regenerated if ap else (), noise=ap.noise if ap else ())
         if settings_path is None and os.path.realpath(wt.path) != os.path.realpath(planned):
             # An adopted lane (#944): rules rendered for ap-<id> would refuse every edit and every
             # `git -C <worktree>` write in the folder the run actually starts in. Adoption creates
@@ -606,6 +949,12 @@ class WorkerPool:
             except (projects_mod.ConfigError, _permissions().ConfigError) as e:
                 raise WorkerError(f"{wt.branch} is checked out in {wt.path}, which cannot get a "
                                   f"worker profile: {e}") from e
+        grants, refused = [], []
+        if settings_path is None and task.get("grants"):
+            # Rendered again now the worktree exists: an edit grant re-denies its files (#979).
+            relaxed = self._grant_settings(project, task, wt)
+            if relaxed:
+                settings, wrappers, grants, refused = relaxed
 
         runs_dir = os.path.join(self.state_dir, "runs", project.id)
         os.makedirs(runs_dir, exist_ok=True)
@@ -615,15 +964,16 @@ class WorkerPool:
 
         now = time.time()
         deadline = now + self.run_secs
-        cmd = [self.claude, "-p", prompt or build_prompt(project, task, wt, deadline, wrappers),
-               *cli_args(settings), "--verbose", "--output-format", "stream-json"]
+        cmd = self.adapter.command(self.claude, prompt or build_prompt(
+            project, task, wt, deadline, wrappers, grants), cli_args(settings), project_caps(project))
         with open(log_path, "wb") as out, open(err_path, "wb") as err:
-            proc = subprocess.Popen(cmd, cwd=wt.path, stdout=out, stderr=err,
-                                    stdin=subprocess.DEVNULL, start_new_session=True,
-                                    env={**os.environ, "ANTHROPIC_API_KEY": ""})
+            proc = self.adapter.launch(cmd, cwd=wt.path, stdout=out, stderr=err,
+                                       env={**os.environ, **WORKER_ENV})
+        self.ledger.use(project.id, tid, grants, now)     # a launch that failed used none
         run = Run(project.id, tid, wt.path, wt.branch, log_path, err_path, settings, proc,
                   now, deadline, pid_start=proc_start(proc.pid), record=record_path(log_path))
-        run.reported = {"dirty": wt.dirty, "created": wt.created, "new_branch": wt.new_branch}
+        run.reported = {"dirty": wt.dirty, "created": wt.created, "new_branch": wt.new_branch,
+                        "grants": [g.line for g in grants], "grants_refused": refused}
         _write_json(run.record, run.record_data())
         self.runs[key] = run
         return run
@@ -654,34 +1004,58 @@ class WorkerPool:
     # -- collect --
 
     def _finish(self, run):
-        parsed = parse_stream(run.log)
+        parsed = self.adapter.parse(run.log)
         denials = parsed["denials"]
         requeue = False
+        reset_at = None
         if run.killed == "lost" and parsed["result"] is not None:
             run.killed = ""          # it ended by itself while the supervisor was down: judge it
-        if run.killed:
-            why = {"timeout": "time limit reached", "operator": "killed by the operator",
-                   "lost": "the run ended without a result while the supervisor was down"}[run.killed]
-            outcome, detail = "resume", f"{why}; branch {run.branch} kept"
-            requeue = True
-        else:
-            tail = ""
+        tail = ""
+        if not run.killed:
             try:
                 with open(run.stderr, errors="replace") as f:
                     tail = f.read()[-500:].strip()
             except OSError:
                 pass
+            final = parsed["result"] if parsed["result"] is not None else parsed["last_text"]
+            reset_at = usage_limited(final, tail)
+        if run.killed:
+            why = {"timeout": "time limit reached", "operator": "killed by the operator",
+                   "lost": "the run ended without a result while the supervisor was down"}[run.killed]
+            outcome, detail = "resume", f"{why}; branch {run.branch} kept"
+            requeue = True
+        elif reset_at is not None:
+            # #960: the Max plan ran out mid-run. Not the task's fault: it resumes after the reset.
+            outcome, detail = "resume", (f"Claude usage limit reached; resuming at {clock(reset_at)}; "
+                                         f"branch {run.branch} kept")
+            requeue = True
+        else:
             tracker = None
             if self.tracker and parsed["result"] is not None:
                 tracker = self.tracker(run.task)
             outcome, detail = judge(parsed, tracker, run.proc.returncode, tail,
                                     tracker_checked=bool(self.tracker))
+        config = self._config_check(run) if outcome == "merge" else []
+        if config:
+            outcome = "needs_operator"
+            detail = "; ".join(p.strip("()") if p.startswith("(") else
+                               f"the run changed {p}, which no grant named" for p in config)
         out = {"task": run.task, "outcome": outcome, "cost_usd": parsed["cost_usd"],
                "detail": detail, "denials": denials, "result": parsed["result"],
                "branch": run.branch, "worktree": run.worktree, "log": run.log,
                "elapsed_s": round(time.time() - run.started, 1),
                # the supervisor, not the run, decided `resume`: nothing told the tracker yet
                "requeue": requeue}
+        if reset_at is not None:
+            out["reset_at"] = reset_at   # the supervisor starts no worker anywhere until then
+        if config:
+            out["config_changes"] = config   # the scheduler moves the task to Awaiting approval
+        state_mod.append_ledger(self.state_dir, {
+            "at": time.time(), "project": run.project, "task": run.task,
+            "branch": run.branch, "session_id": parsed.get("session_id"),
+            "num_turns": parsed.get("num_turns"), "total_cost_usd": parsed["cost_usd"],
+            "modelUsage": parsed.get("model_usage") or {}, "outcome": outcome,
+            "detail": (detail or "")[:500], "elapsed_s": out["elapsed_s"], "log": run.log})
         if run.record:
             try:
                 _write_json(run.record, {**run.record_data(), "collected": outcome,
@@ -689,6 +1063,22 @@ class WorkerPool:
             except OSError as e:
                 log.warning("run record %s not updated: %s", run.record, e)
         return out
+
+    def _config_check(self, run):
+        """config_changes for a run that reported ready to merge, against every edit grant the
+        task used (#979, PRD 5.6). A project with no autopilot block isn't checked."""
+        try:
+            project = self.project_of(run.project)
+        except Exception:
+            project = None
+        if project is None or getattr(project, "autopilot", None) is None:
+            return []
+        try:
+            return config_changes(project, run.worktree,
+                                  self.ledger.granted_edits(run.project, run.task),
+                                  self.state_dir)
+        except Exception as e:      # fails closed: the branch isn't queued, the operator looks
+            return [f"(the config-path check could not run: {type(e).__name__}: {e})"]
 
     def collect(self, ctx, now=None):
         """Scheduler hook. Kill runs past their deadline, then report every run that ended."""
@@ -699,7 +1089,7 @@ class WorkerPool:
                 continue
             if run.proc.poll() is None and now >= run.deadline:
                 run.killed = "timeout"
-                _kill_group(run.proc)
+                self.adapter.terminate(run.proc)
             if run.proc.poll() is None:
                 continue
             done.append(self._finish(run))
@@ -746,7 +1136,7 @@ class WorkerPool:
             if not rec.get("log"):
                 ctx.event("recover", f"task {t}: stored worker has no run log; dropped")
                 continue
-            proc = Adopted(rec.get("pid"), rec.get("pid_start"))
+            proc = self.adapter.adopt(rec.get("pid"), rec.get("pid_start"))
             started = rec.get("started") or time.time()
             run = Run(pid, t, rec.get("worktree", ""), rec.get("branch", ""), rec["log"],
                       rec.get("stderr") or rec["log"][:-len(".jsonl")] + ".stderr",
@@ -786,7 +1176,7 @@ class WorkerPool:
             return
         for run in self.live(ctx.project_id):
             run.killed = "operator"
-            _kill_group(run.proc)
+            self.adapter.terminate(run.proc)
 
 
 def worktree_root(project):

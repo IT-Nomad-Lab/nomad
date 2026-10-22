@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- NOMAD Open WebUI mark (#1218). The content-creation app's logo style: an orange #f97316
+       rounded square (radius 25%), a white lucide-style line icon at half its size (24-unit
+       grid, stroke 2, round caps). The icon: a chat bubble holding a routed "N". -->
+  <rect width="512" height="512" rx="128" fill="#f97316"/>
+  <g transform="translate(128 128) scale(10.6667)" fill="none" stroke="#ffffff" stroke-width="2"
+     stroke-linecap="round" stroke-linejoin="round">
+    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+    <path d="M8.5 13V7l7 6V7"/>
+  </g>
+</svg>

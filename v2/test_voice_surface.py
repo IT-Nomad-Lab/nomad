@@ -108,6 +108,25 @@ def test_the_chat_has_one_entry_point_that_takes_text():
     assert "function csendMsg(capture){" in PAGE
 
 
+def test_a_spoken_turn_is_flagged_voice_and_a_typed_one_is_not():
+    """#973. Voice keeps approve and capture; the typed box is information-only. The page says
+    which one a turn is, because the engine must not guess it from the words."""
+    i = PAGE.index("async function csend(")
+    block = PAGE[i:i + 1600]
+    assert "voice:!!speak" in block
+    assert "function csendMsg(capture){ const m=cin.value; cin.value=''; return csend(m, capture, false); }" in PAGE
+
+
+def test_the_capture_button_posts_to_capture_not_to_the_chat():
+    """PRD cockpit-chat-tools 5.1: ⚑ Capture stays, and stops sharing /chat, so /chat has no
+    write path from the cockpit."""
+    i = PAGE.index("async function csend(")
+    block = PAGE[i:i + 1600]
+    assert "post('/capture',{goal:msg})" in block
+    assert "capture:!!capture" not in PAGE
+    assert "document.getElementById('ccap').onclick=()=>csendMsg(true);" in PAGE
+
+
 def test_a_spoken_turn_is_spoken_back():
     i = PAGE.index("async function csend(")
     assert "if(speak) await vspeak(r.reply)" in PAGE[i:i + 1600]
@@ -122,7 +141,7 @@ def test_speaking_resolves_only_when_it_has_finished():
 
 
 def test_an_action_turn_refreshes_the_board():
-    """The router files captures and clears the gate now, so a chat turn can move the pipeline.
+    """A capture, or a spoken approve or capture, can move the pipeline.
     A page that does not re-read after that shows the operator the state from before they spoke."""
     i = PAGE.index("async function csend(")
     assert "r.intent && r.intent!=='chat'" in PAGE[i:i + 1600]

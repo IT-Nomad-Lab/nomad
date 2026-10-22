@@ -97,7 +97,10 @@ class StateStore:
 
     def _empty(self):
         return {"schema": SCHEMA, "config": dict(DEFAULT_CONFIG), "projects": {},
-                "spend": {"date": date.today().isoformat(), "usd": 0.0}}
+                "spend": {"date": date.today().isoformat(), "usd": 0.0},
+                # #960: the Max usage limit was hit. {"reset_at", "until", "since", "project",
+                # "task"}; no worker starts on any project before `until`.
+                "usage_pause": None}
 
     def _load(self):
         if not os.path.exists(self.path):
@@ -134,6 +137,8 @@ class StateStore:
             base["projects"][pid] = rec
         if isinstance(data.get("spend"), dict):
             base["spend"].update(data["spend"])
+        if isinstance(data.get("usage_pause"), dict):
+            base["usage_pause"] = data["usage_pause"]
         return base
 
     def save(self):
@@ -352,8 +357,102 @@ class StateStore:
             self._roll_spend()
             return copy.deepcopy(self._data["spend"])
 
+    def usage_pause(self):
+        """A copy of the usage-limit pause (#960), or None."""
+        with self._lock:
+            p = self._data.get("usage_pause")
+            return dict(p) if p else None
+
+    def set_usage_pause(self, pause):
+        """Record the usage-limit pause, or None to forget it. Persisted, so a restart keeps it."""
+        with self._lock:
+            self._data["usage_pause"] = dict(pause) if pause else None
+        self.save()
+
     def add_spend(self, usd):
         with self._lock:
             self._roll_spend()
             self._data["spend"]["usd"] += float(usd or 0)
         self.save()
+
+
+# ---- cost ledger (#1093) ----------------------------------------------------------------------
+
+LEDGER_FILE = "cost-ledger.jsonl"
+
+
+def append_ledger(state_dir, line):
+    """Append one JSON line for a collected run. Never raises: a ledger that cannot be written
+    must not stop a run being collected."""
+    try:
+        os.makedirs(state_dir, exist_ok=True)
+        with open(os.path.join(state_dir, LEDGER_FILE), "a") as f:
+            f.write(json.dumps(line, sort_keys=True) + "\n")
+    except OSError as e:
+        log.warning("cost ledger not written: %s", e)
+
+
+def task_totals(state_dir):
+    """{project: {task: {"cost_usd", "turns", "runs"}}} from the ledger.
+
+    A result reports its whole conversation, so after `--resume` two lines of one session_id
+    carry the later total, not an increment: the last line per session counts, and the task
+    total sums over sessions. A line with no session_id counts on its own."""
+    last = {}
+    try:
+        with open(os.path.join(state_dir, LEDGER_FILE)) as f:
+            for n, raw in enumerate(f):
+                try:
+                    e = json.loads(raw)
+                except ValueError:
+                    continue
+                if not isinstance(e, dict) or e.get("task") is None or e.get("event"):
+                    continue
+                last[(str(e.get("project")), str(e["task"]), e.get("session_id") or f"#{n}")] = e
+    except OSError:
+        return {}
+    out = {}
+    for (pid, tid, _), e in last.items():
+        t = out.setdefault(pid, {}).setdefault(tid, {"cost_usd": 0.0, "turns": 0, "runs": 0})
+        t["cost_usd"] = round(t["cost_usd"] + float(e.get("total_cost_usd") or 0), 6)
+        t["turns"] += int(e.get("num_turns") or 0)
+        t["runs"] += 1
+    return out
+
+
+ESCALATE_AFTER = 3          # #1109: failed runs in a row before a task goes to the operator
+
+
+def failed_streak(state_dir, project, task):
+    """Failed runs of one task in a row, newest back, from the ledger. A run with any other
+    outcome, or an `escalated` event, ends the streak; a `resume` (timeout, usage limit) is
+    neither a failure nor a success, so it is skipped."""
+    lines = []
+    try:
+        with open(os.path.join(state_dir, LEDGER_FILE)) as f:
+            for raw in f:
+                try:
+                    e = json.loads(raw)
+                except ValueError:
+                    continue
+                if (isinstance(e, dict) and str(e.get("project")) == str(project)
+                        and str(e.get("task")) == str(task)):
+                    lines.append(e)
+    except OSError:
+        return 0
+    n = 0
+    for e in reversed(lines):
+        if e.get("event") == "escalated":
+            break
+        if e.get("event") or e.get("outcome") == "resume":
+            continue
+        if e.get("outcome") != "failed":
+            break
+        n += 1
+    return n
+
+
+def note_escalated(state_dir, project, task):
+    """Mark that the task went to the operator, so its failed streak starts again."""
+    append_ledger(state_dir, {"at": time.time(), "project": project, "task": task,
+                              "event": "escalated"})

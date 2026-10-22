@@ -1,0 +1,15 @@
+[Unit]
+Description=NOMAD monthly agent-docs-audit (read-only checks, report to Zulip)
+After=default.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/jdelimam/nomad/nomad-watch
+Environment=HOME=/home/jdelimam
+Environment=PYTHONUNBUFFERED=1
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=NOMAD_ZULIPRC=/home/jdelimam/.config/nomad/zulip-bot.zuliprc
+ExecStart=/home/jdelimam/nomad/nomad-relay/.venv/bin/python docs_audit.py
+TimeoutStartSec=900
+UMask=0077
+NoNewPrivileges=true

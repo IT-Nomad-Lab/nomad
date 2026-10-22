@@ -259,7 +259,7 @@ def test_zulip_channel_posts_to_the_stream_with_the_project_as_topic(tmp_path):
     url, kw = http.calls[0]
     assert url == "https://z.test/api/v1/messages"
     assert kw["auth"] == ("bot@z.test", "k123")
-    assert kw["data"]["to"] == "autopilot" and kw["data"]["topic"] == "runematch"
+    assert kw["data"]["to"] == "runematch" and kw["data"]["topic"] == "autopilot"   # #1123
     assert kw["data"]["type"] == "stream" and "task #1 failed" in kw["data"]["content"]
 
 
@@ -268,6 +268,25 @@ def test_zulip_channel_raises_on_an_api_error(tmp_path):
                          http=FakeHTTP(FakeResp(400, {"result": "error", "msg": "Stream does not exist"})))
     with pytest.raises(RuntimeError, match="Stream does not exist"):
         ch.send("rm", "t", "")
+
+
+def test_zulip_channel_uses_the_board_and_falls_back_to_autopilot():
+    class Seq(FakeHTTP):
+        def __init__(self, resps):
+            super().__init__()
+            self.resps = resps
+
+        def post(self, url, **kw):
+            self.calls.append((url, kw))
+            return self.resps.pop(0)
+    http = Seq([FakeResp(400, {"result": "error", "msg": "Channel 'civis' does not exist"}), FakeResp()])
+    al.ZulipChannel("https://z.test", "b", "k", http=http).send("civis-poc", "t", "")
+    assert [(c[1]["data"]["to"], c[1]["data"]["topic"]) for c in http.calls] == \
+        [("civis", "autopilot"), ("autopilot", "civis-poc")]
+    http = FakeHTTP()
+    al.ZulipChannel("https://z.test", "b", "k", http=http).send("nomad-public", "t", "")   # no board
+    assert [(c[1]["data"]["to"], c[1]["data"]["topic"]) for c in http.calls] == [("autopilot", "nomad-public")]
+    assert al.project_stream("nomad") == "nomad-work" and al.project_stream("Bad!") is None
 
 
 def test_email_channel_posts_to_n8n_with_the_token_and_operator_address():

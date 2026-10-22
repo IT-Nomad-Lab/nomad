@@ -1,0 +1,10 @@
+[Unit]
+Description=NOMAD hybrid execution: nightly attempt-store backup (#1488)
+
+[Timer]
+# After pm-backup (03:30).
+OnCalendar=*-*-* 03:45
+Persistent=true
+
+[Install]
+WantedBy=timers.target

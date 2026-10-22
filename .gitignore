@@ -1,5 +1,5 @@
 # ── internal planning docs (not for public release) ────────────────
-docs/
+/docs/
 
 # ── secrets (NEVER commit) ──────────────────────────────────────────
 .env

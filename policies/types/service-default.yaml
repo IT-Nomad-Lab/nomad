@@ -1,0 +1,7 @@
+id: service-default
+role: permission
+description: >-
+  API and backend projects. Database guidance comes from postgres-skills. supabase (live
+  projects) and the hostinger-* servers (VPS, hosting) stay off; a service asks for them by name.
+settings:
+  cap: 2

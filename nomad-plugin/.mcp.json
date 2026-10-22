@@ -1,20 +1,48 @@
 {
   "mcpServers": {
     "nomad-comms": {
-      "command": "python3",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/mcp_comms.py"]
+      "command": "git",
+      "args": [
+        "-c",
+        "alias.nomad-run=!bash",
+        "nomad-run",
+        "${CLAUDE_PLUGIN_ROOT}/bin/nomad-run",
+        "lane-mcp",
+        "comms"
+      ]
     },
     "nomad-research": {
-      "command": "python3",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/mcp_research.py"]
+      "command": "git",
+      "args": [
+        "-c",
+        "alias.nomad-run=!bash",
+        "nomad-run",
+        "${CLAUDE_PLUGIN_ROOT}/bin/nomad-run",
+        "lane-mcp",
+        "research"
+      ]
     },
     "nomad-content": {
-      "command": "python3",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/mcp_content.py"]
+      "command": "git",
+      "args": [
+        "-c",
+        "alias.nomad-run=!bash",
+        "nomad-run",
+        "${CLAUDE_PLUGIN_ROOT}/bin/nomad-run",
+        "lane-mcp",
+        "content"
+      ]
     },
     "nomad-dev": {
-      "command": "python3",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/mcp_dev.py"]
+      "command": "git",
+      "args": [
+        "-c",
+        "alias.nomad-run=!bash",
+        "nomad-run",
+        "${CLAUDE_PLUGIN_ROOT}/bin/nomad-run",
+        "lane-mcp",
+        "dev"
+      ]
     }
   }
 }

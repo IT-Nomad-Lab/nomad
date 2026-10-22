@@ -1,0 +1,16 @@
+[Unit]
+Description=NOMAD Ollama relay (Docker bridge gateway :11434 -> Windows Ollama via the WSL NAT gateway)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Docker Engine only (#383). Under Docker Desktop host.docker.internal already reaches Windows.
+# The bind is IP_FREEBIND, so it doesn't wait for docker0.
+Environment=NOMAD_BRIDGE_IP=172.17.0.1
+ExecStart=/usr/bin/python3 %h/nomad/ollama-relay/relay.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

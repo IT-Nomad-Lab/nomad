@@ -1,0 +1,530 @@
+{
+  "cloud-autopilot": {
+    "board": [
+      "BOARDS = [\n  [\"nomad-work\", \"NOMAD work\"], [\"civis\", \"Civis\"],\n  [\"nomad-portfolio\", \"NOMAD Portfolio\"],\n  [\"tide-log\", \"Tide Log\"]\n].freeze\n"
+    ],
+    "console": [
+      {
+        "lane": "dev",
+        "owner": "Josias",
+        "repo": "",
+        "stack": "python, fastapi",
+        "status": "Planning",
+        "title": "Tide Log"
+      }
+    ],
+    "dispatch": [
+      [
+        "/new-project",
+        {
+          "description": "I never know when low tide is.",
+          "id": "tide-log",
+          "lane": "dev",
+          "local_only": false,
+          "name": "Tide Log",
+          "prd": "# PRD: Tide Log\n\n## Problem and why now\nTides.",
+          "register": false,
+          "stack": [
+            "python",
+            "fastapi"
+          ]
+        }
+      ],
+      [
+        "/register-project",
+        {
+          "autopilot": true,
+          "id": "tide-log",
+          "local_only": false
+        }
+      ],
+      [
+        "/seed-board",
+        {
+          "board": "tide-log",
+          "name": "Tide Log"
+        }
+      ],
+      [
+        "/project-stream",
+        {
+          "id": "tide-log"
+        }
+      ]
+    ],
+    "models": [
+      [
+        "prd",
+        "balanced",
+        true
+      ],
+      [
+        "plan",
+        "balanced",
+        true
+      ]
+    ],
+    "registry": [
+      "  - id: tide-log\n    path: tide-log\n    autopilot:                       # + New project; the switch starts off\n      test: \"echo 'No test command yet: set it in projects.yaml' >&2; exit 1\"   # the first milestone sets the real one\n"
+    ],
+    "roadmap": [
+      [
+        "create",
+        "nomad-portfolio",
+        "Initiative",
+        "Tide Log",
+        null,
+        "manager",
+        "From the approved PRD: `/home/op/tide-log/docs/PRD.md`."
+      ],
+      [
+        "create",
+        "tide-log",
+        "Feature",
+        "M1: A tide table page",
+        900,
+        "manager",
+        "From the approved PRD: `/home/op/tide-log/docs/PRD.md`."
+      ],
+      [
+        "PATCH",
+        "tide-log",
+        "/work_packages/901",
+        {
+          "dueDate": "2026-11-02",
+          "lockVersion": 0,
+          "startDate": "2026-10-12"
+        }
+      ],
+      [
+        "create",
+        "tide-log",
+        "Epic",
+        "Data",
+        901,
+        "dev",
+        "From the approved PRD: `/home/op/tide-log/docs/PRD.md`."
+      ],
+      [
+        "create",
+        "tide-log",
+        "Task",
+        "Set the test command in projects.yaml",
+        902,
+        "dev",
+        "From the approved PRD: `/home/op/tide-log/docs/PRD.md`."
+      ],
+      [
+        "create",
+        "tide-log",
+        "Task",
+        "Add the tide API client",
+        902,
+        "dev",
+        "From the approved PRD: `/home/op/tide-log/docs/PRD.md`."
+      ],
+      [
+        "create",
+        "tide-log",
+        "Epic",
+        "Page",
+        901,
+        "dev",
+        "From the approved PRD: `/home/op/tide-log/docs/PRD.md`."
+      ],
+      [
+        "create",
+        "tide-log",
+        "Task",
+        "Render the table",
+        905,
+        "dev",
+        "From the approved PRD: `/home/op/tide-log/docs/PRD.md`."
+      ],
+      [
+        "create",
+        "tide-log",
+        "Task",
+        "Show the next high tide",
+        905,
+        "dev",
+        "From the approved PRD: `/home/op/tide-log/docs/PRD.md`."
+      ]
+    ],
+    "stages": [
+      "interview",
+      "prd",
+      "setup",
+      "done"
+    ],
+    "state": {
+      "answers": {
+        "autopilot": true,
+        "local_only": false,
+        "mvp": "A tide table page.",
+        "name": "Tide Log",
+        "pitch": "A log of tide times for my beach walks.",
+        "problem": "I never know when low tide is.",
+        "stack": "Python, FastAPI",
+        "users": "Me, then other walkers.",
+        "visibility": "private"
+      },
+      "id": "tide-log",
+      "op_id": 77,
+      "path": "/home/op/tide-log",
+      "prd": "# PRD: Tide Log\n\n## Problem and why now\nTides.",
+      "private": false,
+      "q": 8,
+      "roadmap": {
+        "dates": true,
+        "epic0": 902,
+        "epic1": 905,
+        "feature": 901,
+        "initiative": 900,
+        "plan": {
+          "epics": [
+            {
+              "tasks": [
+                "Set the test command in projects.yaml",
+                "Add the tide API client"
+              ],
+              "title": "Data"
+            },
+            {
+              "tasks": [
+                "Render the table",
+                "Show the next high tide"
+              ],
+              "title": "Page"
+            }
+          ],
+          "m1": "A tide table page",
+          "weeks": 3
+        },
+        "task0.0": 903,
+        "task0.1": 904,
+        "task1.0": 906,
+        "task1.1": 907
+      },
+      "stage": "done",
+      "steps": [
+        "repo",
+        "registry",
+        "board",
+        "roadmap",
+        "stream",
+        "console",
+        "refresh"
+      ]
+    },
+    "transcript": [
+      [
+        "A log of tide times for my beach walks.",
+        "Let's set up a new project. I'll ask 8 short questions, then draft a PRD for your OK. Nothing is created until you say `approve PRD`. Say `cancel` to stop.\n\n**1/8.** What's the project called?"
+      ],
+      [
+        "Tide Log",
+        "**2/8.** What problem does it solve, and why now?"
+      ],
+      [
+        "I never know when low tide is.",
+        "**3/8.** Who is it for?"
+      ],
+      [
+        "Me, then other walkers.",
+        "**4/8.** What's the smallest version worth shipping (the MVP)?"
+      ],
+      [
+        "A tide table page.",
+        "**5/8.** What stack: language, framework, where it runs? (Or say \"you pick\".)"
+      ],
+      [
+        "Python, FastAPI",
+        "**6/8.** Private repo, or public (open source)?"
+      ],
+      [
+        "private",
+        "**7/8.** Should its chats use local models only, never a cloud model? (yes or no)"
+      ],
+      [
+        "no",
+        "**8/8.** Should the autopilot build its tasks? (yes or no. The switch stays off until you turn it on in the cockpit.)"
+      ],
+      [
+        "yes",
+        "# PRD: Tide Log\n\n## Problem and why now\nTides.\n\n---\nSay what to change, or `approve PRD` to set the project up. Nothing is created before that."
+      ],
+      [
+        "approve PRD",
+        "PRD approved. Setting up **Tide Log** (`tide-log`).\n\n✓ 1/7 Repo: `/home/op/tide-log`, first commit made, PRD in docs/PRD.md\n✓ 2/7 Registry: added to projects.yaml with an autopilot block (switch off)\n✓ 3/7 nomad-pm board: board `tide-log` seeded\n✓ 4/7 Roadmap: Initiative #900 in nomad-portfolio, Feature #901 (M1, 3 weeks), 2 epics, 4 tasks\n✓ 5/7 Zulip stream: #tide-log, with you and the bot subscribed\n✓ 6/7 Mission control: row added to the projects table\n✓ 7/7 Project dropdown: `tide-log` is in the Project dropdown, and this chat now works on it\n\n**Tide Log** is set up. Keep going here, or pick `tide-log` in the Project dropdown for a new chat on it. The autopilot switch is off; turn it on in the cockpit when you want it. There's no GitHub remote yet: ask for one here and it goes to the gate like any push."
+      ]
+    ]
+  },
+  "local-only-private": {
+    "board": [
+      "BOARDS = [\n  [\"nomad-work\", \"NOMAD work\"], [\"civis\", \"Civis\"],\n  [\"nomad-portfolio\", \"NOMAD Portfolio\"],\n  [\"health-notes\", \"Health Notes\"]\n].freeze\n"
+    ],
+    "console": [
+      {
+        "lane": "dev",
+        "owner": "Josias",
+        "repo": "",
+        "stack": "",
+        "status": "Planning",
+        "title": "Health Notes"
+      }
+    ],
+    "dispatch": [
+      [
+        "/new-project",
+        {
+          "description": "I lose track of symptoms.",
+          "id": "health-notes",
+          "lane": "dev",
+          "local_only": true,
+          "name": "Health Notes",
+          "prd": "# PRD: Health Notes\n\n## Problem and why now\nTides.\n\n(revised)",
+          "register": false,
+          "stack": []
+        }
+      ],
+      [
+        "/register-project",
+        {
+          "autopilot": false,
+          "id": "health-notes",
+          "local_only": true
+        }
+      ],
+      [
+        "/seed-board",
+        {
+          "board": "health-notes",
+          "name": "Health Notes"
+        }
+      ],
+      [
+        "/project-stream",
+        {
+          "id": "health-notes"
+        }
+      ]
+    ],
+    "models": [
+      [
+        "prd",
+        "private",
+        true
+      ],
+      [
+        "prd",
+        "private",
+        true
+      ],
+      [
+        "plan",
+        "private",
+        true
+      ]
+    ],
+    "registry": [
+      "  - id: health-notes\n    path: health-notes\n    local_only: true\n"
+    ],
+    "roadmap": [
+      [
+        "create",
+        "nomad-portfolio",
+        "Initiative",
+        "Health Notes",
+        null,
+        "manager",
+        "From the approved PRD: `/home/op/health-notes/docs/PRD.md`."
+      ],
+      [
+        "create",
+        "health-notes",
+        "Feature",
+        "M1: A tide table page",
+        900,
+        "manager",
+        "From the approved PRD: `/home/op/health-notes/docs/PRD.md`."
+      ],
+      [
+        "PATCH",
+        "health-notes",
+        "/work_packages/901",
+        {
+          "dueDate": "2026-11-02",
+          "lockVersion": 0,
+          "startDate": "2026-10-12"
+        }
+      ],
+      [
+        "create",
+        "health-notes",
+        "Epic",
+        "Data",
+        901,
+        "dev",
+        "From the approved PRD: `/home/op/health-notes/docs/PRD.md`."
+      ],
+      [
+        "create",
+        "health-notes",
+        "Task",
+        "Set the test command in projects.yaml",
+        902,
+        "dev",
+        "From the approved PRD: `/home/op/health-notes/docs/PRD.md`."
+      ],
+      [
+        "create",
+        "health-notes",
+        "Task",
+        "Add the tide API client",
+        902,
+        "dev",
+        "From the approved PRD: `/home/op/health-notes/docs/PRD.md`."
+      ],
+      [
+        "create",
+        "health-notes",
+        "Epic",
+        "Page",
+        901,
+        "dev",
+        "From the approved PRD: `/home/op/health-notes/docs/PRD.md`."
+      ],
+      [
+        "create",
+        "health-notes",
+        "Task",
+        "Render the table",
+        905,
+        "dev",
+        "From the approved PRD: `/home/op/health-notes/docs/PRD.md`."
+      ],
+      [
+        "create",
+        "health-notes",
+        "Task",
+        "Show the next high tide",
+        905,
+        "dev",
+        "From the approved PRD: `/home/op/health-notes/docs/PRD.md`."
+      ]
+    ],
+    "stages": [
+      "interview",
+      "prd",
+      "setup",
+      "done"
+    ],
+    "state": {
+      "answers": {
+        "autopilot": false,
+        "local_only": true,
+        "mvp": "A form and a list.",
+        "name": "Health Notes",
+        "pitch": "Keep this private: a journal for my health notes.",
+        "problem": "I lose track of symptoms.",
+        "stack": "you pick",
+        "users": "Only me.",
+        "visibility": "private"
+      },
+      "id": "health-notes",
+      "op_id": 77,
+      "path": "/home/op/health-notes",
+      "prd": "# PRD: Health Notes\n\n## Problem and why now\nTides.\n\n(revised)",
+      "private": true,
+      "q": 8,
+      "roadmap": {
+        "dates": true,
+        "epic0": 902,
+        "epic1": 905,
+        "feature": 901,
+        "initiative": 900,
+        "plan": {
+          "epics": [
+            {
+              "tasks": [
+                "Set the test command in projects.yaml",
+                "Add the tide API client"
+              ],
+              "title": "Data"
+            },
+            {
+              "tasks": [
+                "Render the table",
+                "Show the next high tide"
+              ],
+              "title": "Page"
+            }
+          ],
+          "m1": "A tide table page",
+          "weeks": 3
+        },
+        "task0.0": 903,
+        "task0.1": 904,
+        "task1.0": 906,
+        "task1.1": 907
+      },
+      "stage": "done",
+      "steps": [
+        "repo",
+        "registry",
+        "board",
+        "roadmap",
+        "stream",
+        "console",
+        "refresh"
+      ]
+    },
+    "transcript": [
+      [
+        "Keep this private: a journal for my health notes.",
+        "Let's set up a new project. I'll ask 8 short questions, then draft a PRD for your OK. Nothing is created until you say `approve PRD`. Say `cancel` to stop.\n\n**1/8.** What's the project called?"
+      ],
+      [
+        "Health Notes",
+        "**2/8.** What problem does it solve, and why now?"
+      ],
+      [
+        "I lose track of symptoms.",
+        "**3/8.** Who is it for?"
+      ],
+      [
+        "Only me.",
+        "**4/8.** What's the smallest version worth shipping (the MVP)?"
+      ],
+      [
+        "A form and a list.",
+        "**5/8.** What stack: language, framework, where it runs? (Or say \"you pick\".)"
+      ],
+      [
+        "you pick",
+        "**6/8.** Private repo, or public (open source)?"
+      ],
+      [
+        "private repo",
+        "**7/8.** Should its chats use local models only, never a cloud model? (yes or no)"
+      ],
+      [
+        "yes",
+        "**8/8.** Should the autopilot build its tasks? (yes or no. The switch stays off until you turn it on in the cockpit.)"
+      ],
+      [
+        "no",
+        "# PRD: Health Notes\n\n## Problem and why now\nTides.\n\n---\nSay what to change, or `approve PRD` to set the project up. Nothing is created before that."
+      ],
+      [
+        "Make the MVP smaller.",
+        "# PRD: Health Notes\n\n## Problem and why now\nTides.\n\n(revised)\n\n---\nSay what to change, or `approve PRD` to set the project up. Nothing is created before that."
+      ],
+      [
+        "approve PRD",
+        "PRD approved. Setting up **Health Notes** (`health-notes`).\n\n✓ 1/7 Repo: `/home/op/health-notes`, first commit made, PRD in docs/PRD.md\n✓ 2/7 Registry: added to projects.yaml\n✓ 3/7 nomad-pm board: board `health-notes` seeded\n✓ 4/7 Roadmap: Initiative #900 in nomad-portfolio, Feature #901 (M1, 3 weeks), 2 epics, 4 tasks\n✓ 5/7 Zulip stream: #health-notes, with you and the bot subscribed\n✓ 6/7 Mission control: row added to the projects table\n✓ 7/7 Project dropdown: `health-notes` is in the Project dropdown, and this chat now works on it\n\n**Health Notes** is set up. Keep going here, or pick `health-notes` in the Project dropdown for a new chat on it. The autopilot switch is off; turn it on in the cockpit when you want it. There's no GitHub remote yet: ask for one here and it goes to the gate like any push."
+      ]
+    ]
+  }
+}

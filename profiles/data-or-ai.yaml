@@ -1,0 +1,33 @@
+# A data pipeline, analysis or AI/ML project. Gates are the service ones minus mypy; the eval
+# command is project-specific, so the milestone gate stays the same until the project adds one.
+id: data-or-ai
+title: Data or AI
+description: A data pipeline, analysis, model evaluation or AI feature.
+
+interview:
+  ask:
+    - {id: data, question: "What data does it use and is any of it personal?", kind: text}
+    - {id: models, question: "Local models, cloud models, or both?", kind: single, options: [local only, cloud, both]}
+    - {id: output, question: "What does it produce?", kind: single, options: [report, dataset, model, service endpoint]}
+    - {id: eval, question: "How will you know it works? (metric or test set)", kind: text}
+  skip: []
+
+stack:
+  language: python
+  test: pytest
+
+policies: [data-or-ai-default, postgres-skills, docs-audit]
+
+agents:
+  - {role: research-evaluator, lane: research}
+  - {role: backend-engineer, lane: dev}
+  - {role: qa-test, lane: dev}
+
+gates:
+  pre_merge: ["uv run --frozen ruff check .", "uv run --frozen pytest -q -p no:cacheprovider"]
+  milestone: ["uv run --frozen ruff check .", "uv run --frozen pytest -q -p no:cacheprovider"]
+
+files: [README.md, Nomad.md, CLAUDE.md]
+
+autopilot:
+  lanes: [dev, research]

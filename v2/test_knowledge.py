@@ -204,62 +204,20 @@ def test_the_knowledge_route_is_read_only():
     assert methods <= {"GET", "HEAD"}, f"the knowledge base accepts {methods}"
 
 
-def test_research_captures_a_run_instead_of_answering_it(monkeypatch):
-    """The console called a model and filed the result. Here it becomes a run, so a brief cannot be
-    written without the operator approving it first."""
-    seen = {}
-
-    def fake_start(goal):
-        seen["goal"] = goal
-        return {"run_id": "r-42", "lane": "research", "proposal": {"action": "save_brief"}}
-
-    monkeypatch.setattr(server.eng, "start_run", fake_start)
-    monkeypatch.setattr(server, "_bump_runs", lambda: None)
-    out = server._handle_research("the best local STT engine")
-    assert "the best local STT engine" in seen["goal"]
-    assert "r-42" in out
-    assert "Nothing runs until you do." in out
-
-
-def test_research_says_where_the_brief_will_land(monkeypatch):
-    """The console handed the brief back in the reply. It does not arrive there any more, so not
-    saying where it goes would leave the operator with no reason to think one exists."""
-    monkeypatch.setattr(server.eng, "start_run",
-                        lambda g: {"run_id": "r-1", "lane": "research", "proposal": {}})
-    monkeypatch.setattr(server, "_bump_runs", lambda: None)
-    assert "Knowledge Base" in server._handle_research("Piper voices")
-
-
-def test_research_with_no_topic_asks_for_one(monkeypatch):
-    monkeypatch.setattr(server.eng, "start_run", lambda g: pytest.fail("should not capture"))
-    assert "Name a topic" in server._handle_research("   ")
-
-
-def test_a_failed_capture_does_not_promise_a_brief(monkeypatch):
-    """Telling the operator it will be filed, after the capture that would file it failed, is the
-    gate-that-lies shape in miniature."""
-    monkeypatch.setattr(server.eng, "start_run", lambda g: {"error": "nocodb down"})
-    monkeypatch.setattr(server, "_bump_runs", lambda: None)
-    out = server._handle_research("Piper voices")
-    assert "Knowledge Base" not in out
-    assert "nocodb down" in out
-
-
-def test_the_research_intent_reaches_this_handler(monkeypatch):
-    called = {}
-    monkeypatch.setitem(server.ACTION_INTENTS, "research",
-                        lambda p: called.setdefault("topic", p.get("topic")) or "ok")
+def test_the_research_intent_reaches_no_handler_from_chat():
+    """#973: "research X" is often a question, and the chat answers questions. No surface routes
+    the research intent to a handler; it gets the pointer reply instead, and #984 deleted the
+    handler."""
     import intents
     i, payload = intents.classify("research the best local STT engine")
-    assert i == "research"
-    server.ACTION_INTENTS[i](payload)
-    assert called["topic"] == "the best local STT engine"
+    assert (i, payload) == ("research", {"topic": "the best local STT engine"})
+    assert i not in server.ACTION_INTENTS
+    assert all(i not in allowed for allowed in server.SURFACE_INTENTS.values())
 
 
 def test_nothing_in_the_knowledge_path_writes_to_notion():
     """The console's `_kb_save` wrote to a Notion database. Notion is the rollback source and a
     mirror still being written to is not one, which is why that write refuses now."""
     import inspect
-    for fn in (server._knowledge_list, server._knowledge_one, server._artifacts,
-               server._handle_research):
+    for fn in (server._knowledge_list, server._knowledge_one, server._artifacts):
         assert "notion" not in inspect.getsource(fn).lower().split('"""')[-1]

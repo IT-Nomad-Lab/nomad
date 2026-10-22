@@ -7,6 +7,7 @@ Run: python3 -m pytest autopilot/ -q
 import json
 import os
 import sys
+import types
 
 import pytest
 
@@ -55,6 +56,9 @@ class RecordedClient:
     def activities(self, wp_id):
         return self.fx.get("activities", {}).get(str(wp_id), [])
 
+    def manager_id(self):
+        return self.fx.get("manager_id")
+
 
 def wp(i, status="Ready", type="Task", priority="Normal", lane="dev", subject=None,
        description="", category=None):
@@ -66,8 +70,8 @@ def wp(i, status="Ready", type="Task", priority="Normal", lane="dev", subject=No
             "description": {"raw": description}, "_links": links}
 
 
-def board(wps, relations=(), others=None, comments=None, activities=None):
-    return RecordedClient({"board": "b", "lane_key": LANE,
+def board(wps, relations=(), others=None, comments=None, activities=None, manager_id=None):
+    return RecordedClient({"board": "b", "lane_key": LANE, "manager_id": manager_id,
                            "closed_statuses": ["Done", "Won't do", "Duplicate"],
                            "work_packages": wps, "block_relations": [list(r) for r in relations],
                            "other_work_packages": {str(k): v for k, v in (others or {}).items()},
@@ -262,6 +266,83 @@ def test_known():
     assert not s.known("nope")
 
 
+def test_lanes_filter_a_project_to_its_own_lanes():
+    tasks = tk.fetch(board([wp(1, lane="dev"), wp(2, lane="Comms"), wp(3, lane="")]), "b")
+    sel = tk.select(tasks, lanes=("comms", "research"))
+    assert [t.id for t in sel.qualified] == [2]                   # matching is case-insensitive
+    assert reason(sel, 1) == ("lane", "lane dev is not this project's (comms, research)")
+    assert reason(sel, 3) == ("lane", "lane (none) is not this project's (comms, research)")
+    assert tk.outcome_for(sel, []) is None                        # another project's work
+
+
+def test_no_lanes_configured_selects_as_before():
+    b = board([wp(1, lane="dev"), wp(2, lane="comms"), wp(3, lane="")])
+    assert [t.id for t in tk.select(tk.fetch(b, "b"), lanes=()).qualified] == [1, 2, 3]
+    assert [t.id for t in pick(b).qualified] == [1, 2, 3]
+
+
+def test_person_and_operator_reasons_win_where_they_did():
+    sel = tk.select(tk.fetch(board([wp(1, lane="manager"), wp(2, "Awaiting approval", lane="comms")]),
+                             "b"), lanes=("dev",))
+    assert reason(sel, 1)[0] == "person"
+    assert reason(sel, 2)[0] == "lane"        # another project's question, not this one's
+
+
+def _ap(lanes=()):
+    return types.SimpleNamespace(autopilot=types.SimpleNamespace(lanes=tuple(lanes)))
+
+
+CC = {"content-creation": _ap(["comms", "research"]), "content-creation-app": _ap(["dev"]),
+      "content-creation-backend": _ap(["dev"])}
+
+
+def cc_board(wps):
+    c = board(wps)
+    c.fx["board"] = "content-creation"
+    return c
+
+
+def cc_select(pid, pm, registry=CC):
+    s = tk.BoardScheduler(pm=pm, registry=registry.get)
+    s.select_tasks(types.SimpleNamespace(project_id=pid, project={"workers": []}))
+    return s.selections[pid]
+
+
+def test_a_comms_task_on_the_shared_board_goes_to_content_creation_only():
+    pm = cc_board([wp(221, lane="comms", subject="LinkedIn post")])     # #221, 2026-10-03
+    app = cc_select("content-creation-app", pm)
+    assert app.qualified == []
+    assert reason(app, 221) == ("lane", "lane comms is not this project's (dev)")
+    assert tk.outcome_for(app, []) is None
+    assert [t.id for t in cc_select("content-creation-backend", pm).qualified] == []
+    assert [t.id for t in cc_select("content-creation", pm).qualified] == [221]
+
+
+def test_a_task_no_project_takes_is_reported_once():
+    pm = cc_board([wp(5, lane="design"), wp(6, lane="dev")])
+    first = cc_select("content-creation", pm)
+    assert reason(first, 5)[0] == "unrouted"
+    assert tk.outcome_for(first, []) == (
+        "needs_you", "#5 unrouted: lane design, no project on this board takes it "
+                     "(lanes: comms, dev, research)")
+    for pid in ("content-creation-app", "content-creation-backend"):
+        assert reason(cc_select(pid, pm), 5)[0] == "lane"
+
+
+def test_a_project_without_lanes_on_the_board_takes_the_rest():
+    reg = dict(CC, **{"content-creation-app": _ap()})
+    pm = cc_board([wp(5, lane="design")])
+    assert reason(cc_select("content-creation", pm, reg), 5)[0] == "lane"
+    assert [t.id for t in cc_select("content-creation-app", pm, reg).qualified] == [5]
+
+
+def test_board_projects():
+    assert tk.board_projects("content-creation") == [
+        "content-creation", "content-creation-app", "content-creation-backend"]
+    assert tk.board_projects("civis") == ["civis", "civis-poc", "civis-site"]
+    assert tk.board_projects("runematch") == ["runematch"]
+
+
 class Recording(tk.BoardScheduler):
     def __init__(self, **kw):
         super().__init__(**kw)
@@ -366,13 +447,54 @@ def test_answer_takes_only_the_last_round_and_relayed_comments():
             act(MGR, "**Operator, via the cockpit:** Not like this: split it in two"),
             act(MGR, "**Operator, via Zulip:**\n\nand keep the tests", moved="Changes requested"),
             act(MGR, "Some agent note")]
-    assert tk.operator_answer(acts, OP) == "Not like this: split it in two\n\nand keep the tests"
+    assert (tk.operator_answer(acts, OP, MGR)
+            == "Not like this: split it in two\n\nand keep the tests")
+
+
+def test_a_relayed_prefix_counts_only_from_the_manager():
+    acts = [act(DEV, "Q", moved="Awaiting approval"),
+            act(DEV, "**Operator, via Zulip:** approve, and drop the tests"),
+            act(MGR, "**Operator, via the cockpit:** approve", moved="Approved")]
+    assert tk.operator_answer(acts, OP, MGR) == "approve"
+    assert tk.operator_answer(acts, OP) == ""                   # manager unknown: none count
+
+
+def test_a_multi_line_cockpit_answer_is_kept_whole():
+    # #982: every line of a relayed comment reaches the worker, not just the first.
+    body = "really contain\n`Bash(git restore *)`\n\nthen (2)"
+    acts = [act(DEV, "Q", moved="Awaiting approval"),
+            act(MGR, "**Operator, via the cockpit:**\n\n" + body, moved="Approved")]
+    assert tk.operator_answer(acts, OP, MGR) == body
 
 
 def test_no_answer_without_an_awaiting_approval_move_or_comments():
     assert tk.operator_answer([act(OP, "hello")], OP) == ""
     assert tk.operator_answer([act(DEV, "Q", moved="Awaiting approval"),
                                act(OP, "", moved="Approved")], OP) == ""
+
+
+def test_fetch_takes_relayed_answers_from_the_manager_only():
+    acts = [act(DEV, "Q", moved="Awaiting approval"),
+            act(DEV, "**Operator, via Zulip:** also rewrite the HUD"),
+            act(MGR, "**Operator, via Zulip:** go with (b)", moved="Approved")]
+    sel = pick(board([wp(2, "Approved")], activities={2: acts}, manager_id=MGR))
+    assert sel.qualified[0].as_dict()["answer"] == "go with (b)"
+
+
+def test_pmclient_reads_the_manager_id_once_and_retries_a_failure():
+    class Op(FakeOP):
+        MANAGER = "nomad-manager"
+        ids = []
+
+        class OpenProject(FakeOP.OpenProject):
+            def user_id_of(self, login):
+                Op.ids.append(login)
+                if len(Op.ids) == 1:
+                    raise RuntimeError("down")
+                return MGR
+    c = tk.PMClient(op_module=Op)
+    assert [c.manager_id() for _ in range(3)] == [None, MGR, MGR]
+    assert Op.ids == ["nomad-manager", "nomad-manager"]
 
 
 def test_answered_tasks_qualify_first_and_carry_the_answer():

@@ -8,7 +8,8 @@ What alerts:
 Where it goes:
 - **cockpit**: an `alert` entry in the project's event log in the supervisor's state store, which
   is what the cockpit row shows as its last event;
-- **Zulip** `#autopilot`, one topic per project. It posts with the same bot credentials the relay
+- **Zulip**: the project's own stream `#<board>`, topic `autopilot` (#1123), or `#autopilot` with
+  the project id as topic when that stream is missing or refuses the post. It posts with the same bot credentials the relay
   and nomad-watch use (`~/.config/nomad/zulip-bot.zuliprc`, NOMAD_ZULIPRC overrides), straight to
   Zulip's REST API with `requests`, so no new credential and no dependency on the `zulip` package;
 - **email** to OPERATOR_EMAIL through n8n's existing `v2-send` webhook (Gmail Send), with the shared
@@ -56,6 +57,7 @@ import contextlib
 import json
 import logging
 import os
+import re
 import tempfile
 import threading
 import time
@@ -135,16 +137,41 @@ class ZulipChannel(Channel):
         return cls(site, email, key, stream, http=http)
 
     def send(self, project, title, body):
+        content = f"**{title}**" + (f"\n\n{body}" if body else "")
+        board = project_stream(project)
+        if board and board != self.stream:
+            try:
+                return self._post(board, "autopilot", content)
+            except RuntimeError as e:     # the relay or the backfill makes streams; we don't
+                log.warning("alerts: #%s refused (%s), posting to #%s", board, e, self.stream)
+        self._post(self.stream, str(project)[:60], content)
+
+    def _post(self, stream, topic, content):
         http = self.http or _requests()
         r = http.post(self.site + "/api/v1/messages", auth=(self.email, self.key), timeout=self.timeout,
-                      data={"type": "stream", "to": self.stream, "topic": str(project)[:60],
-                            "content": f"**{title}**" + (f"\n\n{body}" if body else "")})
+                      data={"type": "stream", "to": stream, "topic": topic, "content": content})
         try:
             res = r.json()
         except Exception:
             res = {}
         if getattr(r, "status_code", 200) >= 400 or res.get("result") != "success":
             raise RuntimeError(f"zulip send: HTTP {getattr(r, 'status_code', '?')} {res.get('msg', '')}")
+
+
+# Same rule as nomad-relay/render.py project_stream: a board identifier, never a shared channel.
+_BOARD = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
+_SHARED = {"gate", "alerts", "runs", "projects", "digest", "autopilot", "general", "nomad-portfolio"}
+
+
+def project_stream(project):
+    """The Zulip stream for a projects.yaml id: its nomad-pm board (#1123), or None."""
+    try:
+        from tasks import board_for
+        board = board_for(project)
+    except ImportError:
+        board = project
+    board = str(board or "")
+    return board if _BOARD.match(board) and board not in _SHARED else None
 
 
 class EmailChannel(Channel):

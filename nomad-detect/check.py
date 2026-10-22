@@ -68,7 +68,8 @@ def main():
         import binoculars
         from server import _verdict
         sty = style.lint(text)
-        bino = binoculars.engine().score(text)
+        with binoculars.admitted():
+            bino = binoculars.engine().score(text)
         res = {"ok": True, **_verdict(bino, sty), "style": sty, "binoculars": bino}
         if a.external:
             import external

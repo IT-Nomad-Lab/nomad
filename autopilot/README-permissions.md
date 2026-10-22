@@ -1,6 +1,9 @@
 # Autopilot permission profile
 
-DRAFT for operator review (task #876). Built in #875. PRD `docs/prd/autopilot.md` 5.8.
+Signed off by Josias on 2026-10-01 (task #876). Built in #875. The 2026-10-01 rule changes in
+AUTONOMY.template.md (approved deletes and merges, operator-requested config edits) are enforced
+through operator grants since #979: the denies below hold unless a grant opens one named action
+for one run (see Grants). PRD `docs/prd/autopilot.md` 5.8.
 
 Every worker runs headless Claude Code with a settings file generated for its task:
 
@@ -27,6 +30,7 @@ Every worker runs headless Claude Code with a settings file generated for its ta
 | Git, read-only | `git status/diff/log/show/rev-parse`, `git branch` (list forms), `git worktree list`, and the same through `git -C <main checkout>` | Looking around. |
 | Git, writes | `git -C <worktree> add/commit/switch/merge` | Only in the `-C <worktree>` form. See the note below. |
 | Shell | `cd ls test cat head tail grep find date wc echo pwd mkdir` | Plain utilities. `find -exec`/`-delete` are not covered by `find *`. |
+| GitHub, read-only | `gh search`, `gh repo view`, `gh {release,issue,pr,run} list/view`, `gh pr diff/checks`, `gh api {repos,orgs,users,search}/…` | Checking a repo and its publisher before anything is installed (#926). `gh api` is a GET unless a method or body flag is given, and those are denied. `graphql`, `user`, `auth` and every write subcommand have no allow rule. |
 | Project commands | `Bash(<state>/bin/<project>-<name>)`, plus `... *` if it takes a test filter | One wrapper per command (below). Nothing else of the project's is allowed. |
 
 **Why git writes need `-C <worktree>`.** A rule can't see the shell's current folder. With plain
@@ -40,12 +44,19 @@ Denies are a second line: none of these has an allow rule, so `dontAsk` refuses 
 stay in so that a mistake in the allow list, or another settings source, can't open them.
 
 - **Git:** push, stash, reset, rebase, clean, `branch -D/-d/--delete`, `commit --amend`,
-  `worktree remove`. Each is denied in the plain form, the `-C <worktree>` form and the
+  `worktree remove` (an operator grant opens one exact `branch -d` or `worktree remove` for one
+  run, see Grants). Each is denied in the plain form, the `-C <worktree>` form and the
   `-C <main checkout>` form, because a deny on `git push *` does not catch `git -C x push`. Force
-  forms of `switch` (`-f`, `--force`, `-C`, `--discard-changes`). On the main checkout also
+  forms of `switch` (`-f`, `--force`, `-C`, `--discard-changes`). `switch` and `checkout` to a
+  protected branch, plain and `-C <worktree>`: `main`, `master` and the default branch looked up in
+  the main checkout, each rendered from one `{default_branch}` rule. On the main checkout also
   `checkout`, `commit` and `merge`: the supervisor does the fast-forward, not the agent.
 - **Deletion:** `rm -rf`, `rm -fr`, `rm -r`, `rm -R`, `rm --recursive`. Plain `rm` isn't allowed.
-- **Edits to agent config:** `AGENTS.md`, `CLAUDE.md`, `AUTONOMY.md`, `.claude/**`, `.mcp.json`,
+- **GitHub writes through `gh api`:** `-X`, `--method`, `-f`, `-F`, `--field`, `--raw-field`,
+  `--input`, before or after the path. Any of them turns the allowed GET into a write, so a
+  harmless `-X GET` is refused too.
+- **Edits to agent config:** `AGENTS.md`, `CLAUDE.md`, `AUTONOMY*.md` (so
+  `AUTONOMY.template.md` too), `.claude/**`, `.mcp.json`,
   `projects.yaml`, anywhere on disk; `~/.claude/**`.
 - **Edits outside the worktree:** the main checkout (read-only), each `working_dirs` folder
   (read-only), and the autopilot state folder, which holds the settings file and the wrappers.
@@ -101,6 +112,41 @@ The milestone gate gets no wrappers. The supervisor runs it.
 Then `check_narrowing` checks the result: every allow rule is a template rule or a wrapper rule,
 every template deny is still there, `defaultMode` is unchanged, and there are no other keys.
 
+## Grants (#979)
+
+The operator can open one named action for one run with a `grant:` line in a task comment
+(`docs/prd/ap-permission-grants.md`). Only the operator's account counts, or the engine's account
+relaying for them; description text never does. `edit` counts from any such comment posted after
+the task's last run started; `delete ...` and `merge` count only in the Approved answer.
+
+| Grant | Removes | Adds |
+|---|---|---|
+| `grant: edit CLAUDE.md` | each Edit deny that covers `<worktree>/CLAUDE.md`, except the main checkout, the state folder, `~/.claude` and `working_dirs` | `Edit(//<worktree>/CLAUDE.md)`, plus an exact deny for every other file the removed denies covered |
+| `grant: delete branch feat/old` | `Bash(git -C <worktree> branch -d *)` | `Bash(git -C <worktree> branch -d feat/old)` |
+| `grant: delete worktree <path>` | `Bash(git worktree remove *)` | `Bash(git -C <worktree> worktree remove <path>)` |
+| `grant: merge <branch>` | nothing: no worker runs | the supervisor queues the branch in the merge queue |
+
+`-D`, `--delete`, `--force` and every other target stay refused. `check_narrowing` accepts an extra
+allow or a dropped deny only when a grant accounts for it. A used grant is recorded in
+`grants.json` in the state folder and never renders again. A refused line gets one
+`autopilot: grant ignored: <line> (<reason>)` comment. With no grants, `build_settings` takes none
+of this code: `testdata/golden/<project>-settings.json` pins every project's profile byte for byte.
+
+After a run that reports ready to merge, and again in the merge queue before the gate, the
+supervisor lists the files the branch changed against the default branch (plus uncommitted ones).
+A file a template Edit deny covers that no used edit grant names makes it *needs operator*.
+
+**Manual check before #979 merges** (the local evaluator approximates Claude Code's matcher): run
+one headless session per row under a profile rendered with that grant, and read
+`permission_denials`.
+
+| Grant | Must run | Must be refused |
+|---|---|---|
+| `edit CLAUDE.md` | Write `<wt>/CLAUDE.md` | Write `<wt>/sub/CLAUDE.md`, `<wt>/AGENTS.md`, `<repo>/CLAUDE.md` |
+| `delete branch feat/old` | `git -C <wt> branch -d feat/old` | `git -C <wt> branch -d other`, `git -C <wt> branch -D feat/old`, `git branch -d feat/old` |
+| `delete worktree <p>` | `git -C <wt> worktree remove <p>` | `git -C <wt> worktree remove --force <p>`, `git worktree remove <p>` |
+| `merge <branch>` | (no worker) | `git -C <repo> merge --ff-only <branch>` in any worker |
+
 ## Verifying it
 
 `autopilot/test_permissions.py` covers the RuneMatch snapshot (`testdata/runematch-settings.json`),
@@ -129,6 +175,7 @@ Claude Code upgrade.
    that. Not added, since the PRD allows read tools.
 3. **`git -C <worktree> switch` is allowed** because PRD 5.8 lists it, but `AUTONOMY.md` section 1
    says workers don't switch branches. Pick one. Dropping the rule is the narrower choice.
+   Switching to a protected branch is denied since #989.
 4. **The GPU lock path** `/tmp/nomad-gpu.lock` is new. Nothing else takes it yet, so the image
    services must use the same file before `requires_gpu` protects anything.
 5. **False-positive denies** on commit messages: `git -C <wt> commit -m "... --amend ..."` is

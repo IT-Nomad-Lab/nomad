@@ -5,6 +5,7 @@ Run: uv run --no-project --with pytest --with pyyaml --with requests python -m p
 """
 import dataclasses
 import os
+import shutil
 import subprocess
 import sys
 
@@ -13,6 +14,7 @@ import pytest
 NOMAD = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, NOMAD)
 
+from autopilot import merge as merge_mod  # noqa: E402
 from autopilot import milestone as ms  # noqa: E402
 from autopilot.projects import Command  # noqa: E402
 from autopilot.tasks import CLOSED  # noqa: E402
@@ -121,7 +123,7 @@ def test_last_task_runs_the_milestone_gate_and_closes_epic_and_feature(env, rig)
     gate_calls = [c for c in env.calls_list() if c["cmd"] in ("step", "test")]
     assert len(gate_calls) == 4                              # pre-merge gate, then milestone gate
     assert gate_calls[-1]["cwd"] == wt
-    assert sh(wt, "rev-parse", "HEAD") == env.head()
+    assert res[0]["cleanup"] == "removed"                    # #1011: only after the milestone gate
 
 
 def test_a_task_that_is_not_the_last_runs_nothing(env, rig):
@@ -326,3 +328,28 @@ def test_the_default_alert_is_a_project_event(env, rig):
     ctx = Ctx()
     g(ctx, {"task": "1", "result": "merged", "branch": "feat/none"})
     assert any(k == "alert" and m.startswith("feature_complete: Feature #100") for k, m in ctx.events)
+
+
+# ---- gate_network (#1530): one code path for every supervisor gate run --------------------------
+
+@pytest.mark.skipif(not shutil.which("bwrap"), reason="bubblewrap not installed")
+def test_gate_network_none_covers_reruns_post_test_and_the_milestone_gate(env, rig):
+    env.config(tests={"T.A1_ok": "pass", "T.BLK6_flaky": "flaky"})
+    project = env.project(flakes=["BLK6"])
+    project = dataclasses.replace(project, autopilot=dataclasses.replace(
+        project.autopilot, gate_network="none"))
+    seen = []
+
+    def runner(argv, cwd, log_path, timeout):
+        seen.append((argv, log_path))
+        return merge_mod.run_command(argv, cwd, log_path, timeout)
+
+    q = rig.env.queue(project, runner=runner)
+    rig.gate = ms.with_milestones(q, pm=rig.pm, board_of=lambda pid: "board-p",
+                                  alert=lambda ctx, kind, text: rig.alerts.append((kind, text)))
+    res = q.merge(Ctx(), [env.task("1")])
+    assert res[0]["result"] == "merged" and rig.gate.results[-1]["result"] == "closed"
+    logs = [os.path.basename(p) for _, p in seen]
+    assert any("rerun-" in n for n in logs) and any("post-test" in n for n in logs)
+    assert any(f"{os.sep}milestone{os.sep}" in p for _, p in seen)
+    assert all(os.path.basename(a[0]) == "bwrap" and "--unshare-net" in a for a, _ in seen)

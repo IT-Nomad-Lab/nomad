@@ -1,0 +1,12 @@
+[Unit]
+Description=NOMAD MCP gateway: Google (Gmail, Drive, Calendar) proxy, token from the vault
+After=docker.service nomad-vault-unseal.service
+
+[Service]
+WorkingDirectory=%h/nomad/mcp-gateway
+ExecStart=%h/nomad/mcp-local/.venv/bin/python %h/nomad/mcp-gateway/google_proxy.py --listen 172.17.0.1:8312
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

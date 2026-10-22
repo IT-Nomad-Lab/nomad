@@ -162,6 +162,9 @@ def test_worker_prompt_carries_the_operators_answer(tmp_path):
     assert "requested changes" in no and "`needs operator`" in no
     plain = wk.build_prompt(p, {"task": 1, "status": "In Progress"}, w, time.time() + 60)
     assert "operator answered" not in plain and "autopilot: resume` comment" in plain
+    multi = "really contain\n`Bash(git restore *)`\n\nthen (2)"      # #982
+    assert multi in wk.build_prompt(p, {"task": 1, "status": "Approved", "decision": "approved",
+                                        "answer": multi}, w, time.time() + 60)
 
 
 # ---- the answer ------------------------------------------------------------------------------

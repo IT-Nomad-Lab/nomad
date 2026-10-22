@@ -1,12 +1,14 @@
-"""NOMAD audio bridge (MCP) — generate music from inside any project's Claude Code.
+"""NOMAD audio bridge (MCP) — generate music and sound effects from inside any project's Claude Code.
 
-Lets Claude write a song or a background track on the LOCAL GPU (the nomad-audio service, ACE-Step
-v1, Apache-2.0) and saves the WAV straight into the project you're working in. Free, no quota,
-nothing leaves the box — the file is left uncommitted for you to review, like any Builder edit.
+Lets Claude write a song or a background track (the nomad-audio service, ACE-Step 1.5, or v1 when
+rolled back; MIT / Apache-2.0) or a short sound effect (Stable Audio Open) on the LOCAL GPU and saves the
+WAV straight into the project you're working in. Free, no quota, nothing leaves the box — the file
+is left uncommitted for you to review, like any Builder edit.
 
-Tool:
+Tools:
   generate_music(prompt, lyrics, duration, seed, subdir, filename) → renders locally, saves into
   <this project>/<subdir>/
+  generate_sfx(prompt, duration_s, seed, subdir, filename) → same, for SFX up to 47 s
 
 The service writes its own copy to ~/nomad/nomad-audio/generated_audio/; this tool copies the
 result into the repo Claude Code was launched in. It never overwrites: an existing file gets a
@@ -29,6 +31,7 @@ _CANDIDATES = [c for c in (
 _base = None
 TIMEOUT = int(os.environ.get("NOMAD_AUDIO_TIMEOUT", "900"))   # first call loads the model
 MAX_DURATION = 240.0
+MAX_SFX_DURATION = 47.0   # Stable Audio Open 1.0's ceiling; the service enforces it too
 
 mcp = FastMCP("nomad-audio")
 
@@ -52,11 +55,11 @@ def _project_dir() -> str:
     return os.getcwd().rstrip("/") or os.path.expanduser("~/nomad")
 
 
-def _safe_name(filename: str, prompt: str) -> str:
+def _safe_name(filename: str, prompt: str, fallback: str = "nomad-music") -> str:
     if filename.strip():
         name = os.path.basename(filename.strip())
     else:
-        slug = re.sub(r"[^a-z0-9]+", "-", prompt.lower()).strip("-")[:40] or "nomad-music"
+        slug = re.sub(r"[^a-z0-9]+", "-", prompt.lower()).strip("-")[:40] or fallback
         name = f"{slug}-{int(time.time())}"
     return name if name.lower().endswith(".wav") else os.path.splitext(name)[0] + ".wav"
 
@@ -86,7 +89,7 @@ def generate_music(prompt: str, lyrics: str = "", duration: float = 30, seed: in
     `filename` = optional (auto-named .wav); an existing file is never overwritten.
 
     Limits: text-only (it can't cover or remix an existing song's melody), bpm is a hint, output
-    doesn't loop seamlessly, and it isn't for sub-second SFX. Returns the saved path."""
+    doesn't loop seamlessly, and it isn't for short SFX (use generate_sfx). Returns the saved path."""
     if not prompt.strip():
         return "[music error: prompt (style tags) is required]"
     base = _service()
@@ -125,6 +128,56 @@ def generate_music(prompt: str, lyrics: str = "", duration: float = 30, seed: in
     seed_note = f", seed {body['seed']}" if "seed" in body else ""
     return (f"Saved → {dest} ({len(r.content) // 1024} KB, {body['duration']:.0f}s audio, "
             f"generated in {gen}s{seed_note}, provider: ace-step local)")
+
+
+@mcp.tool()
+def generate_sfx(prompt: str, duration_s: float = 5, seed: int = -1,
+                 subdir: str = "assets/nomad-audio/sfx", filename: str = "") -> str:
+    """Generate a sound effect on the LOCAL GPU (Stable Audio Open via nomad-audio) and save a
+    44.1 kHz stereo WAV into the CURRENT project's folder.
+
+    `prompt` = describe the sound plainly ("a wooden door creaks open slowly", "sword clash,
+    metallic ring", "rain on a tin roof, close"). `duration_s` = seconds (max 47). `seed` = fix it
+    (>= 0) to reproduce a take; -1 is random and the seed used is reported back. `subdir` =
+    destination inside the repo. `filename` = optional (auto-named .wav); never overwrites.
+
+    For music use generate_music. Stable Audio Open is under the Stability AI Community Licence,
+    not MIT/Apache-2.0: free under US $1M annual revenue; check it before shipping commercially. Returns the saved path."""
+    if not prompt.strip():
+        return "[sfx error: prompt (a description of the sound) is required]"
+    base = _service()
+    if not base:
+        return ("[nomad-audio is not reachable on :8220 — start it with "
+                "`systemctl --user start nomad-audio`]")
+
+    body = {"prompt": prompt.strip(),
+            "duration_s": max(0.5, min(float(duration_s), MAX_SFX_DURATION))}
+    if seed is not None and seed >= 0:
+        body["seed"] = int(seed)
+
+    started = time.time()
+    try:
+        r = requests.post(f"{base}/sfx", json=body, timeout=TIMEOUT)
+    except requests.Timeout:
+        return f"[sfx generation timed out after {TIMEOUT}s]"
+    except Exception as e:
+        return f"[sfx error: {str(e)[:240]}]"
+    if r.status_code != 200 or not r.headers.get("content-type", "").startswith("audio/"):
+        try:
+            err = r.json().get("error")
+        except Exception:
+            err = r.text[:240]
+        return f"[sfx generation failed ({r.status_code}): {err}]"
+
+    dest_dir = os.path.join(_project_dir(), subdir.strip("/"))
+    os.makedirs(dest_dir, exist_ok=True)
+    dest = _free_path(os.path.join(dest_dir, _safe_name(filename, prompt, "nomad-sfx")))
+    with open(dest, "wb") as f:
+        f.write(r.content)
+    gen = r.headers.get("x-generation-seconds", f"{time.time() - started:.1f}")
+    used_seed = r.headers.get("x-seed", body.get("seed", "?"))
+    return (f"Saved → {dest} ({len(r.content) // 1024} KB, {body['duration_s']:g}s audio, "
+            f"generated in {gen}s, seed {used_seed}, provider: stable-audio-open local)")
 
 
 if __name__ == "__main__":

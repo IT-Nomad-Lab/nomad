@@ -19,6 +19,8 @@ Environment=ANTHROPIC_API_KEY=
 # adding /mnt/c/... as a second root would surface a second RuneMatch checkout under the same
 # name, and the dispatcher would then refuse both rather than guess.
 Environment=PROJECT_ROOTS=/home/jdelimam:/home/jdelimam/content-creation:/home/jdelimam/civis
+# Also listen on the Docker bridge gateway: containers reach it there under Docker Engine (#383).
+Environment=NOMAD_BRIDGE_IP=172.17.0.1
 ExecStart=/usr/bin/python3 /home/jdelimam/nomad/dispatcher/dispatch.py
 Restart=always
 RestartSec=3

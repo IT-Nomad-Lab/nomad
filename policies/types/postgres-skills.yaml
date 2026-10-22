@@ -1,0 +1,10 @@
+id: postgres-skills
+role: permission
+description: >-
+  The supabase and Postgres best-practice skills (guidance only). The supabase MCP server is
+  NOT granted: it spends and changes live projects, so a project asks for it by name.
+statements:
+  - sid: postgres-skills
+    effect: allow
+    kind: skill
+    match: [supabase, supabase-postgres-best-practices]

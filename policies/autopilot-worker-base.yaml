@@ -1,0 +1,96 @@
+id: autopilot-worker-base
+role: permission
+description: >-
+  What an autopilot worker may do, imported from the allow list of
+  autopilot/permissions.template.json (#1391). The ceiling is guardrail-autopilot-worker and
+  guardrail-guard-hook. Same placeholders as there.
+statements:
+  - sid: worker-tools
+    effect: allow
+    kind: tool
+    match:
+      - 'Read'
+      - 'Glob'
+      - 'Grep'
+      - 'Agent'
+      - 'mcp__nomad-pm'
+  - sid: worker-edit-worktree
+    effect: allow
+    kind: tool
+    match:
+      - 'Edit(/{worktree}/**)'
+  - sid: worker-git-read
+    effect: allow
+    kind: tool
+    match:
+      - 'Bash(git status *)'
+      - 'Bash(git diff *)'
+      - 'Bash(git log *)'
+      - 'Bash(git show *)'
+      - 'Bash(git rev-parse *)'
+      - 'Bash(git branch)'
+      - 'Bash(git branch --show-current)'
+      - 'Bash(git branch --list *)'
+      - 'Bash(git worktree list *)'
+  - sid: worker-git-worktree
+    effect: allow
+    kind: tool
+    match:
+      - 'Bash(git -C {worktree} status *)'
+      - 'Bash(git -C {worktree} diff *)'
+      - 'Bash(git -C {worktree} log *)'
+      - 'Bash(git -C {worktree} show *)'
+      - 'Bash(git -C {worktree} rev-parse *)'
+      - 'Bash(git -C {worktree} add *)'
+      - 'Bash(git -C {worktree} commit *)'
+      - 'Bash(git -C {worktree} switch *)'
+      - 'Bash(git -C {worktree} merge *)'
+      - 'Bash(git -C {worktree} branch)'
+      - 'Bash(git -C {worktree} branch --show-current)'
+      - 'Bash(git -C {worktree} branch --list *)'
+  - sid: worker-git-repo-read
+    effect: allow
+    kind: tool
+    match:
+      - 'Bash(git -C {repo} status *)'
+      - 'Bash(git -C {repo} diff *)'
+      - 'Bash(git -C {repo} log *)'
+      - 'Bash(git -C {repo} show *)'
+      - 'Bash(git -C {repo} rev-parse *)'
+  - sid: worker-shell-read
+    effect: allow
+    kind: tool
+    match:
+      - 'Bash(cd *)'
+      - 'Bash(ls *)'
+      - 'Bash(test *)'
+      - 'Bash(cat *)'
+      - 'Bash(head *)'
+      - 'Bash(tail *)'
+      - 'Bash(grep *)'
+      - 'Bash(find *)'
+      - 'Bash(date *)'
+      - 'Bash(wc *)'
+      - 'Bash(echo *)'
+      - 'Bash(pwd *)'
+      - 'Bash(mkdir *)'
+  - sid: worker-gh-read
+    effect: allow
+    kind: tool
+    match:
+      - 'Bash(gh search *)'
+      - 'Bash(gh repo view *)'
+      - 'Bash(gh release list *)'
+      - 'Bash(gh release view *)'
+      - 'Bash(gh issue list *)'
+      - 'Bash(gh issue view *)'
+      - 'Bash(gh pr list *)'
+      - 'Bash(gh pr view *)'
+      - 'Bash(gh pr diff *)'
+      - 'Bash(gh pr checks *)'
+      - 'Bash(gh run list *)'
+      - 'Bash(gh run view *)'
+      - 'Bash(gh api repos/*)'
+      - 'Bash(gh api orgs/*)'
+      - 'Bash(gh api users/*)'
+      - 'Bash(gh api search/*)'

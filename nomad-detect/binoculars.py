@@ -22,10 +22,19 @@ bigger card for more separation.
 Thresholds are PAIR-SPECIFIC. The published 0.9015 belongs to the Falcon-7B pair; any other pair
 needs its own, which is what calibrate.py writes into thresholds.json. Until then the defaults here
 are a starting point, not a verdict to trust blindly.
+
+GPU admission (#1462): on cuda the models load and score only inside `admitted()`, which holds
+/tmp/nomad-gpu.lock (dispatcher/gpu_admission.py) without waiting and drops the models before it
+releases. Outside it `engine()` refuses. A busy GPU raises gpu_admission.Busy, and /detect still
+returns the style report. On the CPU (the service's configured device, #1037) nothing changes.
 """
+import contextlib
+import gc
+import importlib.util
 import json
 import os
 import pathlib
+import threading
 from typing import Any
 
 import torch
@@ -38,6 +47,12 @@ DEVICE = os.environ.get("NOMAD_DETECT_DEVICE", "cuda" if torch.cuda.is_available
 WINDOW = int(os.environ.get("NOMAD_DETECT_WINDOW", "512"))      # tokens scored per chunk
 MIN_TOKENS = int(os.environ.get("NOMAD_DETECT_MIN_TOKENS", "48"))
 THRESHOLDS = pathlib.Path(__file__).with_name("thresholds.json")
+
+_spec = importlib.util.spec_from_file_location(   # by path: this venv has no repo on sys.path
+    "nomad_gpu_admission", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "dispatcher",
+                                        "gpu_admission.py"))
+gpu_admission = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(gpu_admission)
 
 # Fallback bands, replaced per model pair by calibrate.py. accuracy = balanced; low_fpr = the
 # stricter line to clear when a false "AI" accusation is expensive.
@@ -137,10 +152,40 @@ class Binoculars:
 
 
 _engine: Binoculars | None = None
+_gpu = threading.Lock()        # one admitted block per process; others queue here, not on the flock
+_admitted = False
 
 
 def engine() -> Binoculars:
     global _engine
+    if DEVICE.startswith("cuda") and not _admitted:
+        raise RuntimeError("binoculars on cuda runs only inside binoculars.admitted() (#1462)")
     if _engine is None:
         _engine = Binoculars()
     return _engine
+
+
+@contextlib.contextmanager
+def admitted():
+    """Hold shared GPU admission for a block of scoring, then drop the models and release.
+
+    Raises gpu_admission.Busy, without loading anything, when another workload holds the GPU or a
+    gpu_guard restore is pending. A no-op on the CPU."""
+    global _engine, _admitted
+    if not DEVICE.startswith("cuda"):
+        yield
+        return
+    with _gpu:
+        fd = gpu_admission.try_admit()
+        _admitted = True
+        try:
+            yield
+        finally:
+            _admitted = False
+            try:
+                if _engine is not None:
+                    _engine = None
+                    gc.collect()
+                    torch.cuda.empty_cache()
+            finally:
+                os.close(fd)

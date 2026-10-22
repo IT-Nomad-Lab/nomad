@@ -97,3 +97,19 @@ Tests: `python3 -m pytest nomad-watch/test_watch.py -q`
 The timer, and the daily all-clear. If `#alerts` goes quiet for more than a day, the watchdog is
 what died. That is the honest limit of everything running on one box, and it is written here so
 nobody assumes otherwise.
+
+## Monthly docs audit
+
+`docs_audit.py` is a second, slower job in the same folder. On the 1st of each month at 09:00 it
+runs the read-only checks of the agent-docs-audit skill (`checks.py all --from-projects`: doc size
+budgets, stale memories, installed-copy drift, merged worktrees) and posts the report to
+`#alerts`, topic `docs-audit`. It never edits anything. It posts even when clean, so a month
+without a message means the timer died.
+
+```bash
+cp nomad-docs-audit.service nomad-docs-audit.timer ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now nomad-docs-audit.timer
+```
+
+Dry run: `.venv/bin/python docs_audit.py --dry-run`. Tests: `test_docs_audit.py`.

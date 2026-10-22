@@ -1,0 +1,35 @@
+{
+  "set": {
+    "permissions": {
+      "allow": [
+        "PowerShell(git status *)",
+        "PowerShell(git log *)",
+        "PowerShell(git diff *)",
+        "PowerShell(git show *)",
+        "PowerShell(git branch *)",
+        "PowerShell(git worktree *)",
+        "PowerShell(git fetch *)",
+        "PowerShell(git rev-parse *)",
+        "PowerShell(git merge-base *)",
+        "PowerShell(git stash list *)",
+        "PowerShell(git add *)",
+        "PowerShell(git commit *)",
+        "PowerShell(git switch *)",
+        "PowerShell(git checkout *)",
+        "PowerShell(git merge *)",
+        "PowerShell(git -C *)"
+      ],
+      "deny": [
+        "PowerShell(git push --force *)",
+        "PowerShell(git push -f *)",
+        "PowerShell(git push --force-with-lease *)",
+        "PowerShell(git push --mirror *)",
+        "PowerShell(git reset --hard *)",
+        "PowerShell(git clean -fdx *)"
+      ]
+    }
+  },
+  "retire": [
+    "/.claude/hooks/ntfy.ps1"
+  ]
+}

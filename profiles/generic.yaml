@@ -1,0 +1,22 @@
+# The fallback project type: what a project gets today, with nothing added. A project with no
+# `type:` in projects.yaml is treated as this one (PRD docs/prd/project-types-and-inline-asks.md
+# 6.2). Schema and checks: nomad_projects/profiles.py. Nothing reads profiles yet (#1369).
+id: generic
+title: Generic
+description: Any project that fits no other type. Today's behaviour, unchanged.
+
+interview:
+  ask: []        # extra questions on top of the default ones
+  skip: []       # default questions this type does not ask
+
+stack: {}        # stack defaults, e.g. {language: python}
+policies: []     # ids of type policies (policies/types/<id>.yaml): MCP, skill and tool grants
+agents: []       # [{role: <name>, lane: <lane>}]
+
+gates:
+  pre_merge: []  # empty = the project's own gate from projects.yaml
+  milestone: []
+
+files: []        # paths the repo must contain, relative to its root
+
+autopilot: {}    # defaults for the autopilot block (cap, model, max_budget_usd, lanes)

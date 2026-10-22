@@ -1,5 +1,5 @@
 [Unit]
-Description=NOMAD local audio generation (ACE-Step on the RTX 5090)
+Description=NOMAD local audio generation (ACE-Step + Stable Audio Open on the RTX 5090)
 After=network-online.target
 Wants=network-online.target
 
@@ -7,10 +7,14 @@ Wants=network-online.target
 Type=simple
 # %h = the user's home. Assumes the repo at ~/nomad; adjust if cloned elsewhere.
 WorkingDirectory=%h/nomad/nomad-audio
-# Binds 127.0.0.1 (server.py default, #821). The v2 engine container still reaches it via
-# host.docker.internal:8220 (Docker Desktop's gateway lands on host loopback).
-ExecStart=%h/nomad/nomad-audio/.venv/bin/python %h/nomad/nomad-audio/server.py
+# Binds 127.0.0.1 (server.py default, #821), plus the Docker bridge gateway: under Docker Engine
+# the v2 engine container reaches host.docker.internal:8220 there (#383).
+# run.sh picks the 1.5 clone's venv or .venv (v1) from ACE_STEP_VERSION. Rollback: set it to 1 with
+# `systemctl --user edit nomad-audio`, then restart.
+ExecStart=/bin/bash %h/nomad/nomad-audio/run.sh
 Environment=NOMAD_AUDIO_PORT=8220
+Environment=NOMAD_BRIDGE_IP=172.17.0.1
+Environment=ACE_STEP_VERSION=1.5
 Restart=on-failure
 RestartSec=5
 

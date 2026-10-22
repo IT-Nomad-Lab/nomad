@@ -1,0 +1,14 @@
+id: website-default
+role: permission
+description: >-
+  Website projects. Design read (Figma) comes from design-read. Hostinger hosting, DNS and
+  domains stay off: a deploy is a production change, so the project asks for them by name.
+settings:
+  cap: 2
+statements:
+  - sid: website-skills
+    effect: allow
+    kind: skill
+    # Plugin skills, `<plugin>:<skill>` (#1404): visual design, and the technical side of SEO.
+    match: [frontend-design:frontend-design, searchfit-seo:technical-seo, searchfit-seo:on-page-seo,
+            searchfit-seo:schema-markup]

@@ -106,6 +106,12 @@ DENIED = [
     f"git -C {RM_REPO} merge --ff-only feat/x", f"git -C {RM_REPO} commit -m x",
     "rm -rf Assets", "rm -fr /tmp/x", "rm -r Library", "TIMEOUT=1 git push",
     "ls && git push", f"git -C {RM_WT} status && git -C {RM_WT} reset --hard",
+    # gh is read-only (#926): any method or body flag on `gh api` is a write
+    "gh api -X DELETE repos/o/r", "gh api repos/o/r -X DELETE", "gh api repos/o/r -XPATCH",
+    "gh api repos/o/r/issues --method POST", "gh api repos/o/r/issues --method=POST",
+    "gh api repos/o/r/issues -f title=x", "gh api repos/o/r/labels -F name=x",
+    "gh api repos/o/r/issues --field title=x", "gh api repos/o/r/issues --raw-field title=x",
+    "gh api repos/o/r/issues --input body.json",
 ]
 ALLOWED = [
     "git status", "git diff --stat", "git log --oneline -5", "git rev-parse HEAD",
@@ -115,12 +121,21 @@ ALLOWED = [
     "ls -la", "grep -rn Foo Assets", "cd Assets", "cd Assets && ls",
     f"{STATE}/bin/runematch-test-PlayMode", f"{STATE}/bin/runematch-test-EditMode BLK6",
     f"{STATE}/bin/runematch-gate-1", f"{STATE}/bin/runematch-post-test-1",
+    "gh search repos qwen-mm-plugins --limit 10", "gh repo view QwenLM/Qwen-MM-Plugins",
+    "gh api repos/QwenLM/Qwen-MM-Plugins --jq .fork", "gh api orgs/QwenLM",
+    "gh api users/octocat", "gh api search/repositories?q=x", "gh pr view 12",
+    "gh pr diff 12", "gh issue list --limit 5", "gh release view v1 --repo o/r",
+    "gh run view 123 --log",
 ]
 REFUSED = [   # not denied, but no allow rule: dontAsk refuses them
     "git add x", "git commit -m x", "git merge master", "git checkout -- Assets",
     "scripts/unity.sh test EditMode", "flock /tmp/runematch-playmode.lock scripts/unity.sh x",
     f"{STATE}/bin/runematch-gate-1 extra", "python3 -c 'print(1)'", "curl https://x",
     f"git -C /mnt/c/Users/josia/Projects/RuneMatch-wt/lane-A commit -m x", "sed -i s/a/b/ x",
+    "gh pr merge 12", "gh pr create", "gh pr comment 12 -b x", "gh issue create",
+    "gh repo clone o/r", "gh repo delete o/r", "gh release create v1", "gh auth token",
+    "gh secret list", "gh api graphql", "gh api user", "gh workflow run x",
+    "gh repo edit o/r", "gh run rerun 1",
 ]
 
 
@@ -384,6 +399,116 @@ def test_no_nomad_pm_means_no_run(tmp_path, mcp_source, content):
         P.write_criteria(str(tmp_path / "st"))
 
 
+# ---- default branch and the shared rules (#989) ------------------------------------------------
+
+# The template lines #989 adds. A worker can't write the template (the nomad entry's
+# deny_edit_globs), so until the operator applies them the real-template tests below are xfail.
+RULES_989 = {
+    "deny": [
+        "Bash(git switch {default_branch} *)",
+        "Bash(git switch * {default_branch} *)",
+        "Bash(git checkout {default_branch} *)",
+        "Bash(git checkout * {default_branch} *)",
+        "Bash(git -C {worktree} switch {default_branch} *)",
+        "Bash(git -C {worktree} switch * {default_branch} *)",
+        "Bash(git -C {worktree} checkout {default_branch} *)",
+        "Bash(git -C {worktree} checkout * {default_branch} *)",
+        "Edit(**/AUTONOMY*.md)",
+        "Edit(//**/AUTONOMY*.md)",
+    ],
+}
+
+
+def _template_989():
+    t = P.load_template()
+    t["permissions"]["deny"] = list(dict.fromkeys(t["permissions"]["deny"] + RULES_989["deny"]))
+    return t
+
+
+def test_protected_branches_are_main_master_and_the_default(tmp_path):
+    assert P.protected_branches(str(tmp_path / "nope")) == ["main", "master"]   # no repo
+    assert P.protected_branches(str(tmp_path), "trunk") == ["main", "master", "trunk"]
+    assert P.protected_branches(str(tmp_path), "master") == ["main", "master"]
+    for bad in ("a b", "x)", "*", "-x", "a..b"):
+        with pytest.raises(ConfigError, match="default branch"):
+            P.protected_branches(str(tmp_path), bad)
+
+
+def test_protected_branches_looks_the_default_up_in_the_repo(tmp_path):
+    repo = tmp_path / "r"
+    subprocess.run(["git", "init", "-q", "-b", "trunk", str(repo)], check=True)
+    subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t",
+                    "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "x"], check=True)
+    subprocess.run(["git", "-C", str(repo), "update-ref", "refs/remotes/origin/trunk", "HEAD"],
+                   check=True)
+    subprocess.run(["git", "-C", str(repo), "symbolic-ref", "refs/remotes/origin/HEAD",
+                    "refs/remotes/origin/trunk"], check=True)
+    assert P.protected_branches(str(repo)) == ["main", "master", "trunk"]
+
+
+def test_a_default_branch_rule_renders_once_per_protected_branch(tmp_path):
+    wt = str(tmp_path / "wt")
+    t = {"permissions": {"deny": ["Bash(git -C {worktree} switch {default_branch} *)",
+                                  "Bash(git push *)"]}}
+    d = P.render_template(wt, str(tmp_path), "/st", t, ["main", "master", "trunk"])
+    assert d["permissions"]["deny"] == [f"Bash(git -C {wt} switch main *)",
+                                        f"Bash(git -C {wt} switch master *)",
+                                        f"Bash(git -C {wt} switch trunk *)", "Bash(git push *)"]
+
+
+def _settings_989(tmp_path, template):
+    p = _project(tmp_path, BASE)
+    wt = str(tmp_path / "p-wt" / "ap-1")
+    s = P.build_settings(p, wt, state_dir=str(tmp_path / "st"), template=template,
+                         default_branch="trunk")
+    return s, wt
+
+
+SWITCH_DENIED = [
+    "git -C {wt} switch trunk", "git -C {wt} switch master", "git -C {wt} switch main",
+    "git -C {wt} switch --detach trunk", "git -C {wt} switch -m master",
+    "git -C {wt} checkout trunk", "git -C {wt} checkout -q master", "git switch trunk",
+    "git checkout master", "git -C {wt} status && git -C {wt} switch trunk",
+]
+SWITCH_ALLOWED = ["git -C {wt} switch feat/1-x", "git -C {wt} switch feat/1-master-fix",
+                  "git -C {wt} merge trunk"]
+
+
+def _check_switch(s, wt):
+    for c in SWITCH_DENIED:
+        assert P.decide_bash(s, c.format(wt=wt)) == "deny", c
+    for c in SWITCH_ALLOWED:
+        assert P.decide_bash(s, c.format(wt=wt)) == "allow", c
+
+
+def _check_autonomy_edits(s, wt):
+    deny = s["permissions"]["deny"]
+    assert "Edit(**/AUTONOMY*.md)" in deny and "Edit(//**/AUTONOMY*.md)" in deny
+    for rule, cwd in [("Edit(**/AUTONOMY*.md)", wt), ("Edit(//**/AUTONOMY*.md)", "/elsewhere")]:
+        one = {"permissions": {"deny": [rule]}}       # each form on its own
+        for f in ("autopilot/AUTONOMY.template.md", "AUTONOMY.md", "docs/AUTONOMY.md"):
+            assert P.decide_edit(one, f"{wt}/{f}", cwd=cwd) == "deny", (rule, f)
+    for f in ("autopilot/AUTONOMY.template.md", "AUTONOMY.md"):
+        assert P.decide_edit(s, f"{wt}/{f}", cwd=wt) == "deny", f
+    assert P.decide_edit(s, f"{wt}/autopilot/worker.py", cwd=wt) == "allow"
+
+
+def test_rules_989_refuse_switching_to_the_default_branch(tmp_path):
+    _check_switch(*_settings_989(tmp_path, _template_989()))
+
+
+def test_rules_989_refuse_edits_to_the_shared_rules(tmp_path):
+    _check_autonomy_edits(*_settings_989(tmp_path, _template_989()))
+
+
+def test_the_template_refuses_switching_to_the_default_branch(tmp_path):
+    _check_switch(*_settings_989(tmp_path, None))
+
+
+def test_the_template_refuses_edits_to_the_shared_rules(tmp_path):
+    _check_autonomy_edits(*_settings_989(tmp_path, None))
+
+
 # ---- the real claude CLI (opt-in) ---------------------------------------------------------------
 
 CLAUDE_CASES = {   # command -> must it be refused (denied or not allowed)?
@@ -443,6 +568,38 @@ def test_claude_cli_enforces_the_profile(wrapped):
         assert (f in refused_files) == CLAUDE_WRITES[tmpl], (f, sorted(refused_files))
         assert os.path.exists(f) != CLAUDE_WRITES[tmpl], f
     assert not os.path.exists(os.path.join(w["wt"], "CLAUDE.md"))
+
+
+# ---- no-grant golden files (#979, PRD ap-permission-grants 5.7) --------------------------------
+
+GOLDEN_DIR = os.path.join(os.path.dirname(__file__), "testdata", "golden")
+GOLDEN_HOME = "/home/op"        # entry paths resolve here, so the files hold no machine paths
+
+
+def _golden_projects():
+    return [p for p in projects.load(REAL, base=GOLDEN_HOME) if p.autopilot]
+
+
+def _golden_text(p):
+    wt = os.path.join(p.autopilot.worktree_root, "ap-1")
+    s = P.build_settings(p, wt, state_dir=STATE, default_branch="master")
+    return json.dumps(s, indent=2) + "\n"
+
+
+@pytest.mark.parametrize("pid", [p.id for p in _golden_projects()])
+def test_no_grant_profile_is_byte_identical_to_the_golden_file(pid):
+    """Rendered at the commit before #979. A missing file is written and the test fails, so a
+    new golden is always reviewed and committed, never taken silently."""
+    p = next(p for p in _golden_projects() if p.id == pid)
+    path = os.path.join(GOLDEN_DIR, f"{pid}-settings.json")
+    text = _golden_text(p)
+    if not os.path.exists(path):
+        os.makedirs(GOLDEN_DIR, exist_ok=True)
+        with open(path, "w") as f:
+            f.write(text)
+        pytest.fail(f"golden file {path} written; review and commit it")
+    with open(path) as f:
+        assert text == f.read()
 
 
 # ---- snapshot regeneration ----------------------------------------------------------------------

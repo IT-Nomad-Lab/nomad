@@ -78,6 +78,12 @@ class FakeChat:
         self.dms.append(content)
         return 0
 
+    refused = set()                              # boards Zulip won't make a stream for
+
+    def stream_for(self, board, fallback):
+        name = R.project_stream(board, fallback)
+        return fallback if name in self.refused else name
+
     def resolve(self, mid, topic):
         self.resolved.append((mid, topic))
 
@@ -224,6 +230,16 @@ def test_blocked_task_alert_and_skip(tmp_path):
     assert "3/12" in chat.on("projects")[0][3]
 
 
+
+def test_blocked_from_project_goals_needs_no_project_call(tmp_path):
+    r, eng, chat = make(tmp_path)
+    eng.projects = [{"goal_id": 8, "title": "NOMAD", "done": 2, "total": 12, "pct": 17, "blocked": []}]
+    r.sync_projects()
+    eng.projects[0]["blocked"] = [{"task_id": 61, "title": "Wire X", "status": "Blocked", "lane": "dev"}]
+    eng.tasks["8"] = []                                 # /project would say nothing is blocked
+    r.sync_projects()
+    assert "Wire X" in chat.on("alerts")[0][3]
+
 def test_alerts_post_and_recover_once(tmp_path):
     r, eng, chat = make(tmp_path)
     eng.alerts = [{"key": "down:LiteLLM", "severity": "critical", "text": "LiteLLM is offline."},
@@ -275,7 +291,7 @@ def test_a_gate_for_a_project_task_names_the_board_and_links_the_task(tmp_path):
     assert head.startswith("**Project:** `nomad-work` (NOMAD work)")
     assert "[#812 Fix the gate](https://pm.example/work_packages/812)" in head
     assert g[2] == "nomad-work · run g1"
-    runs = chat.on("runs")[-1]
+    runs = chat.on("nomad-work")[-1]                     # #1123: the board's own stream
     assert runs[2] == g[2] and "`nomad-work`" in runs[3]
 
 
@@ -636,3 +652,101 @@ def test_without_a_cockpit_address_the_messages_read_as_before(tmp_path):
 def test_the_run_id_is_quoted_in_the_link():
     assert R.run_url(TAILNET + "/", "a/b c") == f"{TAILNET}/cockpit/run/a%2Fb%20c"
     assert R.run_url("", "g1") is None and R.run_url(TAILNET, "") is None
+
+
+# ── #1123: one stream per project ───────────────────────────────────────────────────────────────
+def test_project_stream_names():
+    assert R.project_stream("runematch", "projects") == "runematch"
+    assert R.project_stream(None, "projects") == "projects"
+    assert R.project_stream("Bad Name!", "runs") == "runs"           # not a board identifier
+    for shared in ("gate", "alerts", "runs", "projects", "digest", "autopilot", "nomad-portfolio"):
+        assert R.project_stream(shared, "projects") == "projects"    # never hijack a shared channel
+
+
+def test_wp_topic_goes_to_its_board_stream_and_replies_still_comment(tmp_path):
+    r, eng, chat = make(tmp_path)
+    pm_ev(eng, watched=True, blocked=False, to="Ready", status="Ready", board="runematch")
+    r.sync_pm()
+    assert chat.sent[-1][1:3] == ("runematch", "wp 112")
+    r.handle_event(stream("runematch", "wp 112", "use the staging key", mid=601))
+    assert ("/pm-comment", {"wp_id": 112, "text": "use the staging key"}) in eng.posts
+
+
+def test_blocked_still_alerts_the_shared_channel(tmp_path):
+    r, eng, chat = make(tmp_path)
+    pm_ev(eng, watched=True, board="runematch")
+    r.sync_pm()
+    assert {s[1] for s in chat.sent} == {"runematch", "alerts"}
+
+
+def test_refused_or_missing_board_falls_back(tmp_path):
+    r, eng, chat = make(tmp_path)
+    chat.refused = {"civis"}
+    pm_ev(eng, watched=True, blocked=False, to="Ready", status="Ready", board="civis")
+    pm_ev(eng, wp_id=113, watched=True, blocked=False, to="Ready", status="Ready")   # no board
+    r.sync_pm()
+    assert [s[1] for s in chat.sent] == ["projects", "projects"]
+
+
+def test_run_lifecycle_goes_to_the_board_stream(tmp_path):
+    r, eng, chat = make(tmp_path)
+    eng.add("b1", "awaiting-approval", project={"board": "nomad-crm"})
+    eng.add("n1", "awaiting-approval")
+    r.sync_runs()
+    feed = {s[2]: s[1] for s in chat.sent if s[1] != "gate"}
+    assert feed == {"nomad-crm · run b1": "nomad-crm", "run n1": "runs"}
+
+
+class _SubClient:
+    def __init__(self, ok=True):
+        self.ok, self.calls = ok, []
+
+    def add_subscriptions(self, streams, principals=None, announce=False):
+        self.calls.append((streams[0]["name"], principals))
+        return {"result": "success"} if self.ok else {"result": "error", "msg": "Insufficient permission"}
+
+
+def test_chat_creates_a_stream_once_and_falls_back_when_refused():
+    c = relay.Chat(_SubClient())
+    c.principals = [OP, BOT]
+    assert c.stream_for("runematch", "projects") == "runematch"
+    assert c.stream_for("runematch", "runs") == "runematch"
+    assert c.c.calls == [("runematch", [OP, BOT])]                  # subscribed once
+    assert c.stream_for(None, "projects") == "projects" and len(c.c.calls) == 1
+    no = relay.Chat(_SubClient(ok=False))
+    assert no.stream_for("civis", "projects") == "projects"
+
+
+def test_project_streams_backfill_is_idempotent_and_skips_shared_names():
+    import project_streams as ps
+    c = _SubClient()
+    res = ps.ensure(c, ["runematch", "projects", "civis"], [OP, BOT])
+    assert res == {"runematch": "ok", "projects": "skipped: not a usable stream name", "civis": "ok"}
+    assert ps.ensure(_SubClient(ok=False), ["civis"], [OP])["civis"].startswith("error")
+    assert ps.ensure(c, ["shift"], [OP], dry=True) == {"shift": "would create"} and len(c.calls) == 2
+
+
+class _ArchClient:
+    def __init__(self, known=("civis",), ok=True):
+        self.known, self.ok, self.deleted = set(known), ok, []
+
+    def get_stream_id(self, name):
+        if name in self.known:
+            return {"result": "success", "stream_id": 7}
+        return {"result": "error", "msg": "Invalid stream name 'x'"}
+
+    def call_endpoint(self, url, method):
+        self.deleted.append((method, url))
+        return {"result": "success"} if self.ok else {"result": "error", "msg": "Must be an organization administrator"}
+
+
+def test_project_streams_archive_deletes_only_project_streams_and_reports_each(  # #1200
+):
+    import project_streams as ps
+    c = _ArchClient()
+    res = ps.archive(c, ["civis", "gone", "projects", "autopilot"])
+    assert res == {"civis": "ok", "gone": "ok: no such stream",
+                   "projects": "skipped: not a project stream", "autopilot": "skipped: not a project stream"}
+    assert c.deleted == [("DELETE", "streams/7")]
+    assert ps.archive(_ArchClient(ok=False), ["civis"])["civis"].startswith("error: Must be")
+    assert ps.archive(_ArchClient(), ["civis"], dry=True) == {"civis": "would archive"}

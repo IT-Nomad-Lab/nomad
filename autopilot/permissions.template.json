@@ -63,7 +63,24 @@
       "Bash(wc *)",
       "Bash(echo *)",
       "Bash(pwd *)",
-      "Bash(mkdir *)"
+      "Bash(mkdir *)",
+
+      "Bash(gh search *)",
+      "Bash(gh repo view *)",
+      "Bash(gh release list *)",
+      "Bash(gh release view *)",
+      "Bash(gh issue list *)",
+      "Bash(gh issue view *)",
+      "Bash(gh pr list *)",
+      "Bash(gh pr view *)",
+      "Bash(gh pr diff *)",
+      "Bash(gh pr checks *)",
+      "Bash(gh run list *)",
+      "Bash(gh run view *)",
+      "Bash(gh api repos/*)",
+      "Bash(gh api orgs/*)",
+      "Bash(gh api users/*)",
+      "Bash(gh api search/*)"
     ],
     "deny": [
       "Bash(git push *)",
@@ -93,6 +110,14 @@
       "Bash(git -C {worktree} switch -C *)",
       "Bash(git -C {worktree} switch --discard-changes*)",
       "Bash(git -C {worktree} switch * --discard-changes*)",
+      "Bash(git switch {default_branch} *)",
+      "Bash(git switch * {default_branch} *)",
+      "Bash(git checkout {default_branch} *)",
+      "Bash(git checkout * {default_branch} *)",
+      "Bash(git -C {worktree} switch {default_branch} *)",
+      "Bash(git -C {worktree} switch * {default_branch} *)",
+      "Bash(git -C {worktree} checkout {default_branch} *)",
+      "Bash(git -C {worktree} checkout * {default_branch} *)",
 
       "Bash(git -C {repo} push *)",
       "Bash(git -C {repo} stash *)",
@@ -110,12 +135,27 @@
       "Bash(rm -R *)",
       "Bash(rm --recursive *)",
 
+      "Bash(gh api -X*)",
+      "Bash(gh api * -X*)",
+      "Bash(gh api --method*)",
+      "Bash(gh api * --method*)",
+      "Bash(gh api -f*)",
+      "Bash(gh api * -f*)",
+      "Bash(gh api -F*)",
+      "Bash(gh api * -F*)",
+      "Bash(gh api --field*)",
+      "Bash(gh api * --field*)",
+      "Bash(gh api --raw-field*)",
+      "Bash(gh api * --raw-field*)",
+      "Bash(gh api --input*)",
+      "Bash(gh api * --input*)",
+
       "Edit(**/AGENTS.md)",
       "Edit(//**/AGENTS.md)",
       "Edit(**/CLAUDE.md)",
       "Edit(//**/CLAUDE.md)",
-      "Edit(**/AUTONOMY.md)",
-      "Edit(//**/AUTONOMY.md)",
+      "Edit(**/AUTONOMY*.md)",
+      "Edit(//**/AUTONOMY*.md)",
       "Edit(**/.claude/**)",
       "Edit(//**/.claude/**)",
       "Edit(~/.claude/**)",
@@ -124,7 +164,15 @@
       "Edit(**/projects.yaml)",
       "Edit(//**/projects.yaml)",
       "Edit(/{repo}/**)",
-      "Edit(/{state_dir}/**)"
+      "Edit(/{state_dir}/**)",
+
+      "Bash(*cockpit-token*)",
+      "Bash(*cockpit_token*)",
+      "Bash(*guardrail-save*)",
+      "Bash(*X-Nomad-Cockpit*)",
+      "Read(~/.config/nomad/cockpit-token)",
+      "Read(//**/cockpit-token)",
+      "Edit(~/.config/nomad/cockpit-token)"
     ]
   }
 }

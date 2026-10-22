@@ -46,8 +46,40 @@ def test_it_reads_the_engine_proxy_not_the_supervisor():
 def test_run_starts_and_stop_asks_finish_or_kill():
     assert "`/projects/${encodeURIComponent(pid)}/start`" in AP
     assert "`/projects/${encodeURIComponent(pid)}/stop`, {mode}" in AP
-    assert "apStopMode(this.dataset.pid,'finish')" in AP and "apStopMode(this.dataset.pid,'kill')" in AP
+    assert "apStopMode(this.dataset.pid,'finish')" in AP and "apKillAsk(this.dataset.pid)" in AP
     assert "Let them finish" in AP and "Kill them" in AP
+
+
+# ── #998: Let them finish sent kill. No single click kills; a poll leaves an open question alone ─
+
+def test_no_button_sends_kill_in_one_click():
+    """Every onclick that reaches mode kill goes through the confirm, which is its own button."""
+    assert "apStopMode(this.dataset.pid,'kill')" not in AP
+    assert AP.count("apKillAsk(this.dataset.pid)") == 2              # Kill them, and Kill N worker(s)
+    assert "onclick=\"apKillConfirm(this.dataset.pid)\"" in AP
+    confirm = AP[AP.index("function apKillConfirm"):AP.index("const AP_HOVER_HOLD_MS")]
+    assert "Date.now()-t<AP_KILL_ARM_MS) return;" in confirm and "apStopMode(pid,'kill')" in confirm
+    # apStopMode(…,'kill') appears nowhere else in the page
+    assert AP.count("apStopMode(pid,'kill')") == 1
+
+
+def test_the_ask_row_puts_finish_first_and_kill_on_the_far_side():
+    ask = AP[AP.index("apAsk.has(pid) ? `<div class=ask>"):]
+    ask = ask[:ask.index("</div>` : ''")]
+    assert ask.index("Let them finish") < ask.index("Cancel") < ask.index("class=sp") < ask.index("Kill them")
+    assert 'class="apbtn run" data-pid="${a}" onclick="apStopMode(this.dataset.pid,\'finish\')"' in ask
+    assert ".ap .ask .sp{flex:1 1 24px}" in C
+
+
+def test_a_poll_does_not_redraw_under_an_open_stop_question():
+    assert "if(!apDecideBusy() && !apHold()) drawProjects();" in AP
+    assert "if(!apHold()) drawProjects();" in C[C.index("async function pollProjects"):C.index("pollProjects(); setInterval")]
+    hold = AP[AP.index("function apHold"):AP.index("function apHold") + 200]
+    assert "apAsk.size>0 || apKill.size>0" in hold
+
+
+def test_the_result_says_which_mode_was_sent():
+    assert "Stop sent (kill)" in AP and "Stop sent (finish)" in AP
 
 
 def test_the_strip_edits_the_budget_and_caps_through_config():
@@ -70,8 +102,8 @@ def test_controls_are_phone_sized():
     assert "@media (max-width:600px){ .ap .acts{margin-left:0}" in C
 
 
-def test_the_strip_sits_above_the_projects_panel():
-    assert C.index("<div id=apstrip") < C.index("<div id=projects")
+def test_the_autopilot_strip_lives_under_more():
+    assert "<div id=apstrip" in C.split("<section id=dest-more")[1].split("</section>")[0]
 
 
 def test_a_refused_write_is_shown_not_swallowed():
@@ -199,6 +231,34 @@ def test_stop_asks_only_when_workers_are_running():
     assert r["calls"] == [["civis-poc", "finish"]]
     assert r["asked"] == ["runematch"]
     assert "Let them finish" in r["line"] and "Kill them" in r["line"] and "Cancel" in r["line"]
+
+
+@needs_node
+def test_kill_needs_a_separate_confirm_click():
+    """#998: Kill them and Kill N worker(s) only arm; a confirm in the same instant is ignored."""
+    r = run_node(js_setup() + """
+      const calls=[]; apStopMode=(pid,mode)=>calls.push([pid,mode]);
+      let t=Date.now(); Date.now=()=>t;
+      apStop('runematch'); apKillAsk('runematch');
+      const armed=apLine('runematch'); apKillConfirm('runematch'); const early=[...calls];
+      t+=1000; apKillConfirm('runematch');
+      apKillAsk('gone'); apKillOff('gone'); t+=1000; apKillConfirm('gone');
+      console.log(JSON.stringify({armed, early, calls, gone: apLine('gone')}));""")
+    assert "Confirm kill" in r["armed"] and "Let them finish" not in r["armed"]
+    assert r["early"] == []
+    assert r["calls"] == [["runematch", "kill"]]                 # gone was cancelled, never sent
+    assert "Confirm kill" not in r["gone"] and "Kill 1 worker</span>" in r["gone"]
+
+
+@needs_node
+def test_a_poll_leaves_an_open_stop_question_alone():
+    r = run_node(js_setup() + """
+      global.fetch=async ()=>({ok:true,status:200,json:async()=>apData});
+      global.document={getElementById:()=>({innerHTML:'',textContent:'',className:'',contains:()=>false})};
+      apStop('runematch'); const d0=drawn;
+      apPoll().then(async ()=>{ const held=drawn-d0; apAskOff('runematch'); const d1=drawn;
+        await apPoll(); console.log(JSON.stringify({held, after: drawn-d1})); });""")
+    assert r == {"held": 0, "after": 1}
 
 
 @needs_node
@@ -363,7 +423,7 @@ def test_the_switch_posts_on_and_off():
 
 def test_decide_posts_to_the_engine_and_a_poll_spares_the_answer_box():
     assert "apPost(`/tasks/${encodeURIComponent(d.id)}/decide`, {decision:d.decision, text})" in AP
-    assert "if(!apDecideBusy()) drawProjects();" in AP
+    assert "if(!apDecideBusy() && !apHold()) drawProjects();" in AP
     rule = C[C.index(".ap .apdec textarea{"):C.index("}", C.index(".ap .apdec textarea{"))]
     assert "min-height:44px" in rule
 
@@ -404,3 +464,23 @@ def test_reject_needs_a_reason_and_approve_sends_the_answer():
     assert "Approve #12" in r["kept"] and ">  (a)  </textarea>" in r["kept"]
     assert r["sent"] == [["/api/autopilot/tasks/12/decide", {"decision": "approve", "text": "(a)"}]]
     assert r["msg"]["ok"] is True and "Approved" in r["msg"]["text"] and r["open"] is False
+
+
+@needs_node
+def test_a_multi_line_answer_is_sent_whole():
+    # #982: the box is a textarea, and a redraw puts every line back.
+    r = run_node(js_setup() + """
+      const sent=[];
+      global.fetch=async (url,opt)=>{ if(opt&&opt.method==='POST'){ sent.push(JSON.parse(opt.body));
+          return {ok:true,status:200,text:async()=>JSON.stringify({ok:true,task:12,status:'Approved'})}; }
+        return {ok:true,status:200,json:async()=>apData}; };
+      global.document={activeElement:null, getElementById:()=>({innerHTML:'',textContent:'',className:'',contains:()=>false})};
+      (async()=>{
+        apDecideOpen('civis-poc','12','approve');
+        apDecideText({dataset:{pid:'civis-poc'}, value:'really contain\\n`Bash(git restore *)`\\n\\nthen (2)\\n'});
+        const kept=apLine('civis-poc');
+        await apDecideSend('civis-poc');
+        console.log(JSON.stringify({kept, sent}));
+      })();""")
+    assert "<textarea" in r["kept"] and ">really contain\n`Bash(git restore *)`\n\nthen (2)\n</textarea>" in r["kept"]
+    assert r["sent"] == [{"decision": "approve", "text": "really contain\n`Bash(git restore *)`\n\nthen (2)"}]

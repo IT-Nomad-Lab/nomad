@@ -127,7 +127,7 @@ def test_only_those_autopilot_routes_open(path):
 
 
 @pytest.mark.parametrize("path", ["/capture", "/api/chat", "/plan-project", "/run-backlog",
-                                  "/pm-hook", "/a-route-invented-in-2027"])
+                                  "/pm-hook", "/withdraw", "/a-route-invented-in-2027"])
 def test_every_other_write_is_closed(path):
     """An allowlist, so a route added later is closed through the proxy until someone opens it."""
     assert server._auth_check(via(), path, "POST")[0] == 403
@@ -164,8 +164,7 @@ def no_model(monkeypatch):
     """Nothing that starts, approves or forgets may run. Each of these fails the test if reached."""
     def boom(*a, **k):
         raise AssertionError("reached a handler that acts")
-    for name in ("_handle_gate_decision", "_handle_pipeline_capture", "_handle_start_project",
-                 "_handle_self_develop", "_handle_research"):
+    for name in ("_handle_gate_decision", "_handle_pipeline_capture"):
         monkeypatch.setattr(server, name, boom)
     monkeypatch.setattr(server.eng, "resume_run", boom)
     monkeypatch.setattr(server.eng, "start_run", boom)
@@ -194,11 +193,17 @@ def test_remote_diagnostics_is_answered(monkeypatch, no_model):
     assert server.chat_reply("run diagnostics", remote=True)["reply"] == "all quiet"
 
 
-def test_the_same_approve_still_works_on_the_laptop(monkeypatch):
+def test_the_same_approve_still_works_by_voice_on_the_laptop(monkeypatch):
+    """#973: the typed box gets the pointer reply; a voice turn on the laptop still decides."""
     monkeypatch.setitem(server.ACTION_INTENTS, "gate_decision", lambda p: "shown")
     import memory_chat
     monkeypatch.setattr(memory_chat, "remember", lambda *a, **k: None)
-    assert server.chat_reply("approve")["reply"] == "shown"
+    assert server.chat_reply("approve", surface="voice")["reply"] == "shown"
+    assert server.chat_reply("approve")["reply"] == server.CHAT_POINTER
+
+
+def test_a_voice_flag_does_not_open_the_gate_through_the_proxy(no_model):
+    assert _post_chat({"message": "approve", "voice": True}, via()).json().get("refused")
 
 
 def _post_chat(body, headers):
@@ -228,3 +233,15 @@ def test_the_page_through_the_proxy_hides_capture_and_voice():
     assert "<body class=remote>" in remote and "<body class=remote>" not in local
     # !important, because #voicebar sets display:flex inline and an inline style beats a rule.
     assert "body.remote #voicebar,body.remote #ccap{display:none!important}" in remote
+
+
+# ── #1407: answering an agent's ask from the phone ─────────────────────────────────────────────
+
+def test_the_operator_can_answer_an_ask_from_the_cockpit_page():
+    assert server._auth_check(via(), "/api/asks/decide", "POST") == (0, "")
+
+
+@pytest.mark.parametrize("h", [via(origin="https://evil.example"), via(origin=None),
+                               via(login="someone@example.com")])
+def test_an_ask_answer_from_another_page_or_login_is_refused(h):
+    assert server._auth_check(h, "/api/asks/decide", "POST")[0] == 403

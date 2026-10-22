@@ -1,0 +1,11 @@
+[Unit]
+Description=NOMAD vault: unseal OpenBao after (re)start
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=%h/nomad/vault/unseal.sh
+RemainAfterExit=no
+
+[Install]
+WantedBy=default.target

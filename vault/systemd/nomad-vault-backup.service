@@ -1,0 +1,6 @@
+[Unit]
+Description=NOMAD vault: nightly raft snapshot
+
+[Service]
+Type=oneshot
+ExecStart=%h/nomad/vault/backup.sh

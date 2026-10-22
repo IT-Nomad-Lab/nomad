@@ -1,0 +1,8 @@
+id: docs-audit
+role: permission
+description: Every typed project may run the agent-docs-audit skill (checks AGENTS.md / CLAUDE.md against the repo).
+statements:
+  - sid: docs-audit-skill
+    effect: allow
+    kind: skill
+    match: [agent-docs-audit]

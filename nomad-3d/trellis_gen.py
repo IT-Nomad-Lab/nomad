@@ -5,6 +5,10 @@
 
 Loads the local weights copy (~/vendor/trellis2/weights), whose pipeline.json uses the MIT BiRefNet
 for background removal, not the non-commercial RMBG-2.0.
+
+GPU admission (#1462): the whole batch holds /tmp/nomad-gpu.lock (dispatcher/gpu_admission.py),
+taken before anything touches CUDA. A busy GPU or a pending gpu_guard restore exits 75 without
+loading; --wait SECONDS retries for that long first. Admission ends when the process does.
 """
 import os
 os.environ.setdefault("ATTN_BACKEND", "xformers")
@@ -12,26 +16,38 @@ os.environ.setdefault("OPENCV_IO_ENABLE_OPENEXR", "1")
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 import argparse
+import gc
+import importlib.util
 import json
 import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, os.path.expanduser("~/vendor/trellis2"))
+HERE = os.path.dirname(os.path.abspath(__file__))
+_spec = importlib.util.spec_from_file_location(
+    "nomad_gpu_admission", os.path.join(HERE, "..", "dispatcher", "gpu_admission.py"))
+gpu_admission = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(gpu_admission)
 
-import torch
-from PIL import Image
-
-# xformers turns FlashAttention-3 on for any capability >= 9.0, but its FA3 kernels are Hopper-only
-# (sm_90a): on the 5090 (sm_120) the first call dies with "flash_fwd_launch_template.h: invalid
-# argument". Fall back to FA2 / cutlass, which both run on Blackwell.
-if torch.cuda.get_device_capability() >= (10, 0):
-    import xformers.ops.fmha.dispatch as _xdispatch
-    _xdispatch._set_use_fa3(False)
+EX_TEMPFAIL = 75
 
 
-from trellis2.pipelines import Trellis2ImageTo3DPipeline
-import o_voxel
+def _load():
+    """Import the CUDA stack. Only ever called while admitted: the first CUDA call allocates."""
+    sys.path.insert(0, os.path.expanduser("~/vendor/trellis2"))
+    import torch
+    from PIL import Image
+
+    # xformers turns FlashAttention-3 on for any capability >= 9.0, but its FA3 kernels are
+    # Hopper-only (sm_90a): on the 5090 (sm_120) the first call dies with
+    # "flash_fwd_launch_template.h: invalid argument". Fall back to FA2 / cutlass, which run on Blackwell.
+    if torch.cuda.get_device_capability() >= (10, 0):
+        import xformers.ops.fmha.dispatch as _xdispatch
+        _xdispatch._set_use_fa3(False)
+
+    from trellis2.pipelines import Trellis2ImageTo3DPipeline
+    import o_voxel
+    return torch, Image, Trellis2ImageTo3DPipeline, o_voxel
 
 
 def main():
@@ -42,9 +58,34 @@ def main():
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--faces", type=int, default=200_000, help="decimation target")
     ap.add_argument("--texture", type=int, default=2048)
+    ap.add_argument("--wait", type=float, default=0.0,
+                    help="seconds to wait for GPU admission before giving up (default: do not wait)")
     a = ap.parse_args()
     a.out_dir.mkdir(parents=True, exist_ok=True)
 
+    try:
+        fd = gpu_admission.wait_admit(a.wait) if a.wait > 0 else gpu_admission.try_admit()
+    except gpu_admission.Busy as e:
+        print(f"trellis_gen: {e}", file=sys.stderr)
+        return EX_TEMPFAIL
+    try:
+        _generate(a)
+    finally:
+        os.close(fd)
+    return 0
+
+
+def _generate(a):
+    """Runs only while admitted, and gives the VRAM back before admission ends."""
+    torch, Image, Trellis2ImageTo3DPipeline, o_voxel = _load()
+    try:
+        _batch(a, torch, Image, Trellis2ImageTo3DPipeline, o_voxel)
+    finally:
+        gc.collect()
+        torch.cuda.empty_cache()
+
+
+def _batch(a, torch, Image, Trellis2ImageTo3DPipeline, o_voxel):
     t0 = time.time()
     pipe = Trellis2ImageTo3DPipeline.from_pretrained(os.path.expanduser("~/vendor/trellis2/weights"))
     pipe.cuda()
@@ -73,4 +114,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

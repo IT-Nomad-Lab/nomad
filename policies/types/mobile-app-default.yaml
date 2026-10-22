@@ -1,0 +1,13 @@
+id: mobile-app-default
+role: permission
+description: >-
+  Mobile app projects. Design read comes from design-read. App store accounts, signing keys and
+  paid device farms are not MCP servers and are never granted here.
+settings:
+  cap: 2
+statements:
+  - sid: mobile-app-skills
+    effect: allow
+    kind: skill
+    # Plugin skill (#1404): visual design for the app's screens.
+    match: [frontend-design:frontend-design]

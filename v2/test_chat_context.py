@@ -121,11 +121,13 @@ def test_a_lookup_failure_does_not_take_the_chat_turn_down(runs, monkeypatch):
     monkeypatch.setattr(memory_chat, "remember", lambda *a, **k: None)
     seen = {}
     monkeypatch.setitem(sys.modules, "runtime", type(sys)("runtime"))
-    sys.modules["runtime"].run = lambda system, user, alias=None, max_tokens=0: (
+    # no run_tools: the tool turn can't start, so this is the no-tools fallback (#970 R5)
+    sys.modules["runtime"].TOOL_TIMEOUT_S = 60
+    sys.modules["runtime"].run = lambda system, user, alias=None, max_tokens=0, timeout_s=None: (
         seen.setdefault("system", system), "an answer")[1]
 
     out = server.chat_reply(f"why did {REAL} fail", session_id="t")
-    assert out["reply"] == "an answer"
+    assert out["reply"].startswith("an answer")
     assert "RUN DETAIL" not in seen["system"]     # degraded, not dead
 
 

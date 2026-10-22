@@ -1,0 +1,26 @@
+# Income Lab operator (proposal nomad-001, redo of nomad-income-lab). Optional: add it to
+# COMPOSE_FILE in .env. Database `income_lab` on the shared Postgres, role `lab_app`.
+# Dry run and kill switch defaults come from the repo; do not set DRY_RUN=false here without
+# an operator decision.
+services:
+  lab-operator:
+    build:
+      context: ../nomad-income-lab
+      dockerfile: deploy/Dockerfile
+    container_name: nomad-lab-operator
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:8120:8120"   # host-only
+      - "172.17.0.1:8120:8120"  # bridge gateway: n8n (own network) calls host.docker.internal:8120
+    environment:
+      - LAB_DATABASE_URL=postgresql://lab_app:${LAB_DB_PASSWORD}@postgres:5432/income_lab
+      - LAB_API_TOKEN=${LAB_API_TOKEN}
+      - LAB_N8N_APPROVAL_URL=http://host.docker.internal:5678/webhook/lab-approval
+      - LAB_N8N_TOKEN=${LAB_N8N_TOKEN}
+      - LAB_PUBLIC_URL=http://host.docker.internal:8120
+      - DRY_RUN=true
+      - KILL_SWITCH=false
+    depends_on:
+      - postgres
+    restart: unless-stopped

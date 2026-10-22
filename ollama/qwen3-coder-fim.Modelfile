@@ -1,0 +1,17 @@
+# #1408: qwen3-coder:30b plus fill-in-the-middle, for Continue tab autocomplete.
+# Ollama's stock tag has TEMPLATE {{ .Prompt }} (chat goes through RENDERER), so it reports
+# "does not support insert". The .Suffix branch adds Qwen's FIM tokens; chat is unchanged.
+FROM qwen3-coder:30b
+TEMPLATE """{{- if .Suffix }}<|fim_prefix|>{{ .Prompt }}<|fim_suffix|>{{ .Suffix }}<|fim_middle|>{{- else }}{{ .Prompt }}{{- end }}"""
+RENDERER qwen3-coder
+PARSER qwen3-coder
+PARAMETER stop <|im_start|>
+PARAMETER stop <|im_end|>
+PARAMETER stop <|endoftext|>
+PARAMETER stop <|fim_pad|>
+PARAMETER stop <|file_sep|>
+PARAMETER stop <|repo_name|>
+PARAMETER temperature 0.7
+PARAMETER top_k 20
+PARAMETER top_p 0.8
+PARAMETER repeat_penalty 1.05

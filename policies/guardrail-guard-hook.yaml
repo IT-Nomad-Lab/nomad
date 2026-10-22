@@ -1,0 +1,83 @@
+id: guardrail-guard-hook
+role: guardrail
+description: >-
+  Layer 1 (PRD docs/prd/project-types-and-inline-asks.md 6.5), imported from the rule sets of
+  .claude/hooks/guard.py (#1391). Patterns are regular expressions (kind command) matched
+  against a Bash command line, case-insensitive, as guard.py does; the protected paths are
+  matched against the path of a Write, Edit, MultiEdit or NotebookEdit call. Not enforced from
+  here: guard.py stays the live hook until the compiler (#1392) renders it from this file.
+  What does not fit a statement stays in guard.py: the fail-closed commit secret scan, the
+  "ask" on a call it cannot parse, COMMIT_SAFE, WRITE_TOOLS and the folding of git's global
+  options (views).
+statements:
+  - sid: guard-commit-bypass
+    effect: deny
+    kind: command
+    # guard.py COMMIT_BYPASS: no agent skips or disarms the pre-commit secret gate.
+    match:
+      - '\bgit\s+commit\b[^|;&\n]*(--no-verify|\s-n\b)'
+      - '\bgit\s+(commit|merge|rebase)\b[^|;&\n]*--no-verify'
+      - '\bgit\s+config\b[^|;&\n]*core\.hooksPath[ \t]+\S'
+      - '\bgit\s+config\b[^|;&\n]*--unset[^|;&\n]*core\.hooksPath'
+      - '\bgit\s+config\b[^|;&\n]*core\.hooksPath[^|;&\n]*--unset'
+      - '\bgit\b[^|;&\n]*\s-c\s*core\.hooksPath\s*='
+      - '\bgit\b[^|;&\n]*--config-env[= ]core\.hooksPath='
+      - '\bchmod\b[^|;&\n]*-x[^|;&\n]*\.githooks'
+      - '\brm\b[^|;&\n]*\.githooks/pre-commit'
+      - '\brm\b[^|;&\n]*secret_scan\.py'
+      - '\b(sed|perl|ruby)\b[^|;&\n]*(\s-[a-z]*i|--in-place)[^|;&\n]*(secret_scan|guard)\.py'
+      - '\b(sed|perl|ruby)\b[^|;&\n]*(\s-[a-z]*i|--in-place)[^|;&\n]*(\.gitleaks\.toml|\.githooks/)'
+      - '\btee\b[^|;&\n]*(secret_scan|guard)\.py'
+      - '\btee\b[^|;&\n]*(\.gitleaks\.toml|\.githooks/)'
+      - '>>?[ \t]*\S*(secret_scan|guard)\.py'
+      - '>>?[ \t]*\S*(\.gitleaks\.toml|\.githooks/)'
+      - '\b(chmod|mv|truncate)\b[^|;&\n]*(secret_scan|guard)\.py'
+      - '\brm\b[^|;&\n]*(guard\.py|\.gitleaks\.toml)'
+  - sid: guard-secret-exposure
+    effect: deny
+    kind: command
+    # guard.py SECRETS: commands that would print or stage a credential.
+    match:
+      - '\b(cat|less|head|tail|bat)\b[^|;&]*\.env(\b|[^a-z])'
+      - '\becho\b[^|;&]*\$\{?[A-Z_]*(KEY|TOKEN|SECRET|PASSWORD)'
+      - '\bgit\s+add\b[^|;&]*\.env(\b|[^a-z.])'
+      - '\bprintenv\b.*(KEY|TOKEN|SECRET)'
+      - 'id_rsa\b'
+      - '\.pem\b'
+  - sid: guard-irreversible
+    effect: ask
+    kind: command
+    # guard.py IRREVERSIBLE: red tier of docs/SDLC.md; the operator confirms.
+    match:
+      - '\bgit\s+push\b'
+      - '\bgit\s+rebase\b\s+.*\bmain\b'
+      - '\bgit\s+reset\s+--hard\s+origin'
+      - '\bgit\s+push\s+.*--force'
+      - '\bgh\s+pr\s+merge\b'
+      - '\bgh\s+release\s+create\b'
+      - '\bnpm\s+publish\b'
+      - '\b(twine|pip)\s+upload\b'
+      - '\bdocker\s+push\b'
+      - '\bdocker\s+compose\s+down\s+.*-v'
+      - '\bdocker\s+volume\s+rm\b'
+      - '\bterraform\s+(apply|destroy)\b'
+      - '\bkubectl\s+(apply|delete)\b'
+      - '\bcloudflared\s+tunnel\b'
+      - '\btailscale\s+funnel\b'
+      - '\bpublish\.sh\b'
+      - '\bn8n\s+update:workflow\b.*--active'
+      - '--active=true'
+      - '\brm\s+-rf\s+(?!/tmp|\./tmp|/var/tmp)\S'
+      - '\bDROP\s+TABLE\b'
+      - '\bTRUNCATE\b'
+      - '\bDELETE\s+FROM\b'
+      - '\bsend[_-]?email\b'
+  - sid: guard-protected-paths
+    effect: deny
+    kind: path
+    # guard.py PROTECTED_PATHS: the gate's own files; a directory covers what is beneath it.
+    match:
+      - '.claude/hooks'
+      - '.claude/settings.json'
+      - '.githooks'
+      - '.gitleaks.toml'

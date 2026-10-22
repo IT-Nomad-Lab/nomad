@@ -3,6 +3,13 @@
 # Service/port map is in README.md. Secrets come from .env (never commit it).
 name: nomad
 
+# host.docker.internal for every service (#383). Docker Desktop defines the name itself; Docker
+# Engine needs it spelled out. `host-gateway` is the daemon's bridge gateway: 172.17.0.1, pinned by
+# "bip" and "host-gateway-ip" in docs/docker-engine/daemon.json. Host-native services listen there
+# as well as on loopback (NOMAD_BRIDGE_IP in their units). Set NOMAD_HOST_GATEWAY only to override.
+x-host-gateway: &host-gateway
+  - "host.docker.internal:${NOMAD_HOST_GATEWAY:-host-gateway}"
+
 services:
   # ── Local models ───────────────────────────────────────────────────
   # NOTE: Ollama runs NATIVELY on Windows (not in Compose), already on the
@@ -13,6 +20,7 @@ services:
   litellm:
     image: ghcr.io/berriai/litellm:main-latest
     container_name: nomad-litellm
+    extra_hosts: *host-gateway
     ports:
       # localhost only: the gateway carries every cloud API key and answers
       # with the master key alone. Containers use http://litellm:4000 over the
@@ -34,15 +42,38 @@ services:
 
   # ── Chat UI + voice + mobile PWA ───────────────────────────────────
   openwebui:
-    image: ghcr.io/open-webui/open-webui:main
+    # Pinned: owui/nomad_pipe.py, nomad_filter.py and nomad_ui.js are written against this
+    # release (0.12.3). To upgrade, check the function API and the loader.js hook, bump
+    # required_open_webui_version, then the digest (#1119, #1137).
+    image: ghcr.io/open-webui/open-webui@sha256:a537bbe1e6b428820f52ed4a029d7fff97062e24d5cf32c365fba36fd0542def
     container_name: nomad-openwebui
+    extra_hosts: *host-gateway
     ports:
       - "127.0.0.1:3000:8080"   # host-only; a browser on this machine is the only client
     volumes:
       - openwebui:/app/backend/data
+      # The Project dropdown (docs/prd/owui-sessions.md §6.5). index.html loads
+      # /static/loader.js, shipped empty; Open WebUI copies this path into its static dir at start.
+      - ./owui/nomad_ui.js:/app/build/static/loader.js:ro
+      # The NOMAD logo (#1218), rendered by owui/brand/render.py. Self-hosted with <=50 users,
+      # so Open WebUI's licence allows the rebrand (docs.openwebui.com/license).
+      - ./owui/brand/static/favicon.png:/app/build/favicon.png:ro
+      - ./owui/brand/static/favicon.png:/app/build/static/favicon.png:ro
+      - ./owui/brand/static/favicon-96x96.png:/app/build/static/favicon-96x96.png:ro
+      - ./owui/brand/static/favicon.ico:/app/build/static/favicon.ico:ro
+      - ./owui/brand/static/favicon.svg:/app/build/static/favicon.svg:ro
+      - ./owui/brand/static/logo.png:/app/build/static/logo.png:ro
+      - ./owui/brand/static/splash.png:/app/build/static/splash.png:ro
+      - ./owui/brand/static/splash-dark.png:/app/build/static/splash-dark.png:ro
+      - ./owui/brand/static/apple-touch-icon.png:/app/build/static/apple-touch-icon.png:ro
+      - ./owui/brand/static/web-app-manifest-192x192.png:/app/build/static/web-app-manifest-192x192.png:ro
+      - ./owui/brand/static/web-app-manifest-512x512.png:/app/build/static/web-app-manifest-512x512.png:ro
     environment:
       - OPENAI_API_BASE_URL=http://litellm:4000/v1
       - OPENAI_API_KEY=${LITELLM_MASTER_KEY}
+      # Signup stays off: a chat can write to nomad-pm (M2). The DB setting already says so;
+      # this keeps a fresh volume the same.
+      - ENABLE_SIGNUP=false
     depends_on:
       - litellm
     restart: unless-stopped
@@ -51,6 +82,7 @@ services:
   qdrant:
     image: qdrant/qdrant:latest
     container_name: nomad-qdrant
+    extra_hosts: *host-gateway
     ports:
       - "127.0.0.1:6333:6333"   # localhost only: Qdrant has NO auth and holds every conversation turn
     volumes:
@@ -61,10 +93,15 @@ services:
   postgres:
     image: postgres:16
     container_name: nomad-postgres
+    extra_hosts: *host-gateway
     environment:
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - POSTGRES_DB=${POSTGRES_DB}
+      # Page checksums for a FRESH cluster only: initdb reads this once, on an empty volume. The
+      # existing `nomad_postgres` volume ignores it; converting that one is offline work, see
+      # docs/CUTOVER-RUNBOOK.md "Postgres page checksums".
+      - POSTGRES_INITDB_ARGS=--data-checksums
     volumes:
       - postgres:/var/lib/postgresql/data
     restart: unless-stopped
@@ -73,6 +110,7 @@ services:
   nocodb:
     image: nocodb/nocodb:latest
     container_name: nomad-nocodb
+    extra_hosts: *host-gateway
     ports:
       - "127.0.0.1:8095:8080"   # http://localhost:8095  (host-only)
     environment:
@@ -85,8 +123,14 @@ services:
 
   # ── NOMAD v2 engine: pipeline state machine + cockpit + gate (managed service) ──
   nomad-v2-engine:
-    build: ./v2
+    build:
+      context: ./v2
+      # nomad_projects (the shared creation module, #1372) lives at the repo root, outside the
+      # v2 context; the Dockerfile copies it in with COPY --from=nomad_projects.
+      additional_contexts:
+        nomad_projects: ./nomad_projects
     container_name: nomad-v2-engine
+    extra_hosts: *host-gateway
     ports:
       - "127.0.0.1:8099:8099"   # cockpit/API host-only; reachable internally as nomad-v2-engine:8099
     env_file: .env              # NC_API_TOKEN, LITELLM_MASTER_KEY, OPERATOR_EMAIL, …
@@ -108,8 +152,8 @@ services:
       - N8N_V2_SEND_URL=http://host.docker.internal:5678/webhook/v2-send  # standalone n8n
       - NOMAD_DISPATCH_URL=http://host.docker.internal:8090               # dev lane → Builder (native dispatcher)
       - NOMAD_AUTOPILOT_URL=http://host.docker.internal:8092              # autopilot supervisor (#882); its token comes from /term-secret/autopilot-token
+      - NOMAD_AGENT_BRIDGE_URL=http://172.17.0.1:8093                     # agent bridge (#1363): pending asks; token = owui-token via /term-secret
       - NOMAD_VOICE_URL=http://host.docker.internal:8200                           # 3D: local Piper/Whisper
-      - NOMAD_CONSOLE_URL=http://nomad-console:8000                       # cockpit telemetry strip (CPU/MEM/GPU)
       - NOMAD_TERM_URL=ws://host.docker.internal:8091                     # interactive project terminal (PTY daemon)
       - QDRANT_URL=http://qdrant:6333                                     # cockpit chat memory (unified w/ console)
       - OLLAMA_URL=http://host.docker.internal:11434                      # embeddings (nomic-embed-text)
@@ -118,7 +162,7 @@ services:
       - NOMAD_KROKI_URL=http://kroki:8000                                 # render diagrams/charts from text (Kroki: mermaid/graphviz/d2/vega-lite)
       # ── image generation (gated): local ComfyUI first, then OpenAI, then Adobe Firefly ──
       - NOMAD_IMAGE_PROVIDER=comfyui,openai,firefly
-      - COMFYUI_URL=http://host.docker.internal:8188                      # local ComfyUI on the host GPU
+      # ComfyUI runs via the dispatcher's /comfy/generate under shared GPU admission (#1462)
       - COMFYUI_MODEL=${COMFYUI_MODEL:-sdxl}                              # set in .env: sdxl (fast default) | flux (FLUX.1 schnell) | flux2 (best quality, slow, non-commercial) | qwen (best text, Apache-2.0)
       - COMFYUI_FLUX2_CLIP=${COMFYUI_FLUX2_CLIP:-mistral_3_small_flux2_fp8.safetensors}  # fp8 (17GB) not bf16 (34GB) — bf16 OOM-kills ComfyUI on a 24GB card; fp4_mixed (~12GB) for tighter RAM
       - OPENAI_IMAGE_MODEL=gpt-image-1                                    # OpenAI Images (uses OPENAI_API_KEY)
@@ -169,6 +213,7 @@ services:
     profiles: ["fullstack-n8n"]
     image: n8nio/n8n:latest
     container_name: nomad-n8n
+    extra_hosts: *host-gateway
     # No `ports:` on purpose — see above. Reach it on the compose network, or publish to a
     # DIFFERENT host port (e.g. "127.0.0.1:5679:5678") if it is ever genuinely needed.
     environment:
@@ -188,27 +233,6 @@ services:
       - postgres
     restart: "no"   # never loop: this is the copy that crash-looped 8228 times
 
-  # ── The autonomous agent team ──────────────────────────────────────
-  crew:
-    build: ./crew
-    container_name: nomad-crew
-    ports:
-      # localhost only: /run-dev and /run-backlog make real edits in real repos
-      # with no auth. The console calls it as http://crew:8001 over the compose
-      # network; the n8n self-dev cron via host.docker.internal:8001.
-      - "127.0.0.1:8001:8001"
-    env_file: .env
-    environment:
-      - LITELLM_BASE_URL=http://litellm:4000
-      - NOMAD_DISPATCH_URL=http://host.docker.internal:8090  # engineering crew → Builder
-      - NOMAD_PROMPTS_DIR=/app/prompts   # named prompt registry (JDE_STYLE etc.)
-    volumes:
-      - ./prompts:/app/prompts:ro        # house voice + shared prompt blocks (single source of truth)
-      - /home/jdelimam/.config/nomad:/term-secret:ro   # the dispatcher's shared token (X-Nomad-Token)
-    depends_on:
-      - litellm
-    restart: unless-stopped
-
   # ── Local voice (nomad-voice): real-time interruptible conversation + TTS/STT/wake ─
   # Runs HOST-NATIVE (the real-time WebRTC needs direct networking) via systemd —
   # nomad-voice/install_service.sh, on 127.0.0.1:8200. NOT a compose service; the engine/console
@@ -218,6 +242,7 @@ services:
   nomad-scraper:
     build: ./nomad-scraper
     container_name: nomad-scraper
+    extra_hosts: *host-gateway
     ports:
       - "127.0.0.1:8210:8210"   # host-only; engine reaches it on the compose network
     env_file: .env              # LITELLM_MASTER_KEY (+ optional OPENAI/GEMINI keys via aliases)
@@ -231,46 +256,13 @@ services:
       - searxng
     restart: unless-stopped
 
-  # ── LCARS command console (dashboard + NOMAD chat) ─────────────────
-  nomad-console:
-    build: ./nomad-console
-    container_name: nomad-console
-    ports:
-      - "127.0.0.1:1701:8000"  # http://localhost:1701  🖖  (host-only; not on LAN/internet)
-    env_file: .env             # NOTION_*, LITELLM_MASTER_KEY, NOMAD_AUTH_* (optional)
-    environment:
-      - LITELLM_BASE_URL=http://litellm:4000
-      - NOMAD_MODEL=deep
-      - PROJECT_ROOTS=/host:/host/content-creation:/host/civis
-      - QDRANT_URL=http://qdrant:6333          # long-term conversational memory
-      - OLLAMA_URL=http://host.docker.internal:11434  # embeddings (nomic-embed-text)
-      - NOMAD_VOICE_URL=http://host.docker.internal:8200  # local Piper TTS + Whisper STT (server-side proxy)
-      - NOMAD_VOICE_RT_URL=http://localhost:8200  # browser-reachable origin for the embedded real-time voice (WebRTC media is P2P browser↔voice)
-      - NOMAD_AUDIO_URL=http://host.docker.internal:8220  # local music generation (ACE-Step)
-      - NOMAD_TERM_URL=ws://host.docker.internal:8091  # interactive project terminal (native PTY daemon)
-      - NOMAD_SOURCE=nocodb                       # CUTOVER 2026-06-03: NocoDB is authoritative (flip back to 'notion' to roll back)
-      - NC_BASE_URL=http://nocodb:8080            # mission-control reads when NOMAD_SOURCE=nocodb
-    volumes:
-      # read-only; backend only reads Nomad.md + CLAUDE.md/AGENTS.md/README per project
-      - /home/jdelimam:/host:ro
-    depends_on:
-      - litellm
-      - qdrant
-    deploy:                    # GPU so nvidia-smi telemetry works
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    restart: unless-stopped
-
   # ── Kroki: render diagrams + charts from text (deterministic, auto-layout) ──
   # One engine for Mermaid/Graphviz/D2/PlantUML (diagrams) + Vega-Lite (charts). No image model:
   # agents emit the spec, Kroki lays it out perfectly (no misplaced arrows / text overflow).
   kroki:
     image: yuzutech/kroki
     container_name: nomad-kroki
+    extra_hosts: *host-gateway
     depends_on:
       - kroki-mermaid
     environment:
@@ -284,6 +276,7 @@ services:
   kroki-mermaid:
     image: yuzutech/kroki-mermaid
     container_name: nomad-kroki-mermaid
+    extra_hosts: *host-gateway
     expose:
       - "8002"
     restart: unless-stopped
@@ -292,6 +285,7 @@ services:
   searxng:
     image: searxng/searxng:latest
     container_name: nomad-searxng
+    extra_hosts: *host-gateway
     ports:
       - "127.0.0.1:8211:8080"          # host-only (debug); scraper reaches it as searxng:8080
     volumes:

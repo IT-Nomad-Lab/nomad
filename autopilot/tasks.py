@@ -11,6 +11,7 @@ A task QUALIFIES when all of these hold:
 - not Awaiting approval, not Blocked (both are outside the statuses above);
 - a buildable type: Task, Bug or Sub-task;
 - not in the `manager` lane and not tagged `human` (PRD 9.2, see `is_human`);
+- in one of the project's `autopilot.lanes`, when it lists any (#1001; see "Shared boards");
 - not already held by one of the project's live workers.
 
 ORDER: `autopilot: resume` and answered (Approved / Changes requested) tasks first, then priority (Immediate, High, Normal, Low), then board
@@ -22,6 +23,8 @@ supervisor's `waiting` and `needs_you` states are made from them:
     waiting       an open blocker (`blocked_by #x (Status)`)
     operator      Awaiting approval, or Blocked with no open blocker: only the operator moves it
     person        manager lane or tagged human: the operator's own work, never an agent's
+    lane          outside this project's `autopilot.lanes`: another project on the board takes it
+    unrouted      outside every lane the board's projects take (reported by one project only)
     criteria      New without acceptance criteria and no draft yet (the autopilot drafts them,
                   PRD 5.2, see autopilot/criteria.py)
     running       held by a live worker
@@ -55,6 +58,12 @@ Criteria drafts (#889, `criteria_draft`). A New task without criteria gets one d
                                                  is moved to Awaiting approval (kind operator)
     autopilot: criteria draft failed           no usable draft; the operator writes them (kind
                                                  operator). Never drafted twice.
+
+Shared boards (#1001). Several projects can read one board (BOARDS: content-creation-app and
+-backend share `content-creation`). A project's optional `autopilot.lanes` limits it to tasks in
+those lanes (case-insensitive); without it the project takes every lane, as before. When every
+project on a board lists lanes, a task in none of them would be picked by no one: the first of
+those projects by id reports it as `unrouted`, so it shows once, not once per project.
 """
 import importlib.util
 import os
@@ -107,6 +116,15 @@ def board_for(project_id):
     return BOARDS.get(project_id, project_id)
 
 
+def board_projects(board):
+    """Every id that may read `board`, sorted: the BOARDS ids mapped to it, plus the board's own
+    name (a project id only if projects.yaml has it; callers check with `known`)."""
+    ids = {pid for pid, b in BOARDS.items() if b == board}
+    if board_for(board) == board:
+        ids.add(board)
+    return sorted(ids)
+
+
 def has_acceptance(description):
     """True when the description holds an acceptance-criteria section with content (see the
     module docstring for the exact rule)."""
@@ -152,11 +170,12 @@ def _moved_to(act):
     return None
 
 
-def operator_answer(activities, operator_id=OPERATOR_ID):
+def operator_answer(activities, operator_id=OPERATOR_ID, manager_id=None):
     """The operator's comments since the task last moved to Awaiting approval, oldest first and
-    joined by blank lines. A comment counts when the operator wrote it, or when it starts with the
-    engine's `**Operator, via ...:**` prefix (the prefix is dropped). "" if there are none, or the
-    task never went through Awaiting approval."""
+    joined by blank lines. A comment counts when the operator wrote it, or when the engine's
+    account (`manager_id`) wrote it with the `**Operator, via ...:**` prefix (the prefix is
+    dropped). The prefix from anyone else is plain text: any agent could type it. "" if there are
+    none, or the task never went through Awaiting approval."""
     start = None
     for i, a in enumerate(activities):
         if _moved_to(a) == "Awaiting approval":
@@ -168,12 +187,125 @@ def operator_answer(activities, operator_id=OPERATOR_ID):
         raw = ((a.get("comment") or {}).get("raw") or "").strip()
         if not raw:
             continue
-        relayed = _RELAYED.match(raw)
+        author = _href_id((a.get("_links") or {}).get("user"))
+        relayed = _RELAYED.match(raw) if manager_id and author == manager_id else None
         if relayed:
             out.append(raw[relayed.end():].strip())
-        elif _href_id((a.get("_links") or {}).get("user")) == operator_id:
+        elif author == operator_id:
             out.append(raw)
     return "\n\n".join(t for t in out if t)
+
+
+# ---- grants (#979, docs/prd/ap-permission-grants.md 5.2 and 5.3) ------------------------------
+
+GRANT_ACTIONS = ("edit", "delete branch", "delete worktree", "merge")
+APPROVED_ONLY = ("delete branch", "delete worktree", "merge")   # count only in the Approved answer
+_GRANT = re.compile(r"^\s*grant:\s+(edit|delete\s+branch|delete\s+worktree|merge)\s+(\S+)\s*$", re.I)
+_GRANT_LINE = re.compile(r"^\s*grant:", re.I)
+_GRANT_ANYWHERE = re.compile(r"^\s*grant:", re.I | re.M)
+_FENCE = re.compile(r"^\s*(```|~~~)")
+
+
+@dataclass(frozen=True)
+class Grant:
+    """One `grant:` line the operator wrote: `action` is one of GRANT_ACTIONS, `arg` exactly as
+    written. `activity_id` names the comment; a grant is used once, keyed by `key`."""
+    action: str
+    arg: str
+    activity_id: int = None
+    created: str = ""       # the comment's createdAt (ISO 8601)
+
+    @property
+    def key(self):
+        return f"{self.activity_id}:{self.action}:{self.arg}"
+
+    @property
+    def line(self):
+        return f"grant: {self.action} {self.arg}"
+
+    def as_dict(self):
+        return {"action": self.action, "arg": self.arg, "activity_id": self.activity_id,
+                "created": self.created}
+
+    @classmethod
+    def of(cls, d):
+        return d if isinstance(d, cls) else cls(d["action"], d["arg"], d.get("activity_id"),
+                                                 d.get("created") or "")
+
+
+def grant_lines(text):
+    """[(line, Grant or None, reason)] for every `grant:` line of a comment outside fenced code
+    and quotes. A line that isn't exactly one of the four forms comes back with None and why."""
+    out, fenced = [], False
+    for line in (text or "").splitlines():
+        if _FENCE.match(line):
+            fenced = not fenced
+            continue
+        if fenced or line.lstrip().startswith(">") or not _GRANT_LINE.match(line):
+            continue
+        m = _GRANT.match(line)
+        if m:
+            out.append((line.strip(), Grant(" ".join(m.group(1).lower().split()), m.group(2)), ""))
+        else:
+            out.append((line.strip(), None, "not one of `grant: edit <path>`, `grant: delete "
+                                             "branch <name>`, `grant: delete worktree <path>`, "
+                                             "`grant: merge <branch>`"))
+    return out
+
+
+def _counted_text(a, operator_id, manager_id):
+    """The comment text when the operator wrote it (or the engine relayed it for them, prefix
+    dropped), else None. The same rule as operator_answer."""
+    raw = ((a.get("comment") or {}).get("raw") or "").strip()
+    if not raw:
+        return None
+    author = _href_id((a.get("_links") or {}).get("user"))
+    relayed = _RELAYED.match(raw) if manager_id and author == manager_id else None
+    if relayed:
+        return raw[relayed.end():].strip()
+    return raw if author == operator_id else None
+
+
+def task_grants(activities, approved, operator_id=OPERATOR_ID, manager_id=None):
+    """(grants, refused) from the task's comments. Only comments the operator wrote (or the
+    engine relayed) count; description text never does. `edit` counts from any of them (the
+    caller drops those from before the last run started); `delete ...` and `merge` count only
+    inside the Approved answer: `approved` True and posted since the last move to Awaiting
+    approval. refused is [(activity_id, line, reason)] for the operator's `grant:` lines that are
+    not grants."""
+    start = None
+    for i, a in enumerate(activities):
+        if _moved_to(a) == "Awaiting approval":
+            start = i
+    grants, refused = [], []
+    for i, a in enumerate(activities):
+        text = _counted_text(a, operator_id, manager_id)
+        if text is None:
+            continue
+        aid, created = a.get("id"), a.get("createdAt") or ""
+        in_answer = approved and start is not None and i >= start
+        for line, g, why in grant_lines(text):
+            g = g and Grant(g.action, g.arg, aid, created)
+            if g is None:
+                refused.append(Refused(f"{aid}:{line}", line, why))
+            elif g.action in APPROVED_ONLY and not in_answer:
+                refused.append(Refused(g.key, line, f"`{g.action}` counts only in an Approved "
+                                                    "answer"))
+            else:
+                grants.append(g)
+    return grants, refused
+
+
+@dataclass(frozen=True)
+class Refused:
+    """A `grant:` line that opens nothing: `key` is what the ledger remembers it by (a grant's
+    own key when the line parsed), so it is reported once and never after it was used."""
+    key: str
+    line: str
+    reason: str
+
+    def as_dict(self):
+        return {"key": self.key, "line": self.line, "reason": self.reason}
 
 
 def criteria_draft(comments):
@@ -219,6 +351,8 @@ class Task:
     resume: bool = False
     draft: tuple = None     # criteria_draft(comments): (state, text) or None
     answer: str = ""        # operator_answer(activities), for an Approved / Changes requested task
+    grants: list = field(default_factory=list)      # [Grant] (task_grants), #979
+    refused: list = field(default_factory=list)     # [Refused] grant lines that open nothing
 
     @property
     def decision(self):
@@ -241,13 +375,15 @@ class Task:
                 "priority": self.priority, "lane": self.lane, "resume": self.resume,
                 "promote": self.status == "New", "decision": self.decision, "answer": self.answer,
                 "criteria_draft": bool(self.status == "New" and not has_acceptance(self.description)
-                                       and self.draft and self.draft[0] == "drafted")}
+                                       and self.draft and self.draft[0] == "drafted"),
+                **({"grants": [g.as_dict() for g in self.grants]} if self.grants else {}),
+                **({"refused": [r.as_dict() for r in self.refused]} if self.refused else {})}
 
 
 @dataclass
 class Skipped:
     task: Task
-    kind: str       # waiting | operator | person | criteria | running | other
+    kind: str       # waiting | operator | person | lane | unrouted | criteria | running | other
     reason: str
 
     def as_dict(self):
@@ -319,7 +455,11 @@ def fetch(client, board, held=()):
             comments = client.comments(t.id)
             t.resume = resume_requested(comments)
             if t.decision:
-                t.answer = operator_answer(client.activities(t.id))
+                t.answer = operator_answer(client.activities(t.id), manager_id=client.manager_id())
+            if any(_GRANT_ANYWHERE.search(c or "") for c in comments):
+                t.grants, t.refused = task_grants(client.activities(t.id),
+                                                  t.status == "Approved",
+                                                  manager_id=client.manager_id())
             if t.status == "New":
                 t.draft = criteria_draft(comments)
         out.append(t)
@@ -332,8 +472,11 @@ def _blockers_text(t):
     return ", ".join(f"#{b.id} ({b.status})" for b in t.open_blockers)
 
 
-def classify(t, held=()):
-    """None if the task qualifies, else (kind, reason)."""
+def classify(t, held=(), lanes=(), taken=None):
+    """None if the task qualifies, else (kind, reason).
+
+    lanes: the project's `autopilot.lanes` (lower case), () for every lane. taken: every lane the
+    board's projects take, given only to the project that reports unrouted tasks (None otherwise)."""
     if t.id in held:
         return "running", "held by a live worker"
     if t.type not in BUILDABLE:
@@ -342,6 +485,13 @@ def classify(t, held=()):
         return "person", f"person-only: {t.lane} lane"
     if t.human:
         return "person", "person-only: tagged human"
+    lane = t.lane.strip().lower()
+    if lanes and lane not in lanes:
+        shown = t.lane or "(none)"
+        if taken is not None and lane not in taken:
+            return "unrouted", (f"unrouted: lane {shown}, no project on this board takes it "
+                                f"(lanes: {', '.join(sorted(taken))})")
+        return "lane", f"lane {shown} is not this project's ({', '.join(lanes)})"
     if t.status == "Awaiting approval":
         return "operator", "needs operator: Awaiting approval"
     if t.open_blockers:
@@ -370,11 +520,12 @@ def order_key(t):
     return (0 if t.resume or t.decision else 1, PRIORITY_RANK.get(t.priority, DEFAULT_RANK), t.id)
 
 
-def select(tasks, held=()):
+def select(tasks, held=(), lanes=(), taken=None):
+    """lanes and taken as in classify."""
     held = {int(h) for h in held}
     qualified, skipped = [], []
     for t in tasks:
-        c = classify(t, held)
+        c = classify(t, held, lanes, taken)
         if c is None:
             qualified.append(t)
         else:
@@ -384,19 +535,25 @@ def select(tasks, held=()):
     return Selection(qualified, skipped)
 
 
+def needs_operator(selection):
+    """Skipped tasks only the operator can move on: kind operator, then unrouted."""
+    return selection.of_kind("operator") + selection.of_kind("unrouted")
+
+
 def outcome_for(selection, workers):
     """(state, detail) for a pass with no work to do, or None to let the supervisor decide.
 
     - workers running, or a task qualifies: None (running / idle / budget are the supervisor's).
     - some task needs the operator: `needs_you`, naming those tasks. This wins over `waiting`,
-      because the operator is the one thing that can move the board on.
+      because the operator is the one thing that can move the board on. An unrouted task
+      (#1001) counts: only the operator can give it a lane some project takes.
     - some task waits on an open blocker: `waiting`, naming task and blocker.
     Person-only tasks alone do not make `needs_you`: they are the operator's own work, and every
     board with a manager lane would otherwise sit in `needs_you` forever. The Selection still
     lists them (kind `person`) for the cockpit."""
     if workers or selection.qualified:
         return None
-    ops = selection.of_kind("operator")
+    ops = needs_operator(selection)
     if ops:
         return "needs_you", "; ".join(f"#{s.task.id} {s.reason}" for s in ops)
     waits = selection.of_kind("waiting")
@@ -429,6 +586,7 @@ class PMClient:
         self._clients = {}
         self._comments = {}     # (wp id, updatedAt) -> [activity]; a comment bumps updatedAt
         self._updated = {}
+        self._manager_id = None
 
     def _client(self, board):
         if board not in self._clients:
@@ -469,6 +627,16 @@ class PMClient:
         """Walk a task to `status` as the dev agent (the criteria drafter's move of a New task to
         Awaiting approval, #889). The reason is its own comment, posted first."""
         return self._any().move(wp_id, status, as_="dev")
+
+    def manager_id(self):
+        """The engine account's user id (it posts the operator's relayed replies), or None when
+        it can't be read; then no relayed reply counts."""
+        if self._manager_id is None:
+            try:
+                self._manager_id = self._any().user_id_of(self._op.MANAGER)
+            except Exception:
+                return None
+        return self._manager_id
 
     def activities(self, wp_id):
         key = (wp_id, self._updated.get(wp_id))
@@ -511,12 +679,33 @@ class TaskSelection:
         p = self._entry(project_id)
         return bool(p and getattr(p, "autopilot", None) and board_for(project_id))
 
+    def _lanes(self, project_id):
+        p = self._entry(project_id)
+        return getattr(getattr(p, "autopilot", None), "lanes", ()) or ()
+
+    def lane_routing(self, project_id):
+        """(lanes, taken) for select (#1001). taken is set only when this project is the first
+        autopilot project on its board and every autopilot project there lists lanes."""
+        lanes = self._lanes(project_id)
+        if not lanes:
+            return (), None
+        sharing = [pid for pid in board_projects(board_for(project_id)) if self.known(pid)]
+        if not sharing or sharing[0] != project_id:
+            return lanes, None
+        taken = set()
+        for pid in sharing:
+            other = self._lanes(pid)
+            if not other:
+                return lanes, None
+            taken.update(other)
+        return lanes, taken
+
     def select_tasks(self, ctx):
         board = board_for(ctx.project_id)
         if not board:
             raise ValueError(f"project {ctx.project_id!r} has no nomad-pm board")
         held = [w.get("task") for w in ctx.project.get("workers", []) if w.get("task") is not None]
-        sel = select(fetch(self.pm, board, held), held)
+        sel = select(fetch(self.pm, board, held), held, *self.lane_routing(ctx.project_id))
         self.selections[ctx.project_id] = sel
         return [t.as_dict() for t in sel.qualified]
 

@@ -1,0 +1,10 @@
+# PROPOSED (#1356), not installed. See the .service file.
+[Unit]
+Description=Daily Open WebUI pipe-file retention
+
+[Timer]
+OnCalendar=*-*-* 04:10:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

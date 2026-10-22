@@ -1,0 +1,34 @@
+# An API or backend service. Gates follow content-creation-backend and crypto-trading-bot
+# (uv, ruff, mypy, pytest).
+id: service
+title: Service
+description: An API, worker or backend service that other software calls.
+
+interview:
+  ask:
+    - {id: language, question: "Language?", kind: single, options: [Python, TypeScript, Go, other]}
+    - {id: database, question: "Which database?", kind: single, options: [none, Postgres, SQLite, other]}
+    - {id: auth, question: "Who calls it and how do they authenticate?", kind: text}
+    - {id: deploy, question: "Where does it run?", kind: single, options: [this machine (docker compose), a VPS, not decided]}
+  skip: []
+
+stack:
+  language: python
+  framework: fastapi
+  test: pytest
+
+policies: [service-default, postgres-skills, docs-audit]
+
+agents:
+  - {role: backend-engineer, lane: dev}
+  - {role: security-reviewer, lane: dev}
+  - {role: qa-test, lane: dev}
+
+gates:
+  pre_merge: ["uv run --frozen ruff check src tests", "uv run --frozen pytest -q -p no:cacheprovider"]
+  milestone: ["uv run --frozen ruff check src tests", "uv run --frozen mypy src", "uv run --frozen pytest -q -p no:cacheprovider"]
+
+files: [README.md, Nomad.md, CLAUDE.md, tests]
+
+autopilot:
+  lanes: [dev]

@@ -11,7 +11,6 @@ Run: python3 -m pytest v2/test_intent_router.py -q   (engine deps live in the co
 """
 import os
 import sys
-import textwrap
 
 import pytest
 
@@ -70,9 +69,11 @@ def test_a_command_never_reaches_the_chat_model(chat, monkeypatch, quiet):
 
 def test_conversation_still_reaches_the_chat_model(chat, monkeypatch, quiet):
     monkeypatch.setattr(server, "_pipeline_context", lambda *a, **k: "idle")
+    import runtime
+    monkeypatch.setattr(runtime, "USE_SDK", False)       # no tool turn: the no-tools fallback
     out = server.chat_reply("what does the comms lane do?")
     assert chat["model"] == 1
-    assert (out["intent"], out["reply"]) == ("chat", "the model answered")
+    assert out["intent"] == "chat" and out["reply"].startswith("the model answered")
 
 
 def test_an_action_turn_is_still_remembered(chat, quiet):
@@ -111,17 +112,136 @@ def test_a_handler_that_throws_does_not_kill_the_turn(chat, monkeypatch, quiet):
     assert "boom" in out["reply"]
 
 
-def test_every_intent_the_classifier_emits_has_a_handler():
-    """The contract `intents.INTENTS` exists for. An intent with no handler falls through to the
-    model, which answers plausibly and does nothing, and nobody finds out."""
-    import intents
-    missing = [i for i in intents.INTENTS if i != "chat" and i not in server.ACTION_INTENTS]
+def test_every_intent_a_surface_allows_has_a_handler():
+    """An allowed intent with no handler falls through to the model, which answers plausibly and
+    does nothing, and nobody finds out. An intent no surface allows gets the pointer reply."""
+    missing = [i for allowed in server.SURFACE_INTENTS.values() for i in allowed
+               if i != "chat" and i not in server.ACTION_INTENTS]
     assert missing == []
 
 
 def test_the_handler_table_invents_no_intents():
     import intents
     assert set(server.ACTION_INTENTS) <= set(intents.INTENTS)
+    for allowed in server.SURFACE_INTENTS.values():
+        assert set(allowed) <= set(intents.INTENTS)
+
+
+# ── #973: the typed cockpit chat is information-only ────────────────────────────────────────────
+
+@pytest.fixture
+def acts(monkeypatch):
+    """Every way a chat turn could change state, each recording that it was reached."""
+    hit = []
+    for name in ("resume_run", "start_run", "plan_project", "run_backlog"):
+        monkeypatch.setattr(server.eng, name, lambda *a, _n=name, **k: hit.append(_n) or {})
+    monkeypatch.setattr(server.urllib.request, "urlopen",
+                        lambda *a, **k: hit.append("dispatcher") or 1 / 0)
+    return hit
+
+
+COMMANDS = ["approve", "reject", "approve all", "/capture fix the relay", "pipeline: fix the relay",
+            "research local STT engines", "start a project called Aurora",
+            "work on your backlog", "send an email to bob"]
+
+
+@pytest.mark.parametrize("msg", COMMANDS)
+def test_a_typed_command_changes_nothing_and_says_where_to_do_it(msg, chat, acts, monkeypatch,
+                                                                quiet):
+    """A run is waiting, so an approve that got through would have something to approve."""
+    monkeypatch.setattr(server, "recent_runs", lambda limit=25: [_run("only1")])
+    monkeypatch.setattr(server, "run_detail", lambda rid: {"proposal_hash": "h"})
+    out = server.chat_reply(msg)
+    assert acts == [] and chat["model"] == 0 and server._CHAT_SHOWN == {}
+    assert out["reply"] == server.CHAT_POINTER and out.get("refused")
+    assert "Approve" in out["reply"] and "Capture" in out["reply"]
+
+
+@pytest.mark.parametrize("msg", COMMANDS)
+def test_zulip_free_text_is_information_only_too(msg, chat, acts, quiet):
+    out = server.chat_reply(msg, session_id="zulip", surface="zulip")
+    assert acts == [] and out["reply"] == server.CHAT_POINTER
+
+
+def test_an_unknown_surface_is_treated_as_the_typed_cockpit(chat, acts, quiet):
+    assert server.chat_reply("approve", surface="martian")["reply"] == server.CHAT_POINTER
+    assert acts == []
+
+
+def test_diagnostics_still_answers_in_the_typed_cockpit(chat, quiet):
+    assert "diagnostic report" in server.chat_reply("run diagnostics")["reply"].lower()
+
+
+def test_a_voice_approve_still_works_while_a_typed_one_gets_the_pointer(chat, monkeypatch, quiet):
+    """Operator decision on #967 (2026-10-01): voice keeps approve/reject and capture."""
+    monkeypatch.setattr(server, "recent_runs", lambda limit=25: [_run("only1")])
+    monkeypatch.setattr(server, "run_detail", lambda rid: {"proposal_hash": "deadbeef"})
+    seen = []
+    monkeypatch.setattr(server.eng, "resume_run",
+                        lambda rid, d, h=None: seen.append((rid, d, h)) or {"status": "executed"})
+    typed = server.chat_reply("approve")
+    assert typed["reply"] == server.CHAT_POINTER and server._CHAT_SHOWN == {}
+    server.chat_reply("approve", session_id="voice", surface="voice")      # shows and pins
+    out = server.chat_reply("approve", session_id="voice", surface="voice")
+    assert seen == [("only1", "approved", "deadbeef")]
+    assert "Approved 1 item" in out["reply"]
+
+
+def test_a_voice_capture_still_files_a_run(chat, monkeypatch, quiet):
+    monkeypatch.setattr(server.eng, "start_run",
+                        lambda goal, task_ref=None: {"run_id": "v1", "lane": "dev",
+                                                     "proposal": {"action": "dispatch_build"}})
+    out = server.chat_reply("/capture fix the relay", surface="voice")
+    assert out["intent"] == "pipeline_capture" and "v1" in out["reply"]
+
+
+@pytest.mark.parametrize("msg", ["start a project called Aurora", "work on your backlog",
+                                 "research local STT engines"])
+def test_voice_does_not_keep_the_other_actions(msg, chat, acts, quiet):
+    assert server.chat_reply(msg, surface="voice")["reply"] == server.CHAT_POINTER
+    assert acts == []
+
+
+# ── /chat: the surface comes from the caller, not the text ──────────────────────────────────────
+
+def _post(body):
+    from starlette.testclient import TestClient
+    return TestClient(server.app).post("/chat", json=body).json()
+
+
+@pytest.mark.parametrize("body", [{"message": "capture: fix the relay"},
+                                  {"message": "project: Aurora"},
+                                  {"message": "⚑ fix the relay"},
+                                  {"message": "fix the relay", "capture": True},
+                                  {"message": "capture: fix the relay", "voice": True}])
+def test_the_cockpit_chat_has_no_write_path(body, acts, quiet):
+    r = _post({**body, "session_id": "cockpit-abc"})
+    assert acts == [] and r.get("refused") and r["reply"] == server.CHAT_POINTER
+
+
+def test_zulip_capture_still_captures(acts, monkeypatch, quiet):
+    monkeypatch.setattr(server.eng, "start_run",
+                        lambda goal: {"run_id": "z1", "lane": "comms", "goal": goal})
+    r = _post({"message": "capture: email bob", "session_id": "zulip"})
+    assert r["captured"] and r["run_id"] == "z1"
+
+
+def test_zulip_project_still_plans(monkeypatch, quiet):
+    monkeypatch.setattr(server.eng, "plan_project",
+                        lambda t, d="": {"goal_id": 3, "title": t, "task_count": 2,
+                                         "milestones": [{"title": "M1", "tasks": [1, 2]}]})
+    r = _post({"message": "project: Aurora", "session_id": "zulip"})
+    assert r["planned"] and r["goal_id"] == 3
+
+
+def test_a_spoken_cockpit_turn_is_the_voice_surface(monkeypatch, quiet):
+    seen = {}
+    monkeypatch.setattr(server, "chat_reply",
+                        lambda m, h, s, remote, surface: seen.update(s=s, surface=surface) or {})
+    _post({"message": "approve", "voice": True, "session_id": "cockpit-abc"})
+    assert seen == {"s": "cockpit-abc", "surface": "voice"}
+    _post({"message": "approve", "session_id": "cockpit-abc"})
+    assert seen["surface"] == "cockpit"
 
 
 # ── diagnostics ─────────────────────────────────────────────────────────────────────────────────
@@ -202,17 +322,6 @@ def test_a_capture_that_throws_is_reported_not_swallowed(monkeypatch, quiet):
     monkeypatch.setattr(server.eng, "start_run",
                         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("nocodb down")))
     assert "nocodb down" in server._handle_pipeline_capture("x")
-
-
-def test_research_captures_rather_than_researching(monkeypatch, quiet):
-    """Research reaches the outside world, so it goes through the gate like everything else that
-    does. The console learned this the same way."""
-    seen = {}
-    monkeypatch.setattr(server.eng, "start_run",
-                        lambda goal, task_ref=None: seen.update(goal=goal) or
-                        {"run_id": "r1", "lane": "research", "proposal": {"action": "research"}})
-    server.ACTION_INTENTS["research"]({"topic": "local STT engines"})
-    assert seen["goal"] == "Research and brief me on local STT engines"
 
 
 # ── the gate ────────────────────────────────────────────────────────────────────────────────────
@@ -377,115 +486,6 @@ def test_only_runs_at_the_gate_are_candidates(monkeypatch, quiet):
                         lambda rid, d, h=None: seen.append(rid) or {"status": "executed"})
     _approve_twice()
     assert seen == ["live1"]
-
-
-# ── the backlog ─────────────────────────────────────────────────────────────────────────────────
-
-def test_the_backlog_sweep_says_nothing_executed(monkeypatch, quiet):
-    """The console fired this at v1 crew, which did the work and left uncommitted edits with
-    nothing in front of it. Every run this starts stops at the gate, and the reply says so."""
-    monkeypatch.setattr(server.eng, "run_backlog",
-                        lambda n: {"started": 1, "limit": 3, "skipped": [],
-                                   "runs": [{"project": "NOMAD", "task_title": "T9",
-                                             "run_id": "r9"}]})
-    r = server._handle_self_develop()
-    assert "awaiting approval" in r and "nothing has executed" in r
-    assert "r9" in r
-
-
-def test_an_empty_backlog_says_how_to_fill_it(monkeypatch, quiet):
-    monkeypatch.setattr(server.eng, "run_backlog",
-                        lambda n: {"started": 0, "limit": 3, "skipped": [], "runs": []})
-    r = server._handle_self_develop()
-    assert "Backlog is empty" in r and "Status = Backlog" in r
-
-
-def test_a_backlog_where_everything_errored_is_not_reported_as_empty(monkeypatch, quiet):
-    """Nothing started for two very different reasons, and they need different things done."""
-    monkeypatch.setattr(server.eng, "run_backlog",
-                        lambda n: {"started": 0, "limit": 3, "runs": [],
-                                   "skipped": [{"goal_id": 4, "error": "no tasks table"}]})
-    r = server._handle_self_develop()
-    assert "Backlog is empty" not in r
-    assert "no tasks table" in r
-
-
-# ── starting a project ──────────────────────────────────────────────────────────────────────────
-
-@pytest.fixture
-def dispatcher(monkeypatch):
-    """Stand in for the dispatcher's /new-project, which scaffolds a git repo on the host."""
-    state = {"sent": None, "reply": {"ok": True, "name": "Aurora", "path": "/home/j/Aurora"}}
-
-    class R:
-        def __init__(self, body):
-            self._b = body
-
-        def read(self):
-            return server.json.dumps(self._b).encode()
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a):
-            return False
-
-    def fake(req, timeout=None):
-        state["sent"] = req
-        if isinstance(state["reply"], Exception):
-            raise state["reply"]
-        return R(state["reply"])
-    monkeypatch.setattr(server.urllib.request, "urlopen", fake)
-    return state
-
-
-def test_a_project_is_scaffolded_then_planned(monkeypatch, dispatcher, quiet):
-    monkeypatch.setattr(server.eng, "plan_project",
-                        lambda t, d="": {"goal_id": 7, "milestones": [1, 2], "task_count": 9})
-    r = server._handle_start_project("Aurora", "track solar output")
-    assert "Aurora" in r and "/home/j/Aurora" in r
-    assert "goal 7" in r and "2 milestones" in r and "9 tasks" in r
-
-
-def test_the_dispatcher_call_is_authenticated(monkeypatch, dispatcher, quiet):
-    """Every dispatcher route but /health needs the token, and a 403 here would otherwise read
-    as "the project could not be created" with no hint why."""
-    monkeypatch.setattr(server.eng, "plan_project", lambda *a, **k: {"goal_id": 1,
-                                                                     "milestones": [],
-                                                                     "task_count": 0})
-    server._handle_start_project("Aurora", "x")
-    assert dispatcher["sent"].get_header("X-nomad-token") == server.DISPATCH_TOKEN
-
-
-def test_a_failed_plan_does_not_read_as_a_failed_scaffold(monkeypatch, dispatcher, quiet):
-    """The repo exists either way. Reporting the whole thing as failed would send the operator
-    looking for a directory that is already there."""
-    monkeypatch.setattr(server.eng, "plan_project",
-                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("goals table missing")))
-    r = server._handle_start_project("Aurora", "x")
-    assert "is live" in r
-    assert "not on the board yet" in r and "goals table missing" in r
-
-
-def test_an_unreachable_dispatcher_is_reported_as_such(dispatcher, quiet):
-    dispatcher["reply"] = OSError("connection refused")
-    r = server._handle_start_project("Aurora", "x")
-    assert "Could not reach the dispatcher" in r
-
-
-def test_a_project_with_no_name_is_asked_for_one(quiet):
-    assert "I need a name" in server._handle_start_project("", "some request")
-
-
-def test_nothing_here_writes_to_notion(monkeypatch, dispatcher, quiet):
-    """The console filed the new project as a Notion row. Notion is the rollback source now and
-    writing to it would make it stop being one."""
-    import ast
-    import inspect
-    fn = ast.parse(textwrap.dedent(inspect.getsource(server._handle_start_project))).body[0]
-    stmts = fn.body[1:] if ast.get_docstring(fn) else fn.body   # the docstring says why, so skip it
-    code = "\n".join(ast.unparse(n) for n in stmts).lower()
-    assert "notion" not in code
 
 
 # ── the detector proxy ──────────────────────────────────────────────────────────────────────────

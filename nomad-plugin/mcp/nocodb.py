@@ -12,9 +12,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def _env():
+    """os.environ, then the .env at NOMAD_ENV_FILE (nomad-run lane-mcp sets it to ~/nomad/.env),
+    else the plugin's own .env."""
     env = dict(os.environ)
     try:
-        for ln in open(os.path.join(ROOT, ".env"), encoding="utf-8"):
+        for ln in open(env.get("NOMAD_ENV_FILE") or os.path.join(ROOT, ".env"), encoding="utf-8"):
             ln = ln.strip()
             if ln and not ln.startswith("#") and "=" in ln:
                 k, _, v = ln.partition("=")

@@ -1,0 +1,16 @@
+id: engine-unity
+role: permission
+description: >-
+  A Unity game (option of the game type, chosen in the PRD). Gates follow RuneMatch
+  (scripts/unity.sh); agents do not hand-edit scene and prefab files. The project needs
+  scripts/unity.sh.
+settings:
+  deny_edit_globs: ["**/*.unity", "**/*.prefab"]
+  pre_merge_gate:
+    - {run: "scripts/unity.sh compile"}
+    - {run: "scripts/unity.sh test EditMode {filter}"}
+    - {run: "scripts/unity.sh test PlayMode {filter}", env: {TIMEOUT: "2400"}}
+  milestone_gate:
+    - {run: "scripts/unity.sh compile"}
+    - {run: "scripts/unity.sh test EditMode {filter}"}
+    - {run: "scripts/unity.sh test PlayMode {filter}", env: {TIMEOUT: "2400"}}

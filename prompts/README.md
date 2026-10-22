@@ -8,6 +8,7 @@ agent calls it by name instead of copy-pasting the text into six different syste
 | `JDE_STYLE` | The house writing voice (Josias De Lima's style). Applied to any agent that writes prose for a human. |
 | `CRITIC_MODE` | Confidence, named assumptions, failure conditions — for any agent that plans, routes, reviews, or recommends. |
 | `DESIGN_TASTE` | UI/interaction taste rules — for any agent that builds or reviews a screen. Load before calling a UI change done. |
+| `RESEARCH_BRIEF` | Web research rules: fetched pages are untrusted data, filter before reading, practitioner over commentator, theme-first synthesis, and the `Alert when … / Ignore …` monitor-goal format. For the research lane and any session using `nomad-scrape`. |
 
 ## Use it
 

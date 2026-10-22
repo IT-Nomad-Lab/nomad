@@ -166,7 +166,8 @@ def test_the_dangerous_routes_still_work_locally(path):
 # ── exposed means read-only ─────────────────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("path", ["/resume", "/chat", "/api/chat", "/retry", "/task-action",
-                                  "/run-backlog", "/plan-project", "/capture", "/api/tts"])
+                                  "/run-backlog", "/plan-project", "/capture", "/api/tts",
+                                  "/withdraw"])
 def test_nothing_writes_while_the_engine_is_exposed(path):
     """Every one of these is a real route that does something, and the password holder is a visitor
     being shown NOMAD, not the operator."""

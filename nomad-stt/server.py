@@ -14,6 +14,7 @@ it at ws://127.0.0.1:8212/stt.
   GET /health
 """
 import asyncio
+import importlib.util
 import json
 import os
 import sys
@@ -29,6 +30,15 @@ DEVICE = os.environ.get("KYUTAI_DEVICE", "cuda")
 HOST = os.environ.get("NOMAD_STT_HOST", "127.0.0.1")   # loopback only (#821); only nomad-voice calls it
 PORT = int(os.environ.get("NOMAD_STT_PORT", "8212"))   # 8200 voice · 8210 scraper · 8212 stt
 _SKIP = (0, 3)   # pad / special text tokens — never spoken
+# GPU admission (#1462): the load waits for /tmp/nomad-gpu.lock, bounded, and releases it once warm.
+# gpu_guard restarts this service while it still holds admission and never waits for it, so a
+# non-blocking refusal would kill every restore. Past the bound the start fails and systemd retries.
+ADMISSION_WAIT_S = float(os.environ.get("NOMAD_STT_ADMISSION_WAIT_SECONDS", "600"))
+_spec = importlib.util.spec_from_file_location(   # by path: this venv has no repo on sys.path
+    "nomad_gpu_admission", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "dispatcher",
+                                        "gpu_admission.py"))
+gpu_admission = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(gpu_admission)
 
 
 class StreamingSTT:
@@ -145,6 +155,15 @@ async def stt_ws(ws: WebSocket):
 
 
 def _load():
+    admission = gpu_admission.wait_admit(ADMISSION_WAIT_S) if DEVICE.startswith("cuda") else None
+    try:
+        _load_admitted()
+    finally:
+        if admission is not None:
+            os.close(admission)
+
+
+def _load_admitted():
     global stt
     print(f"[nomad-stt] loading {HF_REPO} on {DEVICE} …", flush=True)
     stt = StreamingSTT()
@@ -182,7 +201,12 @@ def _smoke(path: str):
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--smoke":
-        with torch.no_grad():
-            _smoke(sys.argv[2])
+        admission = gpu_admission.try_admit() if DEVICE.startswith("cuda") else None
+        try:
+            with torch.no_grad():
+                _smoke(sys.argv[2])
+        finally:
+            if admission is not None:
+                os.close(admission)
     else:
         uvicorn.run(app, host=HOST, port=PORT)

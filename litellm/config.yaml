@@ -14,25 +14,90 @@ model_list:
   # ── Local (NATIVE Windows Ollama, reached via host.docker.internal) ─
   # Tags remapped 2026-05-31 to models actually installed (the spec's
   # qwen3.6:* tags don't exist). `docker exec`/`ollama list` to see options.
-  - model_name: fast            # always-on workhorse: routing, quick Q&A, voice
+  # 2026-10-04 (#1039): was llama3.1:8b. Qwen3.5-9B Heretic (KL 0.024), a local tag made from
+  # hf.co/llmfan46/Qwen3.5-9B-ultra-uncensored-heretic-GGUF:Q4_K_M with num_ctx 8192 and only the
+  # two real stop tokens (the GGUF's own set included "<think>"). Thinking off: on, it runs to
+  # thousands of tokens. A/B in docs/research/1039-fast-ab: better on JSON, tools, math and
+  # spoken replies, 0.9 s median voice turn vs 1.1. 5.3 GB. Rollback: ollama/llama3.1:8b.
+  - model_name: fast            # always-on workhorse: quick Q&A, voice, extraction
     litellm_params:
-      model: ollama/llama3.1:8b
+      model: ollama_chat/qwen3.5-heretic:9b
       api_base: http://host.docker.internal:11434
+      think: false
 
   # 2026-09-15: was deepseek-r1:32b. qwen3.6 scored the same (7/8) on the
   # ~/vendor/colibri-bench quality set at ~20x the speed, and fits the 5090 at 8k ctx.
   # Needs ~22 GB VRAM: it evicts ComfyUI / nomad-detect when it loads.
+  # 2026-10-04 (#1029): now the Heretic build of the same model (refusals 83 -> 10/100, KL 0.0015),
+  # a local Ollama tag made from hf.co/llmfan46/Qwen3.6-35B-A3B-uncensored-heretic-Native-MTP-
+  # Preserved-GGUF:Q4_K_M with draft_num_predict 0. MTP drafting (draft_num_predict 2, the stock
+  # tag's default) ran at ~15 tok/s on Ollama 0.35; off, ~80. Rollback: qwen3.6:35b-a3b.
   - model_name: private         # local reasoning, privacy-sensitive, offline
     litellm_params:
-      model: ollama_chat/qwen3.6:35b-a3b
+      model: ollama_chat/qwen3.6-heretic:35b-a3b
       api_base: http://host.docker.internal:11434
       num_ctx: 8192
       think: false
 
-  - model_name: code            # local coding / refactors / FIM
+  # 2026-10-04 (#1046): local image understanding (IG frames for nomad-social). Qwen3-VL-8B
+  # abliterated (Huihui), Q8_0 on llama.cpp :8241 with the vision encoder on CUDA, on demand
+  # (llama/qwen3vl.sh start). Ollama's packaging of the same weights runs the encoder on the CPU
+  # (105 s for one large photo), so it is only the fallback, `vision-ollama`. Fallbacks stay
+  # image-capable: a text-only one "analyses" frames it never saw. nomad-social disables
+  # fallbacks and runs its own chain (vision, longdoc, gpt).
+  - model_name: vision          # local vision: frames, screenshots, slides
     litellm_params:
-      model: ollama/qwen2.5-coder:32b
+      model: hosted_vllm/qwen3-vl-8b
+      api_base: http://host.docker.internal:8241/v1
+      api_key: "sk-llama-noauth"
+      timeout: 600
+  - model_name: vision-ollama   # always-loadable fallback for `vision` (CPU encoder: slow on big images)
+    litellm_params:
+      model: ollama_chat/huihui_ai/qwen3-vl-abliterated:8b-instruct-q8_0
       api_base: http://host.docker.internal:11434
+      num_ctx: 32768
+      timeout: 600
+
+  # 2026-10-04 (#1045): Qwen3.8-27B + MTP on llama.cpp :8240, on demand (llama/qwen38.sh start).
+  # While :8240 is down, `code` falls back to code-ollama. Rollback: point `code` at
+  # ollama/qwen3-coder:30b. Setup and measurements: docs/prd/local-code-llamacpp.md.
+  - model_name: code            # local coding / refactors / agentic tool use
+    litellm_params:
+      model: hosted_vllm/qwen3.8-27b
+      api_base: http://host.docker.internal:8240/v1
+      api_key: "sk-llama-noauth"              # llama-server runs without auth (local only)
+      timeout: 600
+
+  - model_name: code-ollama     # always-loadable fallback for `code`, and FIM autocomplete
+    litellm_params:              # 2026-10-16 (#1408): was qwen2.5-coder:32b
+      model: ollama/qwen3-coder-fim:30b    # stock tag + FIM template: ollama/qwen3-coder-fim.Modelfile
+      api_base: http://host.docker.internal:11434
+
+  # 2026-10-16 (#1408): extra local models, picked by name in Open WebUI. No lane routes here
+  # and no fallback names them. Each loads on demand and evicts `private` from VRAM.
+  # gpt-oss: its harmony tool format breaks behind converting proxies (see
+  # docs/research/local-abliterated-models.md), so chat only, no agentic tool use.
+  - model_name: devstral        # Mistral Devstral Small 2 (24B, 2512), coding agent
+    litellm_params:
+      model: ollama_chat/devstral-small-2:24b
+      api_base: http://host.docker.internal:11434
+
+  - model_name: glm-flash       # Z.ai GLM-4.7-Flash (30B MoE, ~3.6B active)
+    litellm_params:
+      model: ollama_chat/glm-4.7-flash
+      api_base: http://host.docker.internal:11434
+
+  - model_name: gpt-oss         # OpenAI gpt-oss-20b (21B MoE, 3.6B active)
+    litellm_params:
+      model: ollama_chat/gpt-oss:20b
+      api_base: http://host.docker.internal:11434
+
+  - model_name: longdoc-local   # private long documents (64k ctx), same server as `code`.
+    litellm_params:              #   No fallback on purpose: falling back to Gemini would send a
+      model: hosted_vllm/qwen3.8-27b          #   private document to the cloud. Down = error.
+      api_base: http://host.docker.internal:8240/v1
+      api_key: "sk-llama-noauth"
+      timeout: 900
 
   # ── Cloud (routed only when worth it) ───────────────────────────
   # deep/balanced are served by LOCAL Claude Code (subscription, NOT the
@@ -62,8 +127,8 @@ model_list:
 
   - model_name: longdoc         # huge-context jobs, multimodal
     litellm_params:
-      model: gemini/gemini-2.5-flash          # free-tier OK + 1M context
-      api_key: os.environ/GEMINI_API_KEY      # (switch to gemini-2.5-pro once billing is on)
+      model: gemini/gemini-2.5-flash          # 1M context, multi-image. 2.5-pro 404s for new users (2026-10-03)
+      api_key: os.environ/GEMINI_API_KEY
 
   # ── NVIDIA NIM (free tier) — ACTIVE AS A HAND-CALLED BENCH TOOL ONLY ──────────────
   # ⛔ DO NOT PUT THESE IN A FALLBACK CHAIN. They are defined so a human or an eval script
@@ -132,15 +197,19 @@ router_settings:
   # last resort, so NOMAD keeps answering even if the subscription throttles AND cloud
   # is down. deep→balanced first (cheaper bridge model), then `codex` — a DIFFERENT
   # vendor's subscription, so one throttled account doesn't take the others with it —
-  # then metered cloud, then local. `code` tries codex first: it is a coding agent.
+  # then local. `code` tries codex first: it is a coding agent.
+  # #960: `gpt` (a paid API key) is in NO chain. It stays defined above, and only a caller that
+  # asks for `gpt` by name reaches it: never automatic, never a fallback. The operator's rule is
+  # no paid usage beyond the plans. autopilot/test_no_paid_fallback.py holds it.
   fallbacks:
-    - deep: ["balanced", "codex", "gpt", "fast"]
-    - balanced: ["codex", "gpt", "fast"]
-    - codex: ["gpt", "balanced", "fast"]
+    - deep: ["balanced", "codex", "fast"]
+    - balanced: ["codex", "fast"]
+    - codex: ["balanced", "fast"]
     - gpt: ["balanced", "codex", "fast"]
-    - longdoc: ["gpt", "codex", "fast"]
+    - longdoc: ["codex", "fast"]
     - fast: ["private"]
-    - code: ["codex", "gpt", "fast"]
+    - code: ["code-ollama", "codex", "fast"]
+    - vision: ["vision-ollama"]
     # T0.1: these two lines stay COMMENTED PERMANENTLY. Routing a lane to `nim` makes it
     # production use, which the NVIDIA trial terms forbid (§1.2/§1.4). Kept only so nobody
     # re-derives the idea and wires it. See docs/adr/ADR-010-nvidia-nim-free-tier.md.

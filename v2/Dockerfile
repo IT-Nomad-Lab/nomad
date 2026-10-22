@@ -26,10 +26,22 @@ COPY *.py ./
 COPY publish.sh ./
 COPY skills ./skills
 COPY static ./static
+# The creation module every entry point shares (#1372). It sits outside this context, at the repo
+# root; compose passes it as an additional context. owui_newproject/owui_setup re-export it.
+COPY --from=nomad_projects *.py ./lib/nomad_projects/
 
 # Bind 0.0.0.0 INSIDE the container; the compose port-publish restricts it to 127.0.0.1 on the
 # host. On the docker network it's reachable as nomad-v2-engine:8099 (no LAN exposure).
 ENV NOMAD_V2_ENGINE_HOST=0.0.0.0 \
     NOMAD_RUNTIME=litellm
+# The test suite runs in this image as root against a bind-mounted worktree. Bytecode and the
+# pytest cache would land in that worktree owned by root, and `git worktree remove` then fails
+# without sudo (#1008). Neither is worth having in a container that is recreated, not upgraded.
+# server.py and mcp_image.py also makedirs the image dir at import; its default sits next to the
+# source, i.e. in the worktree, so point it where compose already mounts it.
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTEST_ADDOPTS="-p no:cacheprovider" \
+    NOMAD_IMAGE_DIR=/app/generated_images \
+    PYTHONPATH=/app/lib
 EXPOSE 8099
 CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8099"]

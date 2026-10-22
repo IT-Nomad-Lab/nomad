@@ -149,8 +149,9 @@ class Req:
 def _capture(monkeypatch):
     seen = {}
 
-    def fake(message, history, session_id):
-        seen.update(message=message, history=history, session_id=session_id)
+    def fake(message, history, session_id, remote=False, surface="cockpit"):
+        seen.update(message=message, history=history, session_id=session_id, remote=remote,
+                    surface=surface)
         return {"reply": "ok"}
     monkeypatch.setattr(server, "chat_reply", fake)
     return seen
@@ -200,3 +201,12 @@ def test_a_voice_turn_gets_its_own_session(monkeypatch):
     asyncio.run(server.api_chat(Req({"messages": [{"role": "user", "content": "hi"}],
                                      "session_id": "voice-ab12"})))
     assert seen["session_id"] == "voice-ab12"
+
+
+def test_api_chat_is_the_voice_surface_whatever_the_session(monkeypatch):
+    """#973: nomad-voice keeps approve and capture. The endpoint says who is asking, not a session
+    id a caller picks."""
+    seen = _capture(monkeypatch)
+    asyncio.run(server.api_chat(Req({"messages": [{"role": "user", "content": "approve"}],
+                                     "session_id": "cockpit"})))
+    assert (seen["surface"], seen["remote"]) == ("voice", False)

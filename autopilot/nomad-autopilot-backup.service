@@ -1,0 +1,10 @@
+[Unit]
+Description=NOMAD hybrid execution: back up the attempt store (#1488)
+
+[Service]
+Type=oneshot
+# The same deploy worktree as nomad-autopilot.service. The SQLite backup API copies the store
+# online, so the supervisor keeps running; copies older than 14 days are removed.
+WorkingDirectory=%h/nomad-wt/autopilot-live
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/.local/bin/uv run --no-project --with pyyaml --with requests python -m autopilot.hybrid backup

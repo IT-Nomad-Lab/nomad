@@ -1,0 +1,10 @@
+# PROPOSED (#1356), not installed. Install only after the operator approves the dry-run list:
+#   cp scripts/systemd/nomad-owui-file-retention.* ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now nomad-owui-file-retention.timer
+[Unit]
+Description=NOMAD: delete pipe-uploaded files older than 30 days from Open WebUI
+
+[Service]
+Type=oneshot
+Environment=OWUI_FILE_RETENTION_DAYS=30
+ExecStart=/usr/bin/python3 /home/jdelimam/nomad/scripts/owui-file-retention.py --apply

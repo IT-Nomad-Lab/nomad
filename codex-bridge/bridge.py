@@ -27,7 +27,7 @@ import subprocess
 import tempfile
 import time
 import uuid
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 
 HOST = os.environ.get("CODEX_BRIDGE_HOST", "127.0.0.1")   # loopback only (#821); LiteLLM reaches it via host.docker.internal
 PORT = int(os.environ.get("CODEX_BRIDGE_PORT", "8089"))   # 8088 claude · 8089 codex
@@ -150,6 +150,29 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _reply(self, req, completion):
+        """The completion as JSON, or as SSE when the caller asked to stream (#1132). The CLI
+        gives the whole answer at once, so the stream is one content chunk, a stop chunk with
+        usage, and [DONE]. Without this LiteLLM reads the JSON body as an empty stream."""
+        if not req.get("stream"):
+            self._send(200, completion)
+            return
+        base = {k: completion[k] for k in ("id", "created", "model")}
+        base["object"] = "chat.completion.chunk"
+        content = completion["choices"][0]["message"]["content"]
+        chunks = [{**base, "choices": [{"index": 0, "finish_reason": None,
+                                        "delta": {"role": "assistant", "content": content}}]},
+                  {**base, "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                   "usage": completion.get("usage")}]
+        body = b"".join(b"data: " + json.dumps(c).encode() + b"\n\n" for c in chunks)
+        body += b"data: [DONE]\n\n"
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def log_message(self, *a):  # quieter logs
         pass
 
@@ -179,7 +202,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send(502, {"error": {"message": str(e), "type": "codex_bridge_error"}})
             return
 
-        self._send(200, {
+        self._reply(req, {
             "id": f"chatcmpl-{uuid.uuid4().hex[:24]}",
             "object": "chat.completion",
             "created": int(time.time()),
@@ -195,6 +218,11 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    import importlib.util   # dispatcher/bridge_bind.py, by path: loopback + NOMAD_BRIDGE_IP (#383)
+    spec = importlib.util.spec_from_file_location("bridge_bind", os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "dispatcher", "bridge_bind.py"))
+    bridge_bind = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bridge_bind)
     print(f"NOMAD Codex bridge on http://{HOST}:{PORT}  (codex={CODEX}, "
           f"model={MODEL or 'cli default'})", flush=True)
-    ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
+    bridge_bind.serve_http(HOST, PORT, Handler)

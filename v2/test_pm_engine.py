@@ -225,6 +225,21 @@ def test_next_takes_only_ready_without_open_blockers(monkeypatch):
     assert e.run_next_task(f)["task_id"] == t2
 
 
+def test_run_task_sends_one_named_task_to_the_gate(monkeypatch):
+    """#1146: an Open WebUI chat's "build that fix" names the task. It goes to the gate like a
+    "next" pick; a Feature, a task already in flight or a blocked one doesn't start."""
+    e, db, op = _eng(monkeypatch)
+    f = e.plan_project("P", "")["goal_id"]
+    t1, t2 = op.by_subject("Find sources"), op.by_subject("Write brief")
+    assert "open blocker" in e.run_task(t2)["error"]
+    assert "Feature" in e.run_task(f)["error"]
+    r = e.run_task(t1)
+    assert r["task_id"] == t1 and r["status"] == "awaiting-approval"
+    assert op.status(t1) == "Awaiting approval"
+    assert "isn't started again" in e.run_task(t1)["error"]
+    assert db.list("goals", 50)[-1]["status"] != "executed"     # nothing ran
+
+
 # ── the order "next" picks in (#792, PRD cockpit-remote-approval R11) ──
 
 def _feature(op, *items):
@@ -624,3 +639,128 @@ def test_goals_and_backlog(monkeypatch):
     assert goals[0]["total"] == 3 and goals[0]["milestones"] == 2
     r = e.run_backlog(limit=5)
     assert r["started"] == 2 and {x["goal_id"] for x in r["runs"]} == {f1, f2}
+
+
+
+def test_goals_list_their_blocked_tasks(monkeypatch):
+    """#1130: the relay reads Blocked tasks from /project-goals, not one /project per goal."""
+    e, db, op = _eng(monkeypatch)
+    f = e.plan_project("One", "")["goal_id"]
+    assert e.project_goals()[0]["blocked"] == []
+    t = e.project_status(f)["milestones"][0]["tasks"][0]
+    op.move(t["task_id"], "Blocked")
+    (b,) = e.project_goals()[0]["blocked"]
+    assert (b["task_id"], b["title"], b["status"], b["lane"]) == (t["task_id"], t["title"], "Blocked", t["lane"])
+
+# ── #990: the unattended sweep leaves parked work alone ──
+
+def test_the_sweep_takes_no_backlog_task_blocked_parked_or_operator_only(monkeypatch):
+    """The 2026-10-02 11:00 sweep queued #350 (Backlog, blocker #349), #979 (parked in Backlog)
+    and #988 (operator-only, Backlog). None of them may move; only the Ready task goes."""
+    e, db, op = _eng(monkeypatch)
+    f, (stop_console, parked, operator_only, blocker, ready) = _feature(
+        op, ("Task", "Backlog", "Immediate"), ("Task", "Backlog", "High"),
+        ("Bug", "Backlog", "Immediate"), ("Task", "In Progress", "Normal"), ("Task", "Ready", "Low"))
+    op.blocks(blocker, stop_console)
+    r = e.run_backlog(limit=3)
+    assert [x["task_id"] for x in r["runs"]] == [ready]
+    for t in (stop_console, parked, operator_only):
+        assert op.status(t) == "Backlog"
+    assert e.run_backlog(limit=3)["started"] == 0         # nothing Ready is left
+
+
+def test_the_sweep_skips_a_ready_task_with_an_open_blocker(monkeypatch):
+    """#350 again, had it been Ready: the blocker filter holds on the sweep's path too."""
+    e, db, op = _eng(monkeypatch)
+    f, (stop_console, blocker) = _feature(op, ("Task", "Ready", "Normal"),
+                                          ("Task", "In Progress", "Normal"))
+    op.blocks(blocker, stop_console)
+    assert e.run_backlog(limit=3)["started"] == 0
+    assert op.status(stop_console) == "Ready"
+    op.move(blocker, "Done")
+    assert [x["task_id"] for x in e.run_backlog(limit=3)["runs"]] == [stop_console]
+
+
+def test_the_cockpits_next_still_falls_back_to_backlog(monkeypatch):
+    """Pressing "next" is the operator asking; only the timer is limited to Ready."""
+    e, db, op = _eng(monkeypatch)
+    f, (back,) = _feature(op, ("Task", "Backlog", "Normal"))
+    assert e.run_backlog(limit=1)["started"] == 0
+    assert e.run_next_task(f)["task_id"] == back
+
+
+# ── #990: withdrawing a stray proposal leaves the task alone ──
+
+def test_withdraw_closes_the_run_and_leaves_the_task_where_it_is(monkeypatch):
+    e, db, op = _eng(monkeypatch)
+    f, (t,) = _feature(op, ("Task", "Ready", "Normal"))
+    r = e.run_next_task(f)
+    op.move(t, "Blocked")                                  # the operator moved it back by hand
+    moves = len(op.moves)
+    w = e.withdraw_run(r["run_id"], "queued by the 11:00 cron")
+    assert w == {"run_id": r["run_id"], "status": "withdrawn"}
+    assert db.find("comms", "run_id", r["run_id"])["status"] == "withdrawn"
+    assert op.status(t) == "Blocked" and len(op.moves) == moves
+    assert "withdrawn" in op.said(t)[-1][1] and "11:00 cron" in op.said(t)[-1][1]
+
+
+def test_a_withdrawn_run_cannot_be_approved_or_withdrawn_again(monkeypatch):
+    e, db, op = _eng(monkeypatch)
+    f, (t,) = _feature(op, ("Task", "Ready", "Normal"))
+    r = e.run_next_task(f)
+    e.withdraw_run(r["run_id"])
+    assert _approve(e, db, r["run_id"])["status"] == "withdrawn"
+    assert e.resume_run(r["run_id"], "rejected")["status"] == "withdrawn"
+    assert op.status(t) == "Awaiting approval"             # neither Done nor Won't do
+    again = e.withdraw_run(r["run_id"])
+    assert again["status"] == "withdrawn" and "awaiting approval" in again["note"]
+    assert e.withdraw_run("nope")["error"] == "run not found"
+
+
+def test_only_a_run_awaiting_approval_can_be_withdrawn(monkeypatch):
+    e, db, op = _eng(monkeypatch)
+    f, (t,) = _feature(op, ("Task", "Ready", "Normal"))
+    r = e.run_next_task(f)
+    _approve(e, db, r["run_id"])
+    w = e.withdraw_run(r["run_id"])
+    assert w["status"] == "executed" and "awaiting approval" in w["note"]
+    assert op.status(t) == "Done"
+
+
+class _Counted(OpenProject):
+    """The real client over a fake board: counts the board reads, applies PATCHes."""
+
+    def __init__(self):
+        super().__init__(project="nomad-work", base="http://op")
+        self.reads, self.board = 0, [{"id": 1, "subject": "a"}]
+
+    def call(self, method, path, body=None, as_="nomad-manager", ok=(200, 201, 204)):
+        if method != "GET":
+            self.invalidate_wps()
+        if path.startswith("/projects/"):
+            return {"id": 3}
+        if path.startswith("/work_packages?"):
+            self.reads += 1
+            return {"_embedded": {"elements": [dict(w) for w in self.board]}, "total": len(self.board)}
+        self.board[0]["subject"] = body["subject"]
+        return {}
+
+
+def test_project_wps_reuses_a_board_read_and_hands_out_copies():
+    op = _Counted()
+    first = op.project_wps()
+    first[0]["subject"] = "changed by a caller"
+    assert op.project_wps() == [{"id": 1, "subject": "a"}] and op.reads == 1
+    op.project_wps(CIVIS)
+    assert op.reads == 2                     # another board is its own read
+
+
+def test_project_wps_reads_again_after_a_write_or_the_ttl(monkeypatch):
+    import pm_openproject
+    op = _Counted()
+    op.project_wps()
+    op.call("PATCH", "/work_packages/1", {"subject": "b"})
+    assert op.project_wps()[0]["subject"] == "b" and op.reads == 2
+    monkeypatch.setattr(pm_openproject, "WPS_TTL", 0)
+    op.project_wps()
+    assert op.reads == 3

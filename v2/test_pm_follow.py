@@ -26,7 +26,7 @@ NAMES = {"/api/v3/users/4": "OpenProject Admin", "/api/v3/users/6": "Research (a
 
 def wp(i, subject, type_="Task", status="Ready", parent=None, lane="research",
        created="2026-09-01T10:00:00Z", updated="2026-09-01T10:00:00Z", lock=0):
-    links = {"status": {"title": status}, "type": {"title": type_}, "project": {"title": "Work"},
+    links = {"status": {"title": status}, "type": {"title": type_}, "project": {"title": "Work", "href": "/api/v3/projects/14"},
              "parent": {"href": f"/api/v3/work_packages/{parent}" if parent else None}}
     return {"id": i, "subject": subject, "_links": links, "lane": lane, "createdAt": created,
             "updatedAt": updated, "lockVersion": lock}
@@ -62,6 +62,15 @@ class FakeOP:
 
     def lane_of(self, w):
         return w.get("lane")
+
+    def board_of(self, w):
+        href = (w["_links"].get("project") or {}).get("href")
+        if href == "/api/v3/projects/99":
+            raise PMError("GET -> 404")
+        return {"/api/v3/projects/14": "nomad-work"}.get(href)
+
+    def user_id_of(self, login):
+        return {pm_follow.MANAGER: 10}.get(login)
 
     def closed(self, s):
         return s in CLOSED
@@ -135,6 +144,16 @@ def test_blocked_on_a_watched_item(board):
     assert (ev["from"], ev["to"], ev["blocked"], ev["watched"]) == ("Ready", "Blocked", True, True)
     assert ev["author"] == "Dev (agent)" and ev["by_agent"] and not ev["by_operator"]
     assert ev["comment"] == "waiting on the API key" and ev["lane"] == "research"
+
+
+def test_events_carry_the_board_or_none(board):
+    op, f = board
+    assert f.ingest(hook_wp(5))["board"] == "nomad-work"
+    op.wps[6] = wp(6, "Elsewhere")
+    op.wps[6]["_links"]["project"]["href"] = "/api/v3/projects/99"     # board lookup fails
+    op.acts[6] = [act(60, 9, ["Status changed from Ready to In Progress"])]
+    ev = f.ingest(hook_wp(6))
+    assert ev is not None and ev["board"] is None                       # fail-open: still an event
 
 
 def test_one_activity_two_hooks_is_one_event(board):
@@ -347,6 +366,18 @@ def test_zulip_reply_rejects():
     ev = _comment(f, 2, 10, pm_follow.ZULIP_PREFIX + "Reject: split it in two")
     assert ev["decided"] == "Changes requested"
     assert op.moves == [(7, "Changes requested", pm_follow.MANAGER)]
+
+
+def test_a_zulip_prefix_from_another_account_does_not_move():
+    op, f = _awaiting()
+    assert _comment(f, 2, 9, pm_follow.ZULIP_PREFIX + "approve")["decided"] is None   # a worker
+    assert op.moves == []
+
+    def unknown(login):
+        raise PMError("no token")
+    op.user_id_of = unknown                     # no manager id: no relayed reply counts
+    assert _comment(f, 3, 10, pm_follow.ZULIP_PREFIX + "approve")["decided"] is None
+    assert op.moves == []
 
 
 def test_no_move_from_an_agent_a_question_or_another_status():

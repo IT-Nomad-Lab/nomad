@@ -1,6 +1,6 @@
 # Autopilot rules for workers
 
-DRAFT for operator review (task #874). Installed path once approved: `~/nomad/docs/AUTONOMY.md`.
+Signed off by Josias on 2026-10-01 (task #876).
 Source: PRD `docs/prd/autopilot.md` 5.2 to 5.8, generalised from `RuneMatch/AUTONOMY.md`.
 
 Josias owns this file. It gives autopilot workers standing authority to finish board work
@@ -34,7 +34,8 @@ merges, alerts and posts digests. You don't.
 3. **Claim.** Move it to In Progress with the comment `autopilot: started <branch>`. This works
    from Ready, Approved and Changes requested.
 4. **Work where you were put.** The supervisor made your worktree and branch. Stay in them. Don't
-   create, switch or delete branches, and don't open another worktree.
+   create or switch branches, and don't open another worktree. Delete a branch or worktree only
+   with an Approved answer that names it (section 6).
 5. **Build to the acceptance criteria.** Nothing more. Commit on your branch as you go, small
    commits, each ending with the `Co-Authored-By:` trailer your run gives you. Anything you find
    outside the task becomes a new task (section 2), not extra scope.
@@ -66,9 +67,14 @@ left, and stop. The next run picks it up.
   takes as fact about the world or the business;
 - art direction, and any generated image, model, audio or video that ships;
 - money, licences (any other than those listed above), external services and accounts;
-- push, deleting anything (branches, history, tracker items), and any force operation;
+- push, rewriting history, and any force operation;
+- deleting branches, worktrees or tracker items, and merging into the default branch. Ask first
+  (section 6). An Approved answer that names the branch, worktree, item or merge lets you do that
+  one thing in the next run, and nothing else;
 - edits to agent config: `AGENTS.md`, `CLAUDE.md`, any `AUTONOMY.md`, anything in `.claude/`,
-  the project's `autopilot:` entry in `projects.yaml`, and permission settings;
+  the project's `autopilot:` entry in `projects.yaml`, and permission settings. **Exception:**
+  when Josias asked for that edit, in the task description or in a comment Josias wrote on the
+  task, make it and log it as a delegated decision (section 3), quoting the request;
 - architecture changes: new or merged modules, changed layering or namespaces, a changed public
   interface other code depends on, a new framework or datastore, a schema change that drops data;
 - publishing, deploying, or sending anything outside this machine;
@@ -167,9 +173,11 @@ Never move a task to Done. The supervisor does that after the merge.
 
 - push, or touch any remote;
 - stash, reset, rebase, clean, amend, or anything with `--force`;
-- delete branches, tags, worktrees, tracker items, or files your task doesn't own;
-- merge into the default branch, or check it out;
-- edit agent config (section 2);
+- delete tags, or files your task doesn't own;
+- delete branches, worktrees or tracker items, or merge into the default branch, without an
+  Approved answer that names it (section 2);
+- check out the default branch;
+- edit agent config that Josias didn't ask for (section 2);
 - write anything in the main checkout. You may read it;
 - post a digest or send an alert;
 - work on a second task in the same run.

@@ -36,11 +36,17 @@ from fastapi.staticfiles import StaticFiles
 
 import engine as engine_mod
 import intents
+import cockpit_asks
+import cockpit_policies
+import cockpit_standards
+import owui
 from engine import Engine, proposal_hash
 from mcp_image import generate_image_impl   # direct local image gen for the nomad-image MCP bridge
 from nocodb import NocoDB
 import pm_board
 import pm_follow
+import pm_mention
+from task_question import parse_question
 from pm_openproject import MANAGER, OpenProject, PMError, _title
 
 HOST = os.environ.get("NOMAD_V2_ENGINE_HOST", "127.0.0.1")   # localhost-only (security review)
@@ -345,31 +351,6 @@ def _handle_pipeline_capture(goal: str) -> str:
             f"action allows it, or say **approve** here. Nothing runs until you do.")
 
 
-def _handle_self_develop() -> str:
-    """The v2 backlog sweep. The console fired this at crew on :8001, which ran the work and left
-    uncommitted edits with nothing in front of it; every run this starts stops at the gate."""
-    try:
-        res = eng.run_backlog(3)
-    except Exception as e:
-        return f"⚠ Could not start the backlog sweep: {str(e)[:200]}"
-    _bump_runs()
-    if not res.get("started"):
-        skipped = res.get("skipped") or []
-        if skipped:
-            return ("Nothing started. Every project with work left errored: " +
-                    "; ".join(f"goal {x['goal_id']}: {x['error'][:80]}" for x in skipped[:3]))
-        return ("Backlog is empty, nothing queued for me to build. Add Tasks rows with "
-                "**Status = Backlog** against a project goal, then tell me to work on my backlog.")
-    lines = [f"- **{r.get('project','?')}**: {r.get('task_title','?')} (`{r.get('run_id','')}`)"
-             for r in res.get("runs", [])]
-    note = ""
-    if res.get("skipped"):
-        note = f"\n\n{len(res['skipped'])} project(s) were stepped over after an error."
-    return (f"Started {res['started']} backlog item(s), one per project, limit {res['limit']}:\n" +
-            "\n".join(lines) +
-            "\n\nEvery one is **awaiting approval** and nothing has executed." + note)
-
-
 # run_id → (proposal_hash, time) of the proposal as chat last showed it (#806). A chat approval
 # executes only the version recorded here, so the engine's stale-proposal check compares what the
 # operator saw with what is stored, not the stored proposal with itself.
@@ -474,67 +455,28 @@ def _handle_gate_decision(decision: str, do_all: bool) -> str:
     return f"{verb} {len(done)} item(s):\n" + "\n".join(lines) + tail
 
 
-def _handle_start_project(name: str, request: str) -> str:
-    """Scaffold a repo through the dispatcher, then plan it into v2 mission control.
-
-    The console filed the new project as a Notion row, which refuses now: Notion is the rollback
-    source and writing to it would make it one. `plan_project` is the NocoDB equivalent and does
-    more than the row did, so the project arrives with milestones instead of a name."""
-    if not name:
-        return "I need a name to start a project. Try: \"start a project called <name>\"."
-    try:
-        req = urllib.request.Request(
-            DISPATCH_URL + "/new-project", method="POST",
-            headers={"Content-Type": "application/json", "X-Nomad-Token": DISPATCH_TOKEN},
-            data=json.dumps({"name": name, "description": request}).encode())
-        with urllib.request.urlopen(req, timeout=60) as r:
-            res = json.loads(r.read() or b"{}")
-    except Exception as e:
-        return f"⚠ Could not reach the dispatcher to scaffold the project: {str(e)[:200]}"
-    if not res.get("ok"):
-        return f"Could not create **{name}**: {res.get('error', 'unknown error')}"
-    # The repo exists either way; a failure to plan must not read as a failure to scaffold.
-    planned = ""
-    try:
-        pl = eng.plan_project(res.get("name") or name, request)
-        planned = (f" Planned into mission control as goal {pl['goal_id']}: "
-                   f"{len(pl['milestones'])} milestones, {pl['task_count']} tasks.")
-    except Exception as e:
-        planned = f" It is not on the board yet: planning failed with {str(e)[:120]}."
-    return (f"Project **{res.get('name', name)}** is live, Commander. Scaffolded a git repo at "
-            f"`{res.get('path','?')}`.{planned}")
-
-
-def _handle_research(topic: str) -> str:
-    """Research captures like anything else, and says where the brief will end up.
-
-    The console answered a research request with the brief itself, written on the spot. That read
-    better and was the wrong shape: it reached a model and filed a document with no gate in front
-    of either. Here it becomes a run. The one thing worth adding is where to go looking, because
-    the answer no longer arrives in the reply and a filed brief nobody can find is not filed."""
-    topic = (topic or "").strip()
-    if not topic:
-        return "Name a topic, for example `research the best local STT engine`."
-    out = _handle_pipeline_capture("Research and brief me on " + topic)
-    if out.startswith(("⚠", "Capture failed")):
-        return out
-    return out + ("\n\nOnce you approve it the brief is filed to the Knowledge Base, and the run's "
-                  "drill-down shows the copy that was actually stored.")
-
-
 ACTION_INTENTS = {
     "diagnostics": lambda p: _handle_diagnostics(),
-    # Research and imperative actions capture rather than run, so they reach the human gate and the
-    # approval queue instead of being executed, or merely talked about, by the chat model.
-    "research": lambda p: _handle_research(p.get("topic", "")),
-    "action_capture": lambda p: _handle_pipeline_capture(p.get("request", "")),
+    # Voice keeps these (operator decision on #967, 2026-10-01). Captures still stop at the gate.
     "gate_decision": lambda p: _handle_gate_decision(p.get("decision", "approved"),
                                                      p.get("all", False)),
-    "start_project": lambda p: _handle_start_project(p.get("name", ""), p.get("request", "")),
-    "self_develop": lambda p: _handle_self_develop(),
     "pipeline_capture": lambda p: _handle_pipeline_capture(p.get("goal", "")),
+    "action_capture": lambda p: _handle_pipeline_capture(p.get("request", "")),
 }
 
+
+# #973 (PRD cockpit-chat-tools 5.1). The chat gives information; which intents act depends on who
+# is asking, and that is decided by the caller (the endpoint, a flag, the Zulip session), never by
+# the message text. The typed cockpit box and Zulip's free text answer questions only. Voice keeps
+# approve/reject and capture, because the operator has no button to press while talking. A list of
+# what is allowed, so an intent added next month is information-only until someone decides otherwise.
+SURFACE_INTENTS = {
+    "cockpit": ("chat", "diagnostics"),
+    "zulip": ("chat", "diagnostics"),
+    "voice": ("chat", "diagnostics", "gate_decision", "pipeline_capture", "action_capture"),
+}
+CHAT_POINTER = ("I only answer questions here. To approve or reject, use the Approve or Reject "
+                "button on the run. To start work, use ⚑ Capture.")
 
 # R2a (#796). Through the tailnet proxy chat answers questions and nothing else. It is a list of
 # what is allowed, not of what is refused, so an intent added next month is refused from the phone
@@ -543,11 +485,49 @@ REMOTE_CHAT_INTENTS = ("chat", "diagnostics")
 REMOTE_REFUSAL = ("From here I can answer questions. To start or approve work, use the Approve "
                   "buttons or the laptop.")
 
+# #970 (PRD cockpit-chat-tools 4). The only tools the chat model can call, by name. Every one is
+# read-only (#968, #969). A list of what is allowed, like REMOTE_CHAT_INTENTS: a tool added to
+# chat_tools or chat_pm_tools next month is out of reach from chat until it is named here.
+CHAT_TOOL_ALLOWLIST = (
+    "pipeline_runs", "pipeline_run_detail", "approval_queue", "autopilot_runs",
+    "autopilot_status", "autopilot_config", "system_health",
+    "pm_search", "pm_get", "pm_tree", "pm_ready", "pm_project_summary", "pm_my_queue",
+)
+CHAT_NO_LOOKUP = "(I couldn't look anything up live just now, so this is from a snapshot.)"
 
-def chat_reply(message: str, history=None, session_id: str = "cockpit", remote: bool = False) -> dict:
+
+def _chat_tools() -> dict:
+    """The allowlisted tools, as runtime.run_tools takes them. A name on the list that no module
+    offers, or that isn't marked read-only, is left out rather than guessed at."""
+    import chat_tools
+    import chat_pm_tools
+    out = {}
+    for mod in (chat_tools, chat_pm_tools):
+        for name, t in mod.TOOLS.items():
+            if name in CHAT_TOOL_ALLOWLIST and t.get("read_only") is True:
+                out[name] = {"description": t["description"], "input_schema": t["input_schema"],
+                             "call": lambda args, _m=mod, _n=name: _m.call(_n, args)}
+    return out
+
+
+def _chat_stopped_note(res: dict, max_turns: int, timeout_s: float) -> str:
+    """What the operator is told when a tool turn hit a bound, so a cut answer never reads as a
+    whole one and a turn with nothing to show still says something."""
+    why = {"turns": f"I stopped after {max_turns} steps of looking things up",
+           "time": f"I stopped after {timeout_s:g} seconds of looking things up"}[res["stopped"]]
+    if res.get("reply"):
+        return f"{res['reply']}\n\n({why}, so this may be incomplete.)"
+    return f"{why} before I had an answer. Try a narrower question, or ask about one run or task."
+
+
+def chat_reply(message: str, history=None, session_id: str = "cockpit", remote: bool = False,
+               surface: str = "cockpit") -> dict:
     """Conversational turn grounded in live pipeline state + memory. Recalls relevant past
     conversations (cross-session, unified with the console) and the recent in-session history, then
-    persists both sides of the turn. Memory is fail-open. capture=true is handled by the caller."""
+    persists both sides of the turn. Memory is fail-open. `surface` is who is asking (see
+    SURFACE_INTENTS); an unknown one is treated as the typed cockpit. A question goes to the model
+    with CHAT_TOOL_ALLOWLIST as its only tools (#970); `tools` in the result names the ones it
+    called."""
     import runtime
     import memory_chat
     # memory opt-out / forget — honored BEFORE the model runs (mirrors the console)
@@ -574,6 +554,15 @@ def chat_reply(message: str, history=None, session_id: str = "cockpit", remote: 
     i_action, payload = intents.classify(message)
     if remote and i_action not in REMOTE_CHAT_INTENTS:
         return {"reply": REMOTE_REFUSAL, "remembered": False, "refused": True, "intent": i_action}
+    allowed = SURFACE_INTENTS.get(surface, SURFACE_INTENTS["cockpit"])
+    if i_action != "chat" and i_action not in allowed:
+        # A command on an information-only surface: the pointer, and never the model, so "approve"
+        # can't come back as "Sure, approved!".
+        if intent == "off_record":
+            return {"reply": CHAT_POINTER, "remembered": False, "refused": True, "intent": i_action}
+        memory_chat.remember(session_id, "user", message)
+        memory_chat.remember(session_id, "assistant", CHAT_POINTER)
+        return {"reply": CHAT_POINTER, "remembered": True, "refused": True, "intent": i_action}
     if i_action in ACTION_INTENTS:
         try:
             reply = ACTION_INTENTS[i_action](payload)
@@ -591,35 +580,63 @@ def chat_reply(message: str, history=None, session_id: str = "cockpit", remote: 
     if mems:
         mem_block = "\n\nRECALLED MEMORY (relevant past conversations — treat as things you remember):\n" + \
             "\n".join(f"- {m['role']}: {m['content'][:200]}" for m in mems)
-    # a named run: the recent-runs summary carries status and proposal but never the error, so
-    # "why did run X fail" could only be answered with a guess. Pull the actual record instead.
-    try:
-        run_block = _run_context(*_resolve_run_ids(message))
-    except Exception:
-        run_block = ""                      # a chat turn must not die because a lookup did
     # short-term: the recent in-session turns the client sends (continuity within this chat)
     hist_block = ""
     for t in (history or [])[-6:]:
         role = (t.get("role") or "").upper()
         hist_block += f"\n{role}: {(t.get('content') or '')[:400]}"
-    system = (
-        "You are NOMAD, the orchestrator of a self-hosted pipeline (Capture→Clarify→Route→Process→"
-        "Human Gate→Execute→Log&Learn) over a 5-lane inbox (comms/research/support/ads/dev). Answer "
-        "the operator concisely about the CURRENT pipeline state shown below. If they're handing you "
-        "a task to act on, tell them to capture it (the ⚑ Capture button or 'capture: <goal>') so it "
-        "enters the gate. Don't invent runs or claim you executed anything.\n\n"
-        f"LIVE PIPELINE STATE:\n{_pipeline_context()}{run_block}{mem_block}"
-        + (f"\n\nRECENT CONVERSATION:{hist_block}" if hist_block else ""))
+    tail = mem_block + (f"\n\nRECENT CONVERSATION:{hist_block}" if hist_block else "")
+    intro = ("You are NOMAD, the orchestrator of a self-hosted pipeline (Capture→Clarify→Route→"
+             "Process→Human Gate→Execute→Log&Learn) over a 5-lane inbox (comms/research/support/ads/"
+             "dev). Answer the operator concisely. If they're handing you a task to act on, tell them "
+             "to capture it (the ⚑ Capture button) so it enters the gate. Don't invent runs or claim "
+             "you executed anything.")
+
+    # #970: the tool turn (PRD 6, R1 to R4, R6). The model reads live state through the read-only
+    # tools instead of a pasted snapshot. A question that needs no lookup is answered with none.
+    tool_calls, reply = [], None
     try:
-        reply = runtime.run(system, message, alias="balanced", max_tokens=400)
-    except Exception as e:
-        reply = f"(chat unavailable: {str(e)[:120]})"
+        res = runtime.run_tools(
+            intro + " Your tools read the live pipeline, the approval queue, the autopilot, service "
+            "health and the task board, and nothing you can call changes anything. Look things up "
+            "rather than guess; a question that needs no lookup needs no tool. If a tool returns an "
+            "error, say what failed and don't fill the gap." + tail,
+            message, _chat_tools(), alias="balanced", max_turns=runtime.TOOL_MAX_TURNS,
+            timeout_s=runtime.TOOL_TIMEOUT_S)
+        tool_calls = res.get("tool_calls") or []
+        if res.get("stopped"):
+            reply = _chat_stopped_note(res, runtime.TOOL_MAX_TURNS, runtime.TOOL_TIMEOUT_S)
+        elif res.get("reply"):
+            reply = res["reply"]
+    except Exception:
+        reply = None                        # R5: no SDK, or it failed to start; fall back below
+    if reply is None:
+        # R5: no tools, today's pasted context, and the reply says it couldn't look things up.
+        # a named run: the recent-runs summary carries status and proposal but never the error, so
+        # "why did run X fail" could only be answered with a guess. Pull the actual record instead.
+        try:
+            run_block = _run_context(*_resolve_run_ids(message))
+        except Exception:
+            run_block = ""                      # a chat turn must not die because a lookup did
+        system = (intro + " Answer about the CURRENT pipeline state shown below.\n\n"
+                  f"LIVE PIPELINE STATE:\n{_pipeline_context()}{run_block}" + tail)
+        try:
+            reply = runtime.run(system, message, alias="balanced", max_tokens=400,
+                                timeout_s=runtime.TOOL_TIMEOUT_S)
+            reply = f"{reply}\n\n{CHAT_NO_LOOKUP}"
+        except Exception as e:
+            if isinstance(e, TimeoutError) or "timed out" in str(e).lower():
+                reply = (f"(chat timed out: no answer within {runtime.TOOL_TIMEOUT_S:g} seconds. "
+                         "Try again, or ask a narrower question.)")
+            else:
+                reply = f"(chat unavailable: {str(e)[:120]})"
     # 'off the record' → answer but store NOTHING; otherwise persist both sides for future recall
+    tools_used = [c["name"] for c in tool_calls]      # what the answer was read from
     if intent == "off_record":
-        return {"reply": reply, "remembered": False}
+        return {"reply": reply, "remembered": False, "tools": tools_used}
     memory_chat.remember(session_id, "user", message)
     memory_chat.remember(session_id, "assistant", reply)
-    return {"reply": reply, "remembered": True, "intent": "chat"}
+    return {"reply": reply, "remembered": True, "intent": "chat", "tools": tools_used}
 
 
 def _delivery(run_id: str) -> list:
@@ -979,7 +996,9 @@ TAILNET_ORIGIN = os.environ.get("NOMAD_TAILNET_ORIGIN", "").strip().rstrip("/")
 # and so must the budget switch and caps (#884). Exactly these routes, matched whole; the engine
 # still checks the project id and the stop mode, and the supervisor the config fields.
 # #890 adds the per-project ON/OFF switch (/api/autopilot/projects/<id>/autopilot), same id rule.
-TAILNET_WRITES = ("/resume", "/retry", "/run-next-task", "/chat",
+# #1407 (operator OK 2026-10-16): answering an agent's question or approval from the phone; the
+# bridge still checks the ask id and refuses one that is no longer pending.
+TAILNET_WRITES = ("/resume", "/retry", "/run-next-task", "/chat", "/api/asks/decide",
                   "/api/autopilot/pass", "/api/autopilot/config")
 TAILNET_WRITE_PATTERNS = (
     re.compile(r"/api/autopilot/projects/[A-Za-z0-9][A-Za-z0-9._-]{0,63}/(?:start|stop|autopilot)"),
@@ -1106,11 +1125,453 @@ async def projects():
     return await asyncio.to_thread(_f)
 
 
+def _registry_detail() -> list | None:
+    """The dispatcher's /projects detail rows, or None when it can't be asked."""
+    try:
+        import requests
+        r = requests.get(f"{DISPATCH_URL}/projects", headers={"X-Nomad-Token": DISPATCH_TOKEN},
+                         timeout=5)
+        r.raise_for_status()
+        detail = r.json().get("detail")
+        return detail if isinstance(detail, list) else None
+    except Exception:
+        return None
+
+
+@app.get("/owui/models")
+async def owui_models(request: Request):
+    """The Open WebUI pipe's dropdown: projects, + New project, General (local). #1114."""
+    status, msg = owui.check(request.headers.get("x-nomad-token"))
+    if status:
+        return JSONResponse({"ok": False, "error": msg}, status_code=status)
+    return owui.models(await asyncio.to_thread(_registry_detail))
+
+
+def _project_context(pid: str) -> dict | None:
+    """The dispatcher's /project-context for one registry id; None when it doesn't know it."""
+    import requests
+    r = requests.get(f"{DISPATCH_URL}/project-context", params={"id": pid},
+                     headers={"X-Nomad-Token": DISPATCH_TOKEN}, timeout=5)
+    if r.status_code == 404:
+        return None
+    r.raise_for_status()
+    return r.json()
+
+
+OWUI_TURNS = "owui_turns"
+_owui_table = {"ok": False}
+
+
+def _owui_log(row: dict):
+    """One routed turn into NocoDB, for reviewing routing quality later (§6.2 step 5, §9)."""
+    if not _owui_table["ok"]:
+        cols = [{"column_name": k, "title": k, "uidt": u} for k, u in (
+            ("chat_id", "SingleLineText"), ("entry", "SingleLineText"),
+            ("project", "SingleLineText"), ("local_only", "Checkbox"),
+            ("routed", "SingleLineText"), ("routed_by", "SingleLineText"),
+            ("reason", "SingleLineText"), ("served", "SingleLineText"),
+            ("fallbacks", "SingleLineText"), ("needs_tools", "Checkbox"),
+            ("note", "LongText"), ("error", "LongText"), ("route_ms", "Number"),
+            ("total_ms", "Number"), ("chars", "Number"), ("at", "SingleLineText"))]
+        db.create_table(OWUI_TURNS, cols)
+        _owui_table["ok"] = True
+    db.create(OWUI_TURNS, {**row, "at": datetime.now(timezone.utc).isoformat(timespec="seconds")})
+
+
+OWUI_CHATS = "owui_chats"
+_owui_chats = {"ok": False, "cache": {}}
+
+
+def _owui_bound(chat_id: str):
+    """The entry an Open WebUI chat is bound to (§6.5), or None. Bindings don't change once
+    set, except by M3's + New project rename, which goes through _owui_bind, so they cache."""
+    cache = _owui_chats["cache"]
+    if chat_id not in cache:
+        _owui_chats_table()
+        row = db.find(OWUI_CHATS, "chat_id", chat_id)
+        if not row:
+            return None
+        cache[chat_id] = (row.get("Id"), row.get("entry"))
+    return cache[chat_id][1]
+
+
+def _owui_bind(chat_id: str, entry: str):
+    _owui_chats_table()
+    at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    have = _owui_chats["cache"].get(chat_id)
+    if have and have[0]:
+        db.update(OWUI_CHATS, have[0], {"entry": entry, "at": at})
+        rid = have[0]
+    else:
+        rid = (db.create(OWUI_CHATS, {"chat_id": chat_id, "entry": entry, "at": at}) or {}).get("Id")
+    _owui_chats["cache"][chat_id] = (rid, entry)
+
+
+def _owui_chats_table():
+    if not _owui_chats["ok"]:
+        db.create_table(OWUI_CHATS, [{"column_name": k, "title": k, "uidt": "SingleLineText"}
+                                     for k in ("chat_id", "entry", "at")])
+        _owui_chats["ok"] = True
+
+
+OWUI_NEW_PROJECTS = "owui_new_projects"
+_owui_np = {"ok": False}
+OWUI_PRD_TOKENS = 4000
+OWUI_PRD_TIMEOUT_S = 300
+
+
+def _owui_np_table():
+    if not _owui_np["ok"]:
+        db.create_table(OWUI_NEW_PROJECTS, [
+            {"column_name": k, "title": k, "uidt": t}
+            for k, t in (("chat_id", "SingleLineText"), ("stage", "SingleLineText"),
+                         ("project", "SingleLineText"), ("state", "LongText"),
+                         ("at", "SingleLineText"))])
+        _owui_np["ok"] = True
+
+
+def _owui_np_load(chat_id: str):
+    """A + New project chat's state (owui_newproject, #1151), or None for a new chat."""
+    _owui_np_table()
+    row = db.find(OWUI_NEW_PROJECTS, "chat_id", chat_id)
+    return json.loads(row["state"]) if row and row.get("state") else None
+
+
+def _owui_np_save(chat_id: str, state: dict):
+    _owui_np_table()
+    fields = {"stage": state.get("stage", ""), "project": state.get("id", ""),
+              "state": json.dumps(state),
+              "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+    row = db.find(OWUI_NEW_PROJECTS, "chat_id", chat_id)
+    if row:
+        db.update(OWUI_NEW_PROJECTS, row["Id"], fields)
+    else:
+        db.create(OWUI_NEW_PROJECTS, {"chat_id": chat_id, **fields})
+
+
+OWUI_TOOL_TURNS = 10
+OWUI_TOOL_TIMEOUT_S = 180
+
+
+def _owui_tools(info: dict) -> dict:
+    """The chat's owui_tools (#1146): green writes on its project's board, gated starts through
+    the engine. Every run started here is a gate run, so the cockpit's counts move with it."""
+    import owui_tools
+    from pm_openproject import OpenProject
+
+    def started(st):
+        _bump_runs()
+        return st
+
+    def run_next(board):
+        st = eng.run_next_task(None, OpenProject(project=board).project()["id"])
+        pm_board.invalidate_projects()
+        return started(st)
+
+    return owui_tools.build(owui_tools.Actions(
+        board=info.get("board") or "",
+        op=lambda b: OpenProject(project=b) if b else OpenProject(),
+        capture=lambda goal: started(eng.start_run(goal)),
+        run_task=lambda i: started(eng.run_task(i)), run_next=run_next))
+
+
+def _owui_draft(alias, system, user):
+    import llm
+    return llm.chat(alias, system, user, max_tokens=OWUI_PRD_TOKENS, timeout=OWUI_PRD_TIMEOUT_S,
+                    extra={"disable_fallbacks": True} if alias == "private" else None)
+
+
+def _owui_profiles() -> list:
+    """The dispatcher's project types (GET /profiles, #1373); [] when it can't be asked."""
+    try:
+        import requests
+        r = requests.get(f"{DISPATCH_URL}/profiles", headers={"X-Nomad-Token": DISPATCH_TOKEN},
+                         timeout=5)
+        r.raise_for_status()
+        got = r.json()
+        return got["profiles"] if got.get("ok") and isinstance(got.get("profiles"), list) else []
+    except Exception:
+        return []
+
+
+def _owui_upsert_project(row: dict):
+    """The mission-control row (§6.4 step 3.6), as nomad-console/sync_projects.py writes it."""
+    have = db.find("projects", "title", row["title"])
+    if have:
+        db.update("projects", have["Id"], {k: v for k, v in row.items() if k != "title"})
+    else:
+        db.create("projects", row)
+
+
+def _owui_refresh(chat_id: str, pid: str) -> str:
+    """The new project in this chat and in the dropdown (§6.4 step 3.7)."""
+    import owui
+    if chat_id:
+        _owui_bind(chat_id, owui.PROJECT_PREFIX + pid)
+    pm_board.invalidate_projects()
+    rows = _registry_detail()
+    if rows is not None and pid not in {r.get("id") for r in rows}:
+        return ("the dispatcher doesn't list it yet: ~/nomad may be on another branch than "
+                "master, so it shows up once that checkout is back on master")
+    return ""
+
+
+def _owui_setup(state: dict, save, chat_id: str):
+    import owui_setup
+    from pm_openproject import OpenProject
+    return owui_setup.run(owui_setup.Setup(
+        dispatch=_dispatcher, op=lambda b: OpenProject(project=b), plan=_owui_draft,
+        upsert_project=_owui_upsert_project, refresh=_owui_refresh), state, save, chat_id)
+
+
+# ── create a project from answers given at once (#1374) ────────────────────────────────
+# The dispatcher's POST /create-project and the create_project MCP tool end here, in the same
+# module and with the same setup as the chat. A run's state is saved per step in
+# owui_new_projects under new:<id>, so the same call again resumes where it stopped. The steps
+# take minutes (the board seed alone can take 15), so the run goes on in a thread and
+# GET /owui/create-project/<id> reports it.
+CREATE_PREFIX = "new:"
+_creating = {}                      # id -> {"running": bool, "lines": [...]} since the engine started
+_creating_lock = threading.Lock()
+
+
+def _create_status(pid: str, state: dict | None) -> dict:
+    run = _creating.get(pid) or {}
+    st = state or {}
+    return {"ok": True, "id": pid, "stage": st.get("stage") or "", "steps": st.get("steps") or [],
+            "running": bool(run.get("running")), "lines": run.get("lines") or []}
+
+
+def _create_run(pid: str, inputs: dict, state: dict):
+    from nomad_projects import create
+    key, run = CREATE_PREFIX + pid, _creating[pid]
+    try:
+        for piece in create.create(inputs, state, taken=None, save=lambda st: _owui_np_save(key, st),
+                                   setup=lambda st, save: _owui_setup(st, save, "")):
+            run["lines"].append(piece.strip())
+    except Exception as e:
+        run["lines"].append(f"⚠ {type(e).__name__}: {str(e)[:200]}")
+    finally:
+        run["running"] = False
+
+
+def owui_create(inputs: dict) -> tuple:
+    """(status code, body). Checks the answers before anything starts: a refused one comes back
+    at once, and nothing is made. Otherwise the steps run in a thread."""
+    from nomad_projects import create
+    inputs = inputs if isinstance(inputs, dict) else {}
+    pid = create.slug(str(inputs.get("name") or ""))
+    if not create.ID.match(pid):
+        return 400, {"ok": False, "error": "A project needs a name that makes a usable id "
+                                           "(letters, digits and dashes, 2-40)."}
+    with _creating_lock:
+        if (_creating.get(pid) or {}).get("running"):
+            return 200, _create_status(pid, _owui_np_load(CREATE_PREFIX + pid))
+        state = _owui_np_load(CREATE_PREFIX + pid) or {}
+        if state.get("stage") not in ("setup", "done"):
+            rows = _registry_detail()
+            st, why = create.prepare(inputs, taken=None if rows is None else {r.get("id") for r in rows},
+                                     profiles=_owui_profiles())
+            if why:
+                return 400, {"ok": False, "id": pid, "error": why}
+            state = st
+            _owui_np_save(CREATE_PREFIX + pid, state)
+        if state["stage"] == "done":
+            return 200, _create_status(pid, state)
+        _creating[pid] = {"running": True, "lines": []}
+    threading.Thread(target=_create_run, args=(pid, inputs, state), daemon=True).start()
+    return 202, _create_status(pid, state)
+
+
+def _owui_rows(table: str, field: str, value: str) -> list:
+    """Every NocoDB row of `table` whose `field` equals `value`; none when the table isn't there."""
+    where = urllib.parse.quote(f"({field},eq,{value})", safe="(),")
+    try:
+        return db.list(table, 500, where=where)
+    except KeyError:                        # no such table yet: no rows
+        return []
+
+
+def _owui_initiative(pid: str, name: str):
+    """The Initiative in nomad-portfolio for a project: the id its + New project run saved, else
+    the one Initiative of that name. None when there is none or the name is ambiguous."""
+    import owui_delete
+    for r in _owui_rows(OWUI_NEW_PROJECTS, "project", pid):
+        if str(r.get("chat_id") or "").startswith(owui_delete.STATE_PREFIX):
+            continue
+        try:
+            found = ((json.loads(r.get("state") or "{}")).get("roadmap") or {}).get("initiative")
+        except ValueError:
+            found = None
+        if found:
+            return int(found)
+    from pm_openproject import OpenProject
+    named = [w["id"] for w in OpenProject(project=owui_delete.PORTFOLIO).project_wps()
+             if w.get("subject") == name and ((w.get("_links") or {}).get("type") or {}).get("title") == "Initiative"]
+    return named[0] if len(named) == 1 else None
+
+
+def _owui_gate(pid: str, listing: str) -> str:
+    """File the delete at the human gate, as a run the cockpit and the chat's `approve` both see."""
+    import owui_delete
+    st = eng.file_gate(f"Delete project {pid} from an Open WebUI chat", owui_delete.ACTION,
+                       {"project": pid, "summary": "repo to ~/archive, registry entry, board and stream "
+                                                   "archived, NocoDB rows removed"},
+                       target=pid, preview=listing)
+    _bump_runs()
+    return st["run_id"]
+
+
+def _owui_forget(chat_id: str, pid: str) -> str:
+    """The deleted project out of the dropdown and out of every cache (§6.6 step 6)."""
+    import owui
+    for cid, (_rid, entry) in list(_owui_chats["cache"].items()):
+        if entry == owui.PROJECT_PREFIX + pid:
+            _owui_chats["cache"].pop(cid, None)
+    pm_board.invalidate_projects()
+    rows = _registry_detail()
+    if rows is not None and pid in {r.get("id") for r in rows}:
+        return "the dispatcher still lists it: ~/nomad may be on another branch than master"
+    return ""
+
+
+def _owui_drop_state(pid: str):
+    import owui_delete
+    for r in _owui_rows(OWUI_NEW_PROJECTS, "project", pid):     # a create run's too (#1374)
+        if str(r.get("chat_id") or "").startswith((owui_delete.STATE_PREFIX, CREATE_PREFIX)):
+            db.delete(OWUI_NEW_PROJECTS, r["Id"])
+
+
+def _owui_delete(text: str, bound: str, chat_id: str):
+    """`delete project <id>` in an Open WebUI chat (owui_delete, #1200)."""
+    import owui_delete
+    from pm_openproject import OpenProject
+    key = owui_delete.STATE_PREFIX + chat_id
+    d = owui_delete.Delete(
+        dispatch=_dispatcher, op=lambda b: OpenProject(project=b), rows=_owui_rows,
+        drop_row=db.delete, initiative=_owui_initiative, file_gate=_owui_gate,
+        gate_status=lambda rid: (db.find("comms", "run_id", rid) or {}).get("status"),
+        refresh=_owui_forget, drop_state=_owui_drop_state)
+    return owui_delete.turn(text, bound, chat_id, d, lambda: _owui_np_load(key),
+                            lambda st: _owui_np_save(key, st))
+
+
+def _owui_deps():
+    import chat_pm_tools
+    import llm
+    import memory_chat
+    import owui_chat
+    import runtime
+    return owui_chat.Deps(
+        registry=_registry_detail, fetch_context=_project_context, search=chat_pm_tools.pm_search,
+        complete=lambda alias, system, user, timeout: llm.chat(
+            alias, system, user, max_tokens=120, timeout=timeout,
+            extra={"disable_fallbacks": True, "temperature": 0}),
+        stream=llm.stream,
+        recall=lambda q, s: memory_chat.recall(q, k=5, exclude_session=s),
+        remember=memory_chat.remember, log=_owui_log, bound=_owui_bound, bind=_owui_bind,
+        tools=_owui_tools, complete_tools=llm.complete,
+        # The container runs on LiteLLM (NOMAD_RUNTIME=litellm), so cloud tool turns there go to
+        # a local model; on a host with the SDK they go to Claude.
+        run_tools=(lambda system, user, tools, alias: runtime.run_tools(
+            system, user, tools, alias=alias, max_turns=OWUI_TOOL_TURNS,
+            timeout_s=OWUI_TOOL_TIMEOUT_S)) if runtime.USE_SDK else None,
+        gate=_handle_gate_decision, np_load=_owui_np_load, np_save=_owui_np_save,
+        draft=_owui_draft, setup=_owui_setup, delete=_owui_delete, profiles=_owui_profiles)
+
+
+@app.post("/owui/chat")
+async def owui_chat_turn(request: Request):
+    """One Open WebUI turn, streamed as JSON lines (owui_chat.turn). #1117."""
+    status, msg = owui.check(request.headers.get("x-nomad-token"))
+    if status:
+        return JSONResponse({"ok": False, "error": msg}, status_code=status)
+    import owui_chat
+    body = await _json(request)
+    events = owui_chat.turn(body, _owui_deps())
+    return StreamingResponse((json.dumps(e) + "\n" for e in events),
+                             media_type="application/x-ndjson")
+
+
+@app.post("/owui/context")
+async def owui_context_for_filter(request: Request):
+    """The project context the Open WebUI filter prepends for a model the operator picked
+    (owui_chat.context, §6.5). Body: {chat_id, entry, model}."""
+    status, msg = owui.check(request.headers.get("x-nomad-token"))
+    if status:
+        return JSONResponse({"ok": False, "error": msg}, status_code=status)
+    import owui_chat
+    body = await _json(request)
+    return await asyncio.to_thread(owui_chat.context, body, _owui_deps())
+
+
+def _owui_dispatch(body: dict) -> dict:
+    """The Dispatch panel's calls (owui_dispatch, #1441). Body: {op: items|status|dispatch,
+    entry, ids?, id?}. The board is the chat's project's, or nomad-work for General."""
+    import owui_chat
+    import owui_dispatch
+    from pm_openproject import OpenProject
+    entry = str(body.get("entry") or "general")
+    info = owui_chat.entry_info(entry, _registry_detail() if entry.startswith("p-") else [])
+    board = info.get("board") or owui_dispatch.DEFAULT_BOARD
+    op = OpenProject(project=board)
+
+    def run_status(rid):
+        return (db.find("comms", "run_id", rid) or {}).get("status") or ""
+
+    kind = body.get("op")
+    if kind == "items":
+        return owui_dispatch.items(op, run_status, board)
+    if kind == "status":
+        return owui_dispatch.status(op, run_status, list(body.get("ids") or []))
+    if kind == "dispatch":
+        def run_task(i):
+            st = eng.run_task(i)
+            if isinstance(st, dict) and st.get("run_id"):
+                _bump_runs()
+                pm_board.invalidate_projects()
+            return st
+        return owui_dispatch.dispatch(op, run_task, run_status, body.get("id"))
+    return {"ok": False, "error": "op must be items, status or dispatch"}
+
+
+@app.post("/owui/dispatch")
+async def owui_dispatch_call(request: Request):
+    status, msg = owui.check(request.headers.get("x-nomad-token"))
+    if status:
+        return JSONResponse({"ok": False, "error": msg}, status_code=status)
+    return await asyncio.to_thread(_owui_dispatch, await _json(request))
+
+
 async def _json(request: Request) -> dict:
     try:
         return await request.json()
     except Exception:
         return {}
+
+
+@app.post("/owui/create-project")
+async def owui_create_project(request: Request):
+    """Set a project up from answers given at once (nomad_projects.create.INPUTS, #1374): the
+    dispatcher's POST /create-project and the create_project MCP tool call this. 202 when the
+    steps started, 200 when they already run or are done, 400 with the refusal."""
+    status, msg = owui.check(request.headers.get("x-nomad-token"))
+    if status:
+        return JSONResponse({"ok": False, "error": msg}, status_code=status)
+    code, body = await asyncio.to_thread(owui_create, await _json(request))
+    return JSONResponse(body, status_code=code)
+
+
+@app.get("/owui/create-project/{pid}")
+async def owui_create_project_status(pid: str, request: Request):
+    status, msg = owui.check(request.headers.get("x-nomad-token"))
+    if status:
+        return JSONResponse({"ok": False, "error": msg}, status_code=status)
+    state = await asyncio.to_thread(_owui_np_load, CREATE_PREFIX + pid)
+    if state is None and pid not in _creating:
+        return JSONResponse({"ok": False, "id": pid, "error": "no create run for that id"},
+                            status_code=404)
+    return JSONResponse(_create_status(pid, state))
 
 
 # ── reads ───────────────────────────────────────────────────────────
@@ -1178,8 +1639,9 @@ async def api_chat(request: Request):
     if not turn:
         return {"reply": ""}
     history = [m for m in msgs if m is not turn and (m.get("role") or "") != "system"]
+    # nomad-voice is this endpoint's caller, so its turns are the voice surface (#973).
     return await asyncio.to_thread(chat_reply, (turn.get("content") or "").strip(), history,
-                                   req.get("session_id") or "voice")
+                                   req.get("session_id") or "voice", False, "voice")
 
 
 @app.get("/runs")
@@ -1206,6 +1668,32 @@ async def cockpit_run(run_id: str):
     if not d.get("status"):
         return HTMLResponse(run_missing_page(run_id), status_code=404)
     return HTMLResponse(run_page(d))
+
+
+# ── pending asks (#1363): the cockpit's answer channel for the agent bridge's inline asks ─────────
+# Auth is the middleware's, like every other cockpit action: POST is refused while the engine is
+# exposed (`on`) and allowed on the tailnet allowlist with the operator's login and Origin.
+@app.get("/cockpit/asks", response_class=HTMLResponse)
+async def cockpit_asks_page():
+    return HTMLResponse(cockpit_asks.PAGE)
+
+
+@app.get("/api/asks")
+async def api_asks(state: str = ""):
+    status, out = await asyncio.to_thread(cockpit_asks.list_asks, state)
+    return JSONResponse(out, status_code=status)
+
+
+@app.post("/api/asks/decide")
+async def api_asks_decide(request: Request):
+    try:
+        req = await request.json()
+    except Exception:
+        req = None
+    if not isinstance(req, dict):
+        return JSONResponse({"ok": False, "error": "JSON body required"}, status_code=400)
+    status, out = await asyncio.to_thread(cockpit_asks.decide, req)
+    return JSONResponse(out, status_code=status)
 
 
 async def _sse_gen():
@@ -1272,15 +1760,32 @@ async def retry(request: Request):
     return r
 
 
+@app.post("/withdraw")
+async def withdraw(request: Request):
+    """{run_id, reason}: close a stray proposal without deciding it. Unlike rejecting, it leaves the
+    task's status alone (#990). Local only: it is not in TAILNET_WRITES."""
+    req = await _json(request)
+    r = await asyncio.to_thread(eng.withdraw_run, req["run_id"], req.get("reason", ""))
+    _bump_runs()
+    return r
+
+
 @app.post("/chat")
 async def chat(request: Request):
     req = await _json(request)
     msg = (req.get("message") or "").strip()
     low = msg.lower()
     remote = _via_proxy(request.headers)
-    if remote and (low.startswith(("project:", "capture:")) or req.get("capture")
-                   or msg.startswith("⚑")):
+    session = req.get("session_id") or "cockpit"
+    prefixed = low.startswith(("project:", "capture:")) or msg.startswith("⚑") or req.get("capture")
+    if remote and prefixed:
         return {"reply": REMOTE_REFUSAL, "refused": True}
+    # #973. The surface comes from the caller: nomad-relay's session is Zulip, the cockpit page
+    # flags a spoken turn as voice, and everything else is the typed box. Only Zulip keeps the
+    # explicit capture:/project: commands; the cockpit's ⚑ Capture button posts to /capture.
+    surface = "zulip" if session == "zulip" else ("voice" if req.get("voice") else "cockpit")
+    if prefixed and surface != "zulip":
+        return {"reply": CHAT_POINTER, "refused": True, "intent": "capture"}
     if low.startswith("project:"):
         title = msg.split(":", 1)[1].strip()
         p = await asyncio.to_thread(eng.plan_project, title, "")
@@ -1294,8 +1799,7 @@ async def chat(request: Request):
         st = await asyncio.to_thread(eng.start_run, goal); _bump_runs()
         return {"captured": True, "run_id": st["run_id"], "lane": st["lane"],
                 "reply": f"Captured. Routed to {st['lane']} — awaiting your approval."}
-    return await asyncio.to_thread(chat_reply, msg, req.get("history"),
-                                   req.get("session_id") or "cockpit", remote)
+    return await asyncio.to_thread(chat_reply, msg, req.get("history"), session, remote, surface)
 
 
 @app.get("/history")
@@ -1366,10 +1870,40 @@ async def task_action(request: Request):
 _follow = None
 
 
+def _dispatcher(route: str, body: dict, timeout: float) -> dict:
+    """POST a dispatcher route and return its JSON; an outage comes back as an error body."""
+    req = urllib.request.Request(
+        DISPATCH_URL + route, method="POST",
+        headers={"Content-Type": "application/json", "X-Nomad-Token": DISPATCH_TOKEN},
+        data=json.dumps(body).encode())
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        return {"ok": False, "error": f"dispatcher returned {e.code}"}
+    except Exception as e:
+        return {"ok": False, "error": f"dispatcher link error: {str(e)[:200]}"}
+
+
+def _autopilot_on_task(wp_id) -> bool:
+    """True when an autopilot worker holds this work package. A supervisor that can't be read
+    blocks nothing: the mention runs."""
+    code, st = _autopilot("GET", "/status")
+    if code != 200:
+        return False
+    return any(str(w.get("task")) == str(wp_id)
+               for p in (st.get("projects") or {}).values() for w in p.get("workers") or [])
+
+
 def _pm_follow():
     global _follow
     if _follow is None:
-        _follow = pm_follow.Follow(eng.op)
+        # A bot mentioned by the operator runs an agent session (pm_mention.py).
+        mentions = pm_mention.Mentions(
+            eng.op, _dispatcher, pm_follow.OPERATOR_ID, busy=_autopilot_on_task,
+            log=lambda **e: eng._log(e["run_id"], e["agent"], e["what"], e["why"],
+                                     e["outcome"], e["links"]))
+        _follow = pm_follow.Follow(eng.op, mentions=mentions)
     return _follow
 
 
@@ -1387,6 +1921,7 @@ async def pm_hook(request: Request):
         return JSONResponse({"error": "not json"}, status_code=400)
     ev = await asyncio.to_thread(_pm_follow().ingest, payload)
     pm_board.invalidate_projects()      # any WP change may move a project's counts
+    eng.op.invalidate_wps()             # ...and the board reads behind /project (#1110)
     if ev:
         _bump_runs()        # wakes the relay's SSE listener, so Zulip hears about it now
     return {"event": ev["seq"] if ev else None}
@@ -1633,6 +2168,123 @@ async def api_dispatch(request: Request):
     return JSONResponse(out, status_code=status)
 
 
+# ── policies: the cockpit's Policies area, proxied to the dispatcher (#1396) ────────────────
+#
+# The policy files live in the repo and this container has neither the repo nor git, so the
+# dispatcher runs nomad_policy/api.py and these routes only forward. Every save lands on a
+# policy/* branch, never on master. None of the POSTs is in TAILNET_WRITES: the phone can read
+# the policy layer but not change it. A guardrail save also carries the cockpit token, which
+# only this route sends; a caller with just the dispatch token, as agents have, is refused.
+POLICY_GETS = ("", "get", "effective")
+POLICY_POSTS = ("simulate", "tag-dry-run", "tag-save", "tag-accept", "validate", "save", "attach",
+                "guardrail-save")
+
+
+def _cockpit_token() -> str:
+    """Read at each guardrail save, not at import: the dispatcher creates the file on its first
+    start, which can come after this container's. '' means the dispatcher refuses the save."""
+    env = os.environ.get("NOMAD_COCKPIT_TOKEN")
+    if env:
+        return env
+    try:
+        return open("/term-secret/cockpit-token").read().strip()
+    except Exception:
+        return ""
+
+
+def _policies(method: str, route: str, query: str = "", body: dict = None,
+              base: str = "/policies") -> tuple:
+    """(status, body) from the dispatcher's <base><route>; an outage is a 502."""
+    headers = {"Content-Type": "application/json", "X-Nomad-Token": DISPATCH_TOKEN}
+    if base == "/policies" and route == "/guardrail-save":
+        headers["X-Nomad-Cockpit"] = _cockpit_token()
+    req = urllib.request.Request(
+        f"{DISPATCH_URL}{base}{route}" + (f"?{query}" if query else ""), method=method,
+        headers=headers, data=None if body is None else json.dumps(body).encode())
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return r.status, json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code, json.loads(e.read() or b"{}") or {"ok": False, "error": f"dispatcher returned {e.code}"}
+        except Exception:
+            return e.code, {"ok": False, "error": f"dispatcher returned {e.code}"}
+    except Exception as e:
+        return 502, {"ok": False, "error": f"dispatcher link error: {str(e)[:200]}"}
+
+
+@app.get("/cockpit/policies", response_class=HTMLResponse)
+async def cockpit_policies_page(request: Request):
+    """The Policies page (#1397). From a proxy (the phone on the tailnet) it is read-only, like the
+    tailnet itself: no policy POST is on TAILNET_WRITES."""
+    if _via_proxy(request.headers):
+        return HTMLResponse(cockpit_policies.PAGE.replace("</head><body>", "</head><body class=remote>", 1))
+    return HTMLResponse(cockpit_policies.PAGE)
+
+
+@app.get("/api/policies")
+@app.get("/api/policies/{name}")
+async def api_policies_get(request: Request, name: str = ""):
+    """The policy list, one policy (?id=) or a project's effective access (?project=)."""
+    if name not in POLICY_GETS:
+        return JSONResponse({"ok": False, "error": "not found"}, status_code=404)
+    status, out = await asyncio.to_thread(_policies, "GET", f"/{name}" if name else "",
+                                          request.url.query)
+    return JSONResponse(out, status_code=status)
+
+
+@app.post("/api/policies/{name}")
+async def api_policies_post(request: Request, name: str):
+    """Simulate, tag dry run, save or attach on a branch, and the operator's guardrail save."""
+    if name not in POLICY_POSTS:
+        return JSONResponse({"ok": False, "error": "not found"}, status_code=404)
+    body = await _json(request)
+    status, out = await asyncio.to_thread(_policies, "POST", f"/{name}", "", body)
+    return JSONResponse(out, status_code=status)
+
+
+# ── profiles: the cockpit's Standards area, proxied to the dispatcher (#1377) ────────────────
+#
+# nomad_projects/profile_api.py on the host, like the policies above: list, get, validate and dry
+# run, and save (#1379), which commits on branch profile/<id> and never on master. The
+# dispatcher's own GET /profiles stays the + New project type menu; the cockpit's list is
+# /profiles/list. No profile POST is in TAILNET_WRITES, so the phone cannot save; it gets the dry
+# run of master's version through GET (#1378), which forwards only the id.
+PROFILE_GETS = ("list", "get", "dry-run")
+PROFILE_POSTS = ("validate", "dry-run", "save")
+
+
+@app.get("/cockpit/standards", response_class=HTMLResponse)
+async def cockpit_standards_page(request: Request):
+    """The Standards page (#1378). From a proxy it is read-only: no profile POST is on TAILNET_WRITES."""
+    if _via_proxy(request.headers):
+        return HTMLResponse(cockpit_standards.PAGE.replace("</head><body>", "</head><body class=remote>", 1))
+    return HTMLResponse(cockpit_standards.PAGE)
+
+
+@app.get("/api/profiles/{name}")
+async def api_profiles_get(request: Request, name: str):
+    """Every profile with the editor's choices (list), one profile's text (get?id=), or what a new
+    project of a type gets as on master (dry-run?id=)."""
+    if name not in PROFILE_GETS:
+        return JSONResponse({"ok": False, "error": "not found"}, status_code=404)
+    query = request.url.query
+    if name == "dry-run":
+        query = urllib.parse.urlencode({"id": request.query_params.get("id", "")})
+    status, out = await asyncio.to_thread(_policies, "GET", f"/{name}", query, None, "/profiles")
+    return JSONResponse(out, status_code=status)
+
+
+@app.post("/api/profiles/{name}")
+async def api_profiles_post(request: Request, name: str):
+    """Check a profile's text, dry-run what a new project of the type gets, or save it on its branch."""
+    if name not in PROFILE_POSTS:
+        return JSONResponse({"ok": False, "error": "not found"}, status_code=404)
+    body = await _json(request)
+    status, out = await asyncio.to_thread(_policies, "POST", f"/{name}", "", body, "/profiles")
+    return JSONResponse(out, status_code=status)
+
+
 # ── autopilot: the cockpit's Run/Stop and status line, proxied to the supervisor (#882) ──────
 #
 # The supervisor (autopilot/supervisor.py) is a host-native daemon on 127.0.0.1:8092. Its POSTs need
@@ -1866,6 +2518,40 @@ async def api_autopilot_decide(wp_id: int, request: Request):
     return JSONResponse(out, status_code=status)
 
 
+def _task_question(wp_id: int) -> tuple:
+    """What the worker asked at the gate (#1175): the newest comment that is not the operator's own
+    answer, read as a short question plus options. Read-only."""
+    try:
+        wp = eng.op.get(wp_id)
+        acts = eng.op.activities(wp_id)
+    except PMError as e:
+        if "-> 404" in str(e):
+            return 404, {"ok": False, "error": f"no task #{wp_id}"}
+        return 502, {"ok": False, "error": "OpenProject did not answer", "detail": str(e)[:200]}
+    ask = None
+    for a in reversed(acts):
+        raw = ((a.get("comment") or {}).get("raw") or "").strip()
+        if raw and not raw.startswith("**Operator"):
+            ask = (a, raw)
+            break
+    out = {"ok": True, "id": wp_id, "subject": wp.get("subject") or "",
+           "status": _title(wp, "status"), "project": _title(wp, "project") or "",
+           "stem": "", "options": [], "complex": False, "asked_by": "", "asked_at": ""}
+    if ask:
+        a, raw = ask
+        out.update(parse_question(raw))
+        out["asked_by"] = ((a.get("_links") or {}).get("user") or {}).get("title") or ""
+        out["asked_at"] = a.get("createdAt") or ""
+    return 200, out
+
+
+@app.get("/api/autopilot/tasks/{wp_id}/question")
+async def api_autopilot_question(wp_id: int):
+    """The question a task in Awaiting approval is waiting on, for the cockpit's Now queue."""
+    status, out = await asyncio.to_thread(_task_question, wp_id)
+    return JSONResponse(out, status_code=status)
+
+
 # ── websocket proxies: the cockpit talks to the engine, the engine talks to the host daemon ──
 #
 # Both of these exist for the same reason. termd and nomad-voice are host-native units bound to
@@ -1934,8 +2620,8 @@ async def ws_wake(websocket: WebSocket):
     """Mic PCM up to nomad-voice's openWakeWord listener, the {wake:true} signal back down.
 
     The wake word runs on openWakeWord in nomad-voice: local, free, no account, and it fires the
-    instant it hears the phrase rather than after a transcription window. Porcupine is still staged
-    and still needs a Picovoice key (CLAUDE.md, open item 6), so this is what actually works today.
+    instant it hears the phrase rather than after a transcription window. It replaced Picovoice
+    Porcupine, which was retired in 3a081d5.
 
     Proxied rather than dialled directly so the page stays same-origin. nomad-voice is a host-native
     unit on localhost and a browser cannot reach it, which is the correct state of affairs."""
@@ -2079,86 +2765,99 @@ def recent_runs(limit=25):
     return out
 
 
-COCKPIT = """<!doctype html><html><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>NOMAD v2 · Cockpit</title>
+COCKPIT = """<!doctype html><html><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>NOMAD v2 · Cockpit</title><link rel=icon type=image/svg+xml href=/static/favicon.svg><link rel=icon type=image/png sizes=96x96 href=/static/favicon-96x96.png><link rel=apple-touch-icon href=/static/apple-touch-icon.png>
 <style>
-body{background:#05060a;color:#ffb000;font-family:ui-monospace,'Share Tech Mono',monospace;margin:0;padding:22px}
+:root{--bg:#05060a;--surface:#0c0d16;--surface-2:#14141f;--line:#1f2030;--line-strong:#2a2a3a;--text:#ccddee;--text-muted:#99aaaa;
+--brand:#c9a45c;--attention:#ffb000;--on-attention:#05060a;--ok:#33dd88;--info:#56b6ff;--danger:#e3554f;--warn:#ff8c5a;--paused:#d07bff;
+--sp-1:4px;--sp-2:8px;--sp-3:12px;--sp-4:16px;--sp-5:24px;--sp-6:32px;--r-control:8px;--r-card:10px;--r-tag:999px;--tap:44px;--tabbar:58px}
+h1{color:var(--brand)}
+body{background:var(--bg);color:var(--text);font-family:ui-monospace,'Share Tech Mono',monospace;margin:0;padding:22px}
 h1{font-size:20px;letter-spacing:.28em;margin:0 0 4px} .sub{opacity:.6;font-size:12px;letter-spacing:.15em;margin-bottom:16px}
-.stages{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0 18px;font-size:11px;opacity:.8}
-.stages span{background:#14141f;border:1px solid #2a2a3a;border-radius:10px;padding:3px 9px}
+.stages{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0 18px;font-size:12px;opacity:.8}
+.stages span{background:var(--surface-2);border:1px solid var(--line-strong);border-radius:10px;padding:3px 9px}
 table{width:100%;border-collapse:collapse;font-size:13px} th,td{text-align:left;padding:7px 10px;border-bottom:1px solid #1b1b27}
-th{color:#56b6ff;font-weight:400;letter-spacing:.1em;font-size:11px}
-.tag{padding:2px 9px;border-radius:9px;font-size:11px;color:#000;font-weight:700}
+th{color:var(--info);font-weight:400;letter-spacing:.1em;font-size:12px}
+.tag{padding:2px 9px;border-radius:9px;font-size:12px;color:#000;font-weight:700}
 .new{background:#445;color:#aab}.awaiting-approval{background:#ff5;animation:b 1.1s steps(2) infinite}
-.approved{background:#33dd88}.executing{background:#ffb000;animation:b 1.1s steps(2) infinite}
-.executed{background:#56b6ff}.rejected,.declined{background:#e3554f;color:#fff}.failed{background:#8b1a16;color:#fff}
+.approved{background:var(--ok)}.executing{background:var(--ok);animation:b 1.1s steps(2) infinite}
+.executed{background:var(--info)}.rejected,.declined{background:var(--danger);color:#fff}.failed{background:#8b1a16;color:#fff}
 @keyframes b{50%{opacity:.4}} .mut{opacity:.5}
-.gate{display:inline-flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:2px 5px;border:0;border-radius:7px;padding:4px 11px;margin-left:7px;cursor:pointer;font:inherit;font-size:11px;font-weight:700}
-.ok{background:#33dd88;color:#022} .no{background:#e3554f;color:#fff} .retry{background:#ffb000;color:#022} .gate:active{transform:translateY(1px)}
-.prop{background:#0c0d16} .prop td{border-bottom:1px solid #1b1b27;padding:4px 10px 9px}
-.prop .act{color:#56b6ff;letter-spacing:.08em} .prop .pv{opacity:.78;white-space:pre-wrap}
-.telem{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 16px;font-size:11px}
-.telem .m{background:#0c0d16;border:1px solid #1f2030;border-radius:8px;padding:4px 10px;display:flex;gap:7px;align-items:center}
-.telem .lbl{color:#56b6ff;letter-spacing:.08em} .telem .bar{width:54px;height:6px;background:#1b1b27;border-radius:4px;overflow:hidden}
-.telem .fill{height:100%;background:#33dd88;transition:width .4s} .telem .hot{background:#e3554f} .telem .warn{background:#ffb000}
-.lanes{display:flex;gap:7px;flex-wrap:wrap;margin:0 0 12px;font-size:11px}
-.lanes .chip{background:#0c0d16;border:1px solid #2a2a3a;border-radius:12px;padding:3px 11px;cursor:pointer;letter-spacing:.06em;opacity:.62}
-.lanes .chip.on{opacity:1;border-color:#56b6ff} .lanes .chip .ct{opacity:.6;margin-left:5px}
+.gate{display:inline-flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:2px 5px;border:0;border-radius:7px;padding:4px 11px;margin-left:7px;cursor:pointer;font:inherit;font-size:12px;font-weight:700}
+.ok{background:var(--ok);color:#022} .no{background:var(--danger);color:#fff} .retry{background:var(--attention);color:#022} .gate:active{transform:translateY(1px)}
+.prop{background:var(--surface)} .prop td{border-bottom:1px solid #1b1b27;padding:4px 10px 9px}
+.prop .act{color:var(--info);letter-spacing:.08em} .prop .pv{opacity:.78;white-space:pre-wrap}
+.telem{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 16px;font-size:12px}
+.telem .m{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:4px 10px;display:flex;gap:7px;align-items:center}
+.telem .lbl{color:var(--info);letter-spacing:.08em} .telem .bar{width:54px;height:6px;background:#1b1b27;border-radius:4px;overflow:hidden}
+.telem .fill{height:100%;background:var(--ok);transition:width .4s} .telem .hot{background:var(--danger)} .telem .warn{background:var(--warn)}
+.lanes{display:flex;gap:7px;flex-wrap:wrap;margin:0 0 12px;font-size:12px}
+.lanes .chip{background:var(--surface);border:1px solid var(--line-strong);border-radius:12px;padding:3px 11px;cursor:pointer;letter-spacing:.06em;opacity:.62}
+.lanes .chip.on{opacity:1;border-color:var(--info)} .lanes .chip .ct{opacity:.6;margin-left:5px}
+.lanes button.chip{font:inherit;font-size:12px;color:var(--text)}
 .ldot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:middle}
-.l-comms{background:#33dd88}.l-research{background:#56b6ff}.l-support{background:#ffb000}.l-ads{background:#d07bff}.l-dev{background:#ff8c5a}.l-autopilot{background:#8fe3d0}.l-other{background:#667}
-.ap-merge{background:#56b6ff}.ap-running{background:#ffb000;animation:b 1.1s steps(2) infinite}.ap-failed{background:#8b1a16;color:#fff}.ap-needs_operator{background:#ff5}.ap-resume{background:#d07bff}.ap-unknown{background:#445;color:#aab}
+.l-comms{background:var(--ok)}.l-research{background:var(--info)}.l-support{background:var(--brand)}.l-ads{background:var(--paused)}.l-dev{background:var(--warn)}.l-autopilot{background:#8fe3d0}.l-other{background:#667}
+.ap-merge{background:var(--info)}.ap-running{background:var(--ok);animation:b 1.1s steps(2) infinite}.ap-failed{background:#8b1a16;color:#fff}.ap-needs_operator{background:#ff5}.ap-resume{background:var(--paused)}.ap-unknown{background:#445;color:#aab}
 .aprow .pv{opacity:.72;font-size:12px} .aprow a{color:#8fe3d0}
-.rlink{color:#ffb000;cursor:pointer;border-bottom:1px dotted #665} .rlink:hover{color:#fff}
+.rlink{color:var(--text);cursor:pointer;border-bottom:1px dotted #665} .rlink:hover{color:#fff}
 .detail td{background:#0a0b12;border-bottom:1px solid #1b1b27;padding:10px 14px;font-size:12px}
-.detail .kv{margin:2px 0} .detail .k{color:#56b6ff;display:inline-block;min-width:64px}
+.detail .kv{margin:2px 0} .detail .k{color:var(--info);display:inline-block;min-width:64px}
 .detail .pv{white-space:pre-wrap;overflow-wrap:anywhere;margin:2px 0 8px}
 .detail .log{margin-top:8px;border-top:1px solid #1b1b27;padding-top:6px}
-.detail .le{opacity:.8;margin:2px 0} .detail .le b{color:#33dd88;font-weight:400}
-.chat{margin:0 0 18px;border:1px solid #1f2030;border-radius:10px;background:#0a0b12;overflow:hidden}
+.detail .le{opacity:.8;margin:2px 0} .detail .le b{color:var(--ok);font-weight:400}
+.chat{margin:0 0 18px;border:1px solid var(--line);border-radius:10px;background:#0a0b12;overflow:hidden}
 .clog{max-height:200px;overflow-y:auto;padding:10px 12px;font-size:13px;display:none}
-.clog .u{color:#ffb000;margin:6px 0} .clog .n{color:#9fd}; .clog .n{margin:6px 0;white-space:pre-wrap}
-.clog .u b,.clog .n b{opacity:.6;font-weight:400;margin-right:6px;font-size:11px}
-.crow{display:flex;gap:8px;padding:10px 12px;border-top:1px solid #1f2030}
-.crow input{flex:1;min-width:0;background:#05060a;border:1px solid #2a2a3a;border-radius:8px;color:#ffb000;padding:8px 11px;font:inherit;font-size:13px}
-.crow button{background:#334;color:#cde;border:0;border-radius:8px;padding:8px 13px;cursor:pointer;font:inherit;font-size:12px}
-.crow .cap{background:#ffb000;color:#022;font-weight:700} .crow button:active{transform:translateY(1px)}
+.clog .u{color:var(--text);margin:6px 0} .clog .n{color:#9fd}; .clog .n{margin:6px 0;white-space:pre-wrap}
+.clog .u b,.clog .n b{opacity:.6;font-weight:400;margin-right:6px;font-size:12px}
+.crow{display:flex;gap:8px;padding:10px 12px;border-top:1px solid var(--line)}
+.crow input{flex:1;min-width:0;background:var(--bg);border:1px solid var(--line-strong);border-radius:8px;color:var(--text);padding:8px 11px;font:inherit;font-size:16px}
+.crow button{background:#334;color:var(--text);border:0;border-radius:8px;padding:8px 13px;cursor:pointer;font:inherit;font-size:12px}
+.crow .cap{background:var(--info);color:#022;font-weight:700} .crow button:active{transform:translateY(1px)}
 /* #ws.ws-hidden, not .ws-hidden. The panel's own rule is an id and sets display:flex, so a bare
    class never won and the terminal overlay covered the whole cockpit from first paint, at z-index
    60, with CLOSE doing nothing because all it does is add the class that loses. */
 #ws.ws-hidden{display:none}
-#ws{position:fixed;inset:0;z-index:60;background:#05060a;display:flex;flex-direction:column}
-#wsbar{display:flex;align-items:center;gap:10px;padding:8px 14px;background:#ffb000;color:#000;font-size:13px;letter-spacing:.08em}
-#wsbar .wst{font-weight:700} #wsbar .wsp{background:#000;color:#ffb000;padding:2px 9px;border-radius:9px}
-#wsbar button{background:#000;color:#ffb000;border:0;border-radius:7px;padding:5px 11px;cursor:pointer;font:inherit;font-size:12px}
+#ws{position:fixed;inset:0;z-index:60;background:var(--bg);display:flex;flex-direction:column}
+#wsbar{display:flex;align-items:center;gap:10px;padding:8px 14px;background:var(--brand);color:#000;font-size:13px;letter-spacing:.08em}
+#wsbar .wst{font-weight:700} #wsbar .wsp{background:#000;color:var(--brand);padding:2px 9px;border-radius:9px}
+#wsbar button{background:#000;color:var(--brand);border:0;border-radius:7px;padding:5px 11px;cursor:pointer;font:inherit;font-size:12px}
 #wsterm{flex:1;min-height:0;padding:6px 4px 4px 8px}
-#termproj{background:#14141f;color:#ffb000;border:1px solid #2a2a3a;border-radius:8px;padding:6px;font:inherit;font-size:12px}
-#termopen{background:#56b6ff;border:0;border-radius:8px;color:#022;padding:7px 12px;cursor:pointer;font:inherit}
+#voicebar{align-items:center;gap:10px;margin:8px 0 18px}
+#voicebar .vb{background:#334;color:var(--text-muted);border:0;border-radius:8px;padding:7px 12px;cursor:pointer;font:inherit}
+#voicebar .vb.brand{background:var(--info);color:#022;padding:7px 14px}
+#vstatus{font-size:12px}
+.morecard{margin:0 0 var(--sp-4)}
+.morecard .ph{color:var(--info);letter-spacing:.12em;font-size:12px;margin:0 0 6px}
+.morerow{display:flex;gap:var(--sp-2);flex-wrap:wrap;align-items:center}
+.morerow #termproj{flex:1 1 200px;min-width:0}
+#termproj{background:var(--surface-2);color:var(--text);border:1px solid var(--line-strong);border-radius:8px;padding:6px;font:inherit;font-size:12px}
+#termopen{background:var(--info);border:0;border-radius:8px;color:#022;padding:7px 12px;cursor:pointer;font:inherit}
 .projects{margin:0 0 16px}
-.projects .ph{color:#56b6ff;letter-spacing:.12em;font-size:12px;margin:0 0 6px}
+.projects .ph{color:var(--info);letter-spacing:.12em;font-size:12px;margin:0 0 6px}
 .projects .ph{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .projects .ph .sp{flex:1}
-.projects select{background:#05060a;color:#cde;border:1px solid #2a2a3a;border-radius:7px;padding:6px 8px;font:inherit;font-size:12px;min-height:36px;letter-spacing:0}
-.projects .stale{color:#ff8c5a;font-size:11px;letter-spacing:0;margin:0 0 6px}
+.projects select{background:var(--bg);color:var(--text);border:1px solid var(--line-strong);border-radius:7px;padding:6px 8px;font:inherit;font-size:12px;min-height:36px;letter-spacing:0}
+.projects .stale{color:var(--warn);font-size:12px;letter-spacing:0;margin:0 0 6px}
 /* One OpenProject project (#787). The button drops under the name when the row is narrow. */
-.proj{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;background:#0c0d16;border:1px solid #1f2030;border-radius:9px;padding:8px 11px;margin-bottom:7px}
+.proj{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:8px 11px;margin-bottom:7px}
 .proj.zero{opacity:.55}
 .proj .pn{flex:1 1 220px;min-width:0}
-.proj .pt{font-size:13px;overflow-wrap:anywhere} .proj .pid{font-size:11px;color:#9aa;margin-left:6px}
-.proj .pc{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;font-size:11px;align-items:center}
-.proj .po{color:#ffb000;font-weight:700;margin-right:4px}
-.proj .chip{border:1px solid #2a2a3a;border-radius:10px;padding:1px 7px;color:#9aa;white-space:nowrap}
-.proj .chip.blk{border-color:#ff8c5a;color:#ff8c5a} .proj .chip.aw{border-color:#ffb000;color:#ffb000}
-.proj .hi{color:#ff8c5a;display:inline-flex;align-items:center;gap:3px;white-space:nowrap}
+.proj .pt{font-size:13px;overflow-wrap:anywhere} .proj .pid{font-size:12px;color:var(--text-muted);margin-left:6px}
+.proj .pc{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;font-size:12px;align-items:center}
+.proj .po{color:var(--text);font-weight:700;margin-right:4px}
+.proj .chip{border:1px solid var(--line-strong);border-radius:10px;padding:1px 7px;color:var(--text-muted);white-space:nowrap}
+.proj .chip.blk{border-color:var(--warn);color:var(--warn)} .proj .chip.aw{border-color:var(--attention);color:var(--attention)}
+.proj .hi{color:var(--warn);display:inline-flex;align-items:center;gap:3px;white-space:nowrap}
 /* #890: next to the name, in this order: Open in OpenProject, 'next' (#793), the Autopilot ON/OFF switch, Run/Stop. */
 .proj .pctl{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
-.proj .pnmsg{flex:1 1 100%;font-size:11px;color:#ff8c5a} .proj .pnmsg.ok{color:#33dd88}
-.proj .opbtn{display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:0 12px;border-radius:8px;background:#334;color:#cde;text-decoration:none;font-size:12px;white-space:nowrap}
-.pmb{background:#0c0d16;border:1px solid #1f2030;border-radius:9px;padding:8px 11px;margin-bottom:7px;font-size:12px}
-.pmb .ph a{color:#9aa;text-decoration:none;margin-left:8px} .pmb h4{margin:8px 0 3px;font-weight:400;color:#56b6ff;font-size:11px;letter-spacing:.08em}
+.proj .pnmsg{flex:1 1 100%;font-size:12px;color:var(--warn)} .proj .pnmsg.ok{color:var(--ok)}
+.proj .opbtn{display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:0 12px;border-radius:8px;background:#334;color:var(--text);text-decoration:none;font-size:12px;white-space:nowrap}
+.pmb{background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:8px 11px;margin-bottom:7px;font-size:12px}
+.pmb .ph a{color:var(--text-muted);text-decoration:none;margin-left:8px} .pmb h4{margin:8px 0 3px;font-weight:400;color:var(--info);font-size:12px;letter-spacing:.08em}
 .pmb table{border-collapse:collapse;width:100%} .pmb td,.pmb th{padding:1px 6px;text-align:left;font-weight:400;border-bottom:1px solid #151622}
-.pmb th{opacity:.55;font-size:10px} .pmb td.n{text-align:right;font-variant-numeric:tabular-nums}
-.pmb .blk{color:#ff8c5a} .pmb .ch{padding-left:14px;opacity:.75}
+.pmb th{opacity:.55;font-size:12px} .pmb td.n{text-align:right;font-variant-numeric:tabular-nums}
+.pmb .blk{color:var(--warn)} .pmb .ch{padding-left:14px;opacity:.75}
 .pmb .tp{display:flex;gap:3px;align-items:flex-end;height:46px} .pmb .tp div{flex:1;display:flex;flex-direction:column-reverse}
-.pmb .tp i{display:block} .pmb .tp .a{background:#56b6ff} .pmb .tp .h{background:#ffb000}
+.pmb .tp i{display:block} .pmb .tp .a{background:var(--info)} .pmb .tp .h{background:var(--brand)}
 .pmb svg:not(.ic){width:100%;height:54px;background:#08090f;border-radius:5px}
 /* Lucide icons (R12): drawn in the text colour, so they follow the theme and the state colours. */
 svg.ic{width:16px;height:16px;flex:none;vertical-align:-3px;fill:none;stroke:currentColor;stroke-width:2;
@@ -2167,54 +2866,55 @@ button svg.ic+span,svg.ic+b{margin-left:5px}
 button.icon{display:inline-flex;align-items:center;justify-content:center;gap:6px}
 .sdot{display:inline-block;width:7px;height:7px;border-radius:50%;border:1px solid currentColor;margin-right:6px;vertical-align:1px}
 .sdot.on{background:currentColor}
-.rpage{display:inline-flex;align-items:center;justify-content:center;min-width:32px;min-height:32px;color:#9aa;vertical-align:middle}
+.rpage{display:inline-flex;align-items:center;justify-content:center;min-width:32px;min-height:32px;color:var(--text-muted);vertical-align:middle}
 /* AUTOPILOT (#883, #884): the global strip over PROJECTS, and one status line per autopilot project
    on its board's row. Every control is at least 44 px high so it works from the phone. */
-.apstrip{background:#0c0d16;border:1px solid #1f2030;border-radius:9px;padding:9px 11px;margin:0 0 12px;font-size:12px}
-.apstrip .ph{color:#56b6ff;letter-spacing:.12em;display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap;margin:0 0 6px}
+.apstrip{background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:9px 11px;margin:0 0 12px;font-size:12px}
+.apstrip .ph{color:var(--info);letter-spacing:.12em;display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap;margin:0 0 6px}
 .apstrip .sp{flex:1}
-.apstrip .tot{display:flex;flex-wrap:wrap;gap:4px 14px;margin:0 0 8px;color:#cde}
-.apstrip .tot b{color:#ffb000;font-weight:700}
+.apstrip .tot{display:flex;flex-wrap:wrap;gap:4px 14px;margin:0 0 8px;color:var(--text)}
+.apstrip .tot b{color:var(--text);font-weight:700}
 .apform{display:flex;flex-wrap:wrap;align-items:flex-end;gap:8px 12px}
-.apform label{display:flex;flex-direction:column;gap:3px;font-size:11px;color:#9aa;letter-spacing:.06em}
-.apform input{width:96px;min-height:44px;box-sizing:border-box;background:#05060a;border:1px solid #2a2a3a;border-radius:8px;color:#ffb000;padding:6px 9px;font:inherit;font-size:14px}
+.apform label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--text-muted);letter-spacing:.06em}
+.apform input{width:96px;min-height:44px;box-sizing:border-box;background:var(--bg);border:1px solid var(--line-strong);border-radius:8px;color:var(--text);padding:6px 9px;font:inherit;font-size:14px}
 .apform input:disabled{opacity:.45}
-.apseg{display:inline-flex;border:1px solid #2a2a3a;border-radius:8px;overflow:hidden}
-.apseg button{min-height:44px;padding:0 13px;border:0;background:#14141f;color:#9aa;font:inherit;font-size:12px;cursor:pointer}
-.apseg button[aria-pressed=true]{background:#56b6ff;color:#022;font-weight:700}
+.apseg{display:inline-flex;border:1px solid var(--line-strong);border-radius:8px;overflow:hidden}
+.apseg button{min-height:44px;padding:0 13px;border:0;background:var(--surface-2);color:var(--text-muted);font:inherit;font-size:12px;cursor:pointer}
+.apseg button[aria-pressed=true]{background:var(--info);color:#022;font-weight:700}
 .apbtn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:0 13px;border:0;border-radius:8px;font:inherit;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap}
 .apbtn:disabled{opacity:.5;cursor:default} .apbtn:active{transform:translateY(1px)}
-.apbtn.run{background:#33dd88;color:#022} .apbtn.stop{background:#e3554f;color:#fff}
-.apbtn.kill{background:#8b1a16;color:#fff} .apbtn.plain{background:#334;color:#cde;font-weight:400}
-.apsw{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 12px 0 8px;border:1px solid #2a2a3a;border-radius:8px;background:#14141f;color:#9aa;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
+.apbtn.run{background:var(--ok);color:#022} .apbtn.stop{background:var(--danger);color:#fff}
+.apbtn.kill{background:#8b1a16;color:#fff} .apbtn.plain{background:#334;color:var(--text);font-weight:400}
+.apsw{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 12px 0 8px;border:1px solid var(--line-strong);border-radius:8px;background:var(--surface-2);color:var(--text-muted);font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
 .apsw .knob{position:relative;width:34px;height:20px;border-radius:10px;background:#334;flex:none;transition:background .15s}
-.apsw .knob::after{content:'';position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;background:#9aa;transition:left .15s}
-.apsw[aria-checked=true]{color:#cde;border-color:#56b6ff} .apsw[aria-checked=true] .knob{background:#56b6ff}
+.apsw .knob::after{content:'';position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;background:var(--text-muted);transition:left .15s}
+.apsw[aria-checked=true]{color:var(--text);border-color:var(--info)} .apsw[aria-checked=true] .knob{background:var(--info)}
 .apsw[aria-checked=true] .knob::after{left:17px;background:#022}
 .apsw:disabled{opacity:.45;cursor:default}
-.apmsg{color:#ff8c5a;font-size:11px;margin-top:5px;overflow-wrap:anywhere} .apmsg.ok{color:#33dd88}
+.apmsg{color:var(--warn);font-size:12px;margin-top:5px;overflow-wrap:anywhere} .apmsg.ok{color:var(--ok)}
 .aps{flex:1 1 100%;min-width:0}
 .ap{border-top:1px solid #1b1b27;padding:7px 0 2px;font-size:12px}
 .ap .top{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px}
-.ap .apid{color:#9aa;font-size:11px}
-.ap .apd{flex:1 1 160px;min-width:0;overflow-wrap:anywhere;color:#cde}
+.ap .apid{color:var(--text-muted);font-size:12px}
+.ap .apd{flex:1 1 160px;min-width:0;overflow-wrap:anywhere;color:var(--text)}
 .ap .acts{display:flex;flex-wrap:wrap;gap:6px;margin-left:auto}
-.ap .ask{flex:1 1 100%;display:flex;flex-wrap:wrap;align-items:center;gap:6px;background:#14141f;border-radius:8px;padding:6px 8px}
-.ap .meta{display:flex;flex-wrap:wrap;gap:3px 12px;margin-top:4px;color:#9aa;font-size:11px}
-.ap .meta b{color:#cde;font-weight:400}
-.ap a{color:#ffb000}
-.ap .wk{border:1px solid #2a2a3a;border-radius:10px;padding:1px 7px;color:#ffb000;text-decoration:none;white-space:nowrap}
-.ap .nyou{color:#ffb000;font-weight:700} .ap .nyou a{color:#ffb000}
+.ap .ask{flex:1 1 100%;display:flex;flex-wrap:wrap;align-items:center;gap:6px;background:var(--surface-2);border-radius:8px;padding:6px 8px}
+.ap .ask .sp{flex:1 1 24px}
+.ap .meta{display:flex;flex-wrap:wrap;gap:3px 12px;margin-top:4px;color:var(--text-muted);font-size:12px}
+.ap .meta b{color:var(--text);font-weight:400}
+.ap a{color:var(--text)}
+.ap .wk{border:1px solid var(--line-strong);border-radius:10px;padding:1px 7px;color:var(--text);text-decoration:none;white-space:nowrap}
+.ap .nyou{color:var(--attention);font-weight:700} .ap .nyou a{color:var(--attention)}
 .ap .apdb{margin-left:6px}
-.ap .apdec{display:flex;flex-wrap:wrap;align-items:center;gap:6px;background:#14141f;border-radius:8px;padding:6px 8px;margin-top:6px}
-.ap .apdec label{flex:1 1 100%;font-size:12px;color:#cde}
+.ap .apdec{display:flex;flex-wrap:wrap;align-items:center;gap:6px;background:var(--surface-2);border-radius:8px;padding:6px 8px;margin-top:6px}
+.ap .apdec label{flex:1 1 100%;font-size:12px;color:var(--text)}
 .ap .apdec textarea{flex:1 1 100%;min-height:44px;box-sizing:border-box;background:#0b0b12;color:#e6e6f0;border:1px solid #445;border-radius:6px;padding:6px 8px;font:inherit;font-size:13px}
-.ap .last{margin-top:3px;color:#9aa;font-size:11px;overflow-wrap:anywhere}
-.ap details{margin-top:3px;font-size:11px} .ap summary{cursor:pointer;color:#56b6ff;min-height:32px;display:flex;align-items:center}
-.ap .ev{color:#9aa;margin:2px 0 2px 10px;overflow-wrap:anywhere} .ap .ev b{color:#cde;font-weight:400}
-.apst{padding:2px 9px;border-radius:9px;font-size:11px;font-weight:700;color:#022;background:#556;white-space:nowrap}
-.apst.running{background:#33dd88} .apst.waiting{background:#56b6ff} .apst.needs_you{background:#ffb000;animation:b 1.1s steps(2) infinite}
-.apst.budget_paused{background:#d07bff} .apst.error{background:#e3554f;color:#fff} .apst.idle{background:#9aa} .apst.off{background:#334;color:#9aa}
+.ap .last{margin-top:3px;color:var(--text-muted);font-size:12px;overflow-wrap:anywhere}
+.ap details{margin-top:3px;font-size:12px} .ap summary{cursor:pointer;color:var(--info);min-height:32px;display:flex;align-items:center}
+.ap .ev{color:var(--text-muted);margin:2px 0 2px 10px;overflow-wrap:anywhere} .ap .ev b{color:var(--text);font-weight:400}
+.apst{padding:2px 9px;border-radius:9px;font-size:12px;font-weight:700;color:#022;background:#556;white-space:nowrap}
+.apst.running{background:var(--ok)} .apst.waiting{background:var(--info)} .apst.needs_you{background:var(--attention);animation:b 1.1s steps(2) infinite}
+.apst.budget_paused{background:var(--paused)} .apst.error{background:var(--danger);color:#fff} .apst.idle{background:var(--text-muted)} .apst.off{background:#334;color:var(--text-muted)}
 @media (max-width:600px){ .ap .acts{margin-left:0} .apform label{flex:1 1 40%} .apform input{width:100%} .proj .pctl{flex:1 1 100%} }
 /* The runs table on a phone (#799): FROM and TYPE go, and the decision buttons wrap under the status,
    so the row fits 390 px instead of pushing the page to 554. The run page has the rest. */
@@ -2224,29 +2924,152 @@ button.icon{display:inline-flex;align-items:center;justify-content:center;gap:6p
   #runs th,#runs td{padding:7px 5px}
   #runs .gate{margin:6px 6px 0 0;min-height:40px}
 }
+/* Runs on a phone (#1177): a run is a two-line row, id and status over lane and time. The decision
+   buttons are not in the row; they sit in the sticky bar of the run detail, in the thumb zone. */
+@media (max-width:600px){
+  #runs,#runs tbody{display:block}
+  #runs thead{display:none}
+  #runs tr.rrow,#runs tr.aprow{display:grid;grid-template-columns:1fr auto;align-items:center;gap:2px 10px;
+    padding:6px 4px;border-bottom:1px solid var(--line);min-height:var(--tap)}
+  #runs tr.prop{display:block;border-bottom:1px solid var(--line)}
+  #runs td{padding:0;border:0}
+  #runs td:nth-child(1){grid-column:1;grid-row:1} #runs td:nth-child(5){grid-column:2;grid-row:1;text-align:right}
+  #runs td:nth-child(2){grid-column:1;grid-row:2} #runs td:nth-child(6){grid-column:2;grid-row:2;text-align:right}
+  #runs td:nth-child(5) .gate{display:none}
+  #runs .rlink{min-height:var(--tap);display:inline-flex;align-items:center}
+  .lanes .chip{display:inline-flex;align-items:center;min-height:var(--tap);padding:0 14px;font-size:12px}
+  .runsheet .gb{flex:1 1 0}
+}
+.prow{display:flex;flex-direction:column;gap:2px;width:100%;box-sizing:border-box;min-height:var(--tap);text-align:left;
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--r-card);padding:var(--sp-3);margin:0 0 var(--sp-2);
+  color:var(--text);font:inherit;cursor:pointer}
+.prow:hover{border-color:var(--line-strong)} .prow.zero{opacity:.7}
+.prow .pr1{display:flex;align-items:center;justify-content:space-between;gap:var(--sp-3)}
+.prow .pt{font-size:14px;overflow-wrap:anywhere}
+.prow .pr2{display:flex;flex-wrap:wrap;gap:2px var(--sp-3);font-size:12px;color:var(--text-muted)}
+.prow .hi{color:var(--text)} .prow .nyou{color:var(--attention);font-weight:700}
+.projsheet{padding-bottom:var(--sp-4)}
+.rlink{background:none;border:0;border-bottom:1px dotted #665;padding:0;font:inherit;color:var(--text);cursor:pointer}
+.rrow{cursor:pointer}
+/* Run detail (#1177): replaces the list inside the Runs destination, never grows it. */
+.runsheet{padding-bottom:var(--sp-4)}
+.rs-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--sp-2)}
+.rs-back{display:inline-flex;align-items:center;gap:var(--sp-2);min-height:var(--tap);background:none;border:0;
+  color:var(--text);font:inherit;font-size:14px;cursor:pointer;padding:0 var(--sp-2) 0 0}
+.rs-title{margin:0 0 var(--sp-2);font-size:18px;font-weight:600;overflow-wrap:anywhere}
+.rs-meta{display:flex;flex-wrap:wrap;align-items:center;gap:var(--sp-2) var(--sp-3);color:var(--text-muted);font-size:12px;margin-bottom:var(--sp-3)}
+.rs-prop{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-card);padding:var(--sp-3);margin-bottom:var(--sp-3)}
+.rs-prop .act{color:var(--info);letter-spacing:.08em} .rs-prop .pv{white-space:pre-wrap;overflow-wrap:anywhere;margin-top:var(--sp-2)}
+.runsheet .kv{margin:var(--sp-1) 0;overflow-wrap:anywhere} .runsheet .k{color:var(--info);display:inline-block;min-width:64px}
+.runsheet .pv{white-space:pre-wrap;overflow-wrap:anywhere;margin:2px 0 var(--sp-2)}
+.gatebar{position:sticky;bottom:0;display:flex;gap:var(--sp-3);padding:var(--sp-3) 0;background:var(--bg);
+  border-top:1px solid var(--line);z-index:5}
+.gatebar:empty{display:none}
+.gb{display:inline-flex;align-items:center;justify-content:center;gap:var(--sp-2);min-height:var(--tap);padding:0 var(--sp-4);
+  border:0;border-radius:var(--r-control);font:inherit;font-size:14px;font-weight:700;cursor:pointer}
+.gb:disabled{opacity:.45;cursor:not-allowed}
+@media (max-width:600px){ .gatebar{bottom:calc(var(--tabbar) + env(safe-area-inset-bottom))} }
+/* The confirm sheet: Reject says what will not happen, in words, before it does anything. */
+#csheetwrap.cs-hidden{display:none}
+#csheetwrap .csheet-bg{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:80}
+.csheet{position:fixed;left:0;right:0;bottom:0;z-index:81;background:var(--surface);border-top:1px solid var(--line-strong);
+  border-radius:var(--r-card) var(--r-card) 0 0;padding:var(--sp-4) var(--sp-4) calc(var(--sp-4) + env(safe-area-inset-bottom));
+  max-width:520px;margin:0 auto;box-sizing:border-box}
+.csheet h3{margin:0 0 var(--sp-2);font-size:16px} .csheet p{margin:0 0 var(--sp-4);color:var(--text);overflow-wrap:anywhere}
+.csheet-btns{display:flex;gap:var(--sp-3)} .csheet-btns .gb{flex:1 1 0}
 /* The rest of the cockpit on a phone (#946): nothing wider than the screen, 40 px tap targets, and a
    bottom tab bar that jumps between the sections of a page that is otherwise ~11,000 px tall. */
-#phonenav{display:none}
 @media (max-width:600px){
-  body{padding-bottom:calc(76px + env(safe-area-inset-bottom))}
+  body{padding-bottom:calc(var(--tabbar) + 18px + env(safe-area-inset-bottom))}
   h1{font-size:16px;letter-spacing:.16em}
   .sub{letter-spacing:.06em;line-height:1.7}
   #voicebar{flex-wrap:wrap}
-  #termproj{flex:1 1 55%;min-width:0}
-  #voicebar button,#termproj,#chat button,#chat input,.apbtn,.projects select,.projects button,.ap summary{min-height:40px}
+  #termproj{font-size:16px}
+  #voicebar button,#termproj,#termopen,#chat button,#chat input,.apbtn,.projects select,.projects button,.ap summary{min-height:var(--tap)}
+  /* The mic floats above the tab bar so it stays under the thumb however far the chat has scrolled. */
+  #dest-chat{padding-bottom:calc(var(--tap) + var(--sp-4))}
+  #dest-chat #mic{position:fixed;right:var(--sp-4);bottom:calc(var(--tabbar) + var(--sp-4) + env(safe-area-inset-bottom));
+    z-index:40;width:56px;height:56px;min-height:56px;border-radius:50%;padding:0;display:flex;align-items:center;justify-content:center;
+    box-shadow:0 2px 10px rgba(0,0,0,.5)}
+  #dest-chat #mic span{display:none}
+  #voicebar button{min-width:var(--tap)}
+  .crow{flex-wrap:wrap} .crow input{flex:1 1 100%}
+  .crow button{flex:1 1 0}
+  .rpage{min-width:var(--tap);min-height:var(--tap)}
+  .pmb .ph a{display:inline-block;padding:14px 4px;margin:-14px 0 -14px 4px}
   a.wp{display:inline-block;padding:13px 4px;margin:-13px -1px}
-  #apstrip,#projects,#pmboard,#lanebar,#chat{scroll-margin-top:10px}
-  #phonenav{display:grid;grid-template-columns:repeat(5,1fr);position:fixed;left:0;right:0;bottom:0;z-index:50;
-    background:#0a0b12;border-top:1px solid #2a2a3a;padding:0 0 env(safe-area-inset-bottom)}
-  #phonenav button{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
-    min-height:58px;background:none;border:0;color:#9aa;font:inherit;font-size:10px;letter-spacing:.06em;cursor:pointer}
-  #phonenav button[aria-current=true]{color:#ffb000}
-  #phonenav .nb{position:absolute;top:5px;left:calc(50% + 6px);min-width:17px;padding:1px 4px;box-sizing:border-box;
-    border-radius:9px;background:#ffb000;color:#022;font-size:10px;font-weight:700;line-height:15px}
-  #phonenav .nb[hidden]{display:none}
+  #shellnav{display:grid;grid-template-columns:repeat(5,1fr);position:fixed;left:0;right:0;bottom:0;z-index:50;
+    background:var(--surface);border-top:1px solid var(--line-strong);padding:0 0 env(safe-area-inset-bottom)}
+  #shellnav button{min-height:var(--tabbar)}
 }
 /* !important: #voicebar carries an inline display:flex. It also holds the terminal picker. */
 body.remote #voicebar,body.remote #ccap{display:none!important}
+body.remote #termrow{display:none!important}
+/* Now (#1175): one card per thing that waits on the operator. */
+.nowstatus{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;font-size:13px;margin:0 0 14px}
+.nowq{display:flex;flex-direction:column;gap:10px;margin:0 0 20px}
+.nq{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--attention);border-radius:var(--r-card);padding:12px 14px}
+.nq.fail{border-left-color:var(--danger)} .nq.blocked{border-left-color:var(--warn)}
+.nq .nh{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;font-size:12px;color:var(--text-muted)}
+.nq .ntag{font-weight:700;font-size:12px;padding:2px 9px;border-radius:var(--r-tag);background:var(--attention);color:var(--on-attention)}
+.nq.fail .ntag{background:var(--danger);color:#fff} .nq.blocked .ntag{background:var(--warn);color:var(--on-attention)}
+.nq .nt{font-size:15px;font-weight:700;margin:8px 0 4px;overflow-wrap:anywhere}
+.nq .ns{font-size:13px;line-height:1.5;margin:4px 0;overflow-wrap:anywhere;white-space:pre-wrap}
+.nq .nopts{display:flex;flex-direction:column;gap:6px;margin:8px 0}
+.nq .nopt{display:flex;gap:8px;align-items:flex-start;text-align:left;min-height:var(--tap);padding:8px 12px;box-sizing:border-box;
+  background:var(--surface-2);border:1px solid var(--line-strong);border-radius:var(--r-control);color:var(--text);font:inherit;font-size:13px;cursor:pointer}
+.nq .nopt[aria-checked=true]{border-color:var(--brand);color:var(--brand)}
+.nq .nopt b{flex:0 0 auto}
+.nq .nhint{font-size:12px;color:var(--text-muted);margin:6px 0}
+.nq .nact{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;align-items:center}
+.nq-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:var(--tap);padding:0 16px;box-sizing:border-box;
+  border:1px solid var(--line-strong);border-radius:var(--r-control);background:var(--surface-2);color:var(--text);font:inherit;font-size:13px;font-weight:700;cursor:pointer;text-decoration:none}
+.nq-btn.go{background:var(--ok);border-color:var(--ok);color:var(--on-attention)}
+.nq-btn.stop{border-color:var(--danger);color:var(--danger)}
+.nq-btn[disabled]{opacity:.45;cursor:default}
+.nq textarea{width:100%;box-sizing:border-box;margin-top:8px;min-height:64px;background:var(--bg);color:var(--text);border:1px solid var(--line-strong);
+  border-radius:var(--r-control);padding:8px 10px;font:inherit;font-size:16px}
+.nq .nmsg{font-size:12px;margin-top:8px;color:var(--warn)} .nq .nmsg.ok{color:var(--ok)}
+.nowempty{padding:18px 14px;border:1px dashed var(--line-strong);border-radius:var(--r-card);color:var(--text-muted);text-align:center}
+/* The shell (#1174): five destinations, one visible at a time. Below 600 px the nav is a bottom tab bar;
+   600 to 1023 px an icon rail; from 1024 px a labelled rail and Chat becomes a dock on the right. */
+#shell{display:block}
+#shellnav button{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+  background:none;border:0;border-left:3px solid transparent;color:var(--text-muted);font:inherit;font-size:12px;letter-spacing:.06em;cursor:pointer}
+#shellnav button[aria-current=true]{color:var(--brand)}
+#shellnav .nb{position:absolute;top:5px;left:calc(50% + 6px);min-width:17px;padding:1px 4px;box-sizing:border-box;
+  border-radius:9px;background:var(--attention);color:var(--on-attention);font-size:12px;font-weight:700;line-height:15px}
+#shellnav .nb[hidden]{display:none}
+#main>section[hidden]{display:none}
+@media (min-width:601px){
+  body{padding:0}
+  #shell{display:flex;min-height:100vh}
+  #shellnav{display:flex;flex-direction:column;flex:0 0 64px;position:sticky;top:0;align-self:flex-start;height:100vh;
+    background:var(--surface);border-right:1px solid var(--line-strong);padding-top:12px}
+  #shellnav button{min-height:var(--tap);width:100%;padding:10px 0}
+  #shellnav button[aria-current=true]{border-left-color:var(--brand)}
+  #shellnav span{display:none}
+  #shellnav .nb{left:calc(50% + 4px)}
+  #main{flex:1;min-width:0;padding:22px}
+}
+@media (min-width:1024px){
+  #shellnav{flex-basis:220px}
+  #shellnav button{flex-direction:row;justify-content:flex-start;gap:10px;padding:10px 16px;font-size:13px;letter-spacing:.04em}
+  #shellnav span{display:inline}
+  #shellnav .nb{position:static;margin-left:auto}
+  #shellnav button[data-dest=chat]{display:none}
+  #main{padding-right:372px}
+  #main>section[data-dest=chat]{position:fixed;top:0;right:0;bottom:0;width:340px;box-sizing:border-box;
+    overflow:hidden;padding:22px 16px;background:var(--surface);border-left:1px solid var(--line-strong);
+    flex-direction:column}
+  #main>section[data-dest=chat]{display:flex!important}
+  #dest-chat #voicebar{flex-wrap:wrap;flex:none;margin:0 0 14px!important}
+  #dest-chat #chat{flex:1;display:flex;flex-direction:column;min-height:0;margin:0}
+  #dest-chat .clog{flex:1;max-height:none;min-height:0}
+  #dest-chat .crow{margin-top:auto;flex-wrap:wrap}
+  #dest-chat .crow input{flex:1 1 100%}
+  #dest-chat .crow button{flex:1 1 0}
+}
 </style><link rel=stylesheet href="/static/vendor/xterm.css"></head><body>
 <!-- Lucide icons v1.48.0, https://lucide.dev. ISC License, Copyright (c) 2026 Lucide Icons and
      Contributors. Permission to use, copy, modify, and/or distribute this software for any purpose
@@ -2272,44 +3095,73 @@ body.remote #voicebar,body.remote #ccap{display:none!important}
 <symbol id="i-arrow-up-down" viewBox="0 0 24 24"><path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/></symbol>
 <symbol id="i-skip-forward" viewBox="0 0 24 24"><path d="M21 4v16"/><path d="M6.029 4.285A2 2 0 0 0 3 6v12a2 2 0 0 0 3.029 1.715l9.997-5.998a2 2 0 0 0 .003-3.432z"/></symbol>
 <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+<symbol id="i-ellipsis" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></symbol>
 <symbol id="i-arrow-left" viewBox="0 0 24 24"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></symbol>
 </svg>
+<div id=shell>
+<nav id=shellnav aria-label="cockpit destinations">
+  <button data-dest=now aria-label=Now><svg class=ic aria-hidden=true><use href="#i-flag"/></svg><span>Now</span><b class=nb id=nb-now hidden></b></button>
+  <button data-dest=projects aria-label=Projects><svg class=ic aria-hidden=true><use href="#i-square"/></svg><span>Projects</span></button>
+  <button data-dest=runs aria-label=Runs><svg class=ic aria-hidden=true><use href="#i-play"/></svg><span>Runs</span><b class=nb id=nb-runs hidden></b></button>
+  <button data-dest=chat aria-label=Chat><svg class=ic aria-hidden=true><use href="#i-messages-square"/></svg><span>Chat</span></button>
+  <button data-dest=more aria-label=More><svg class=ic aria-hidden=true><use href="#i-ellipsis"/></svg><span>More</span></button>
+</nav>
+<main id=main>
 <h1>NOMAD&nbsp;v2 · COCKPIT</h1><div class=sub>PIPELINE · LIVE FROM NOCODB · <span id=live class=mut><span class=sdot></span>connecting</span> · <span id=summary class=mut></span></div>
+<section id=dest-now data-dest=now>
+<div id=nowstatus class=nowstatus><span class=mut>loading…</span></div>
+<div id=nowq class=nowq aria-live=polite></div>
 <div class=stages><span>Capture</span><span>Clarify</span><span>Route</span><span>Process</span>
 <span><svg class=ic><use href="#i-flag"/></svg> Human Gate</span><span>Execute</span><span>Log&amp;Learn</span></div>
-<div id=telem class=telem><span class=mut>telemetry…</span></div>
-<nav id=phonenav aria-label="cockpit sections">
-  <button data-to=apstrip aria-label=Autopilot><svg class=ic aria-hidden=true><use href="#i-play"/></svg><span>Autopilot</span><b class=nb id=nb-ap hidden></b></button>
-  <button data-to=projects aria-label=Projects><svg class=ic aria-hidden=true><use href="#i-square"/></svg><span>Projects</span></button>
-  <button data-to=pmboard aria-label=Board><svg class=ic aria-hidden=true><use href="#i-arrow-up-down"/></svg><span>Board</span></button>
-  <button data-to=lanebar aria-label=Runs><svg class=ic aria-hidden=true><use href="#i-flag"/></svg><span>Runs</span><b class=nb id=nb-runs hidden></b></button>
-  <button data-to=chat aria-label=Chat><svg class=ic aria-hidden=true><use href="#i-messages-square"/></svg><span>Chat</span></button>
-</nav>
-<div id=voicebar style="margin:8px 0 18px;display:flex;align-items:center;gap:10px">
-  <button id=mic title="push to talk — click, speak, click. Goes through the chat, so spoken commands act." style="background:#ffb000;border:0;border-radius:8px;color:#000;padding:7px 14px;cursor:pointer;font:inherit" class=icon><svg class=ic aria-hidden=true><use href="#i-mic"/></svg><span>Speak</span></button>
-  <button id=wake class=icon aria-label="wake word" title="wake word — say &quot;Hey Jarvis&quot;, then keep talking" style="background:#334;color:#9aa;border:0;border-radius:8px;padding:7px 12px;cursor:pointer;font:inherit"><svg class=ic aria-hidden=true><use href="#i-ear"/></svg></button>
-  <button id=livevoice class=icon aria-label="live voice" title="live voice — real-time, interrupt any time" style="background:#334;color:#9aa;border:0;border-radius:8px;padding:7px 12px;cursor:pointer;font:inherit"><svg class=ic aria-hidden=true><use href="#i-messages-square"/></svg></button>
-  <button id=spk class=icon aria-label="spoken replies: off" aria-pressed=false title="spoken replies: off" style="background:#334;color:#9aa;border:0;border-radius:8px;padding:7px 12px;cursor:pointer;font:inherit"><svg class=ic aria-hidden=true><use href="#i-volume-x"/></svg></button>
-  <span id=vstatus class=mut style="font-size:12px"></span>
+</section>
+<section id=dest-projects data-dest=projects hidden>
+<div id=projects class=projects></div>
+<div id=projsheet class=projsheet hidden>
+<button type=button class=rs-back onclick="location.hash='projects'"><svg class=ic aria-hidden=true><use href="#i-arrow-left"/></svg><span>Projects</span></button>
+<div id=projdetail class=projects></div>
+<div id=pmboard class=projects></div>
+</div>
+</section>
+<section id=dest-runs data-dest=runs hidden>
+<div id=runslist>
+<div id=stagebar class=lanes aria-label="Pipeline stage"></div>
+<div id=lanebar class=lanes aria-label="Lane"></div>
+<table id=runs><thead><tr><th>RUN</th><th>LANE</th><th>FROM</th><th>TYPE</th><th>STATUS</th><th>WHEN</th></tr></thead>
+<tbody id=rows><tr><td class=mut colspan=6>loading…</td></tr></tbody></table>
+</div>
+<div id=runsheet class=runsheet hidden></div>
+</section>
+<section id=dest-more data-dest=more hidden>
+<div id=termrow class=morecard><div class=ph>TERMINAL</div>
+<div class=morerow><select id=termproj title="project" aria-label="Project for the terminal"></select>
+<button id=termopen class=icon title="open an interactive claude terminal in this project"><svg class=ic aria-hidden=true><use href="#i-square-terminal"/></svg><span>Open terminal</span></button></div></div>
+<div id=morepol class=morecard><div class=ph>POLICIES</div>
+<div class=morerow><a href="/cockpit/policies" target=_blank rel=noopener style="display:inline-flex;align-items:center;min-height:44px" title="policy list, editor, attach to types and projects, and each project's effective access">Open policies</a></div></div>
+<div id=morestd class=morecard><div class=ph>STANDARDS</div>
+<div class=morerow><a href="/cockpit/standards" target=_blank rel=noopener style="display:inline-flex;align-items:center;min-height:44px" title="project types: interview, stack, policies, agents, gates, and a dry run of what a new project gets">Open standards</a></div></div>
+<div id=moretelem class=morecard><div class=ph>SYSTEM</div><div id=telem class=telem><span class=mut>telemetry…</span></div></div>
+<div id=apstrip class=apstrip><div id=aphead class=ph><span>AUTOPILOT</span></div><div id=apsum class=tot><span class=mut>loading…</span></div><div id=apform class=apform></div><div id=apgmsg class=apmsg></div><div id=apother></div></div>
+</section>
+<section id=dest-chat data-dest=chat hidden>
+<div id=voicebar style="display:flex">
+  <button id=mic class="icon vb brand" title="push to talk — click, speak, click. Goes through the chat, so spoken commands act."><svg class=ic aria-hidden=true><use href="#i-mic"/></svg><span>Speak</span></button>
+  <button id=wake class="icon vb" aria-label="wake word" title="wake word — say &quot;Hey Jarvis&quot;, then keep talking"><svg class=ic aria-hidden=true><use href="#i-ear"/></svg></button>
+  <button id=livevoice class="icon vb" aria-label="live voice" title="live voice — real-time, interrupt any time"><svg class=ic aria-hidden=true><use href="#i-messages-square"/></svg></button>
+  <button id=spk class="icon vb" aria-label="spoken replies: off" aria-pressed=false title="spoken replies: off"><svg class=ic aria-hidden=true><use href="#i-volume-x"/></svg></button>
+  <span id=vstatus class=mut></span>
   <audio id=rt-audio autoplay></audio>
-  <span style="flex:1"></span>
-  <select id=termproj title="project"></select>
-  <button id=termopen class=icon title="open an interactive claude terminal in this project"><svg class=ic aria-hidden=true><use href="#i-square-terminal"/></svg><span>Terminal</span></button>
 </div>
 <div id=chat class=chat>
   <div id=clog class=clog></div>
   <div class=crow>
-    <input id=cin placeholder="Ask NOMAD about the pipeline — or capture: a goal" autocomplete=off>
+    <input id=cin placeholder="Ask NOMAD about the pipeline — Capture files a goal" autocomplete=off>
     <button id=csend title="ask">Send</button>
     <button id=ccap class="cap icon" title="capture as a pipeline goal"><svg class=ic aria-hidden=true><use href="#i-flag"/></svg><span>Capture</span></button>
   </div>
 </div>
-<div id=apstrip class=apstrip><div id=aphead class=ph><span>AUTOPILOT</span></div><div id=apsum class=tot><span class=mut>loading…</span></div><div id=apform class=apform></div><div id=apgmsg class=apmsg></div><div id=apother></div></div>
-<div id=projects class=projects></div>
-<div id=pmboard class=projects></div>
-<div id=lanebar class=lanes></div>
-<table id=runs><thead><tr><th>RUN</th><th>LANE</th><th>FROM</th><th>TYPE</th><th>STATUS</th><th>WHEN</th></tr></thead>
-<tbody id=rows><tr><td class=mut colspan=6>loading…</td></tr></tbody></table>
+</section>
+</main></div>
+<div id=csheetwrap class=cs-hidden></div>
 <div id=ws class=ws-hidden>
   <div id=wsbar><span class=wst>WORKSPACE</span><span id=wsproj class=wsp>—</span><span id=wsstat class=mut style="font-size:12px"></span><span style="flex:1"></span><button id=wsre>RECONNECT</button><button id=wsclose class=icon><svg class=ic aria-hidden=true><use href="#i-x"/></svg><span>CLOSE</span></button></div>
   <div id=wsterm></div>
@@ -2321,8 +3173,13 @@ function esc(s){ return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>'
 // One Lucide icon from the sprite at the top of the body. Decorative: the words beside it, or the
 // button's aria-label, carry the meaning.
 function ic(name){ return `<svg class=ic aria-hidden=true><use href="#i-${name}"/></svg>`; }
-/* The phone tab bar (#946): a tab scrolls to its section, the tab of the section on screen lights up,
-   and a badge counts what waits on the operator. The bar is display:none above 600 px. */
+/* The shell (#1174). One destination shows at a time and the hash picks it (#now, #projects, #runs,
+   #chat, #more), so Back works and a link can open on a destination. A badge counts what waits on
+   the operator: Now sums approvals and needs_you projects, Runs shows approvals. */
+/* Declared before the shell below: its first show() runs while this script is still evaluating, and
+   a `let` read before its line is a ReferenceError that stops the whole page. */
+let sheetRid=null, sheetBuilt=null, runsAll=[];
+let projSheet=null, projFilter='all', pmData=null;
 function navBadge(id, n){
   const b=document.getElementById(id); if(!b) return;
   b.hidden=!n; b.textContent=n>99?'99+':String(n||'');
@@ -2330,29 +3187,33 @@ function navBadge(id, n){
   btn.setAttribute('aria-label', n?`${base}, ${n} waiting`:base);
 }
 (function(){
-  const nav=document.getElementById('phonenav'); if(!nav) return;
-  const tabs=[...nav.querySelectorAll('button[data-to]')];
-  tabs.forEach(t=>t.addEventListener('click',()=>{
-    const el=document.getElementById(t.dataset.to); if(el) el.scrollIntoView({behavior:'smooth',block:'start'});
-  }));
-  let queued=false;
-  // The lit tab is the last section whose top is at (or above) the top of the screen, the place a tab
-  // scrolls it to. By position, not tab order: Chat sits above Autopilot in the page.
-  function mark(){ queued=false; if(getComputedStyle(nav).display==='none') return;
-    const line=40;
-    const on=tabs.map(t=>document.getElementById(t.dataset.to)).filter(el=>el && el.getBoundingClientRect().top<=line)
-      .sort((a,b)=>b.getBoundingClientRect().top-a.getBoundingClientRect().top)[0];
-    const cur=on?on.id:'chat';
-    tabs.forEach(t=>t.setAttribute('aria-current', String(t.dataset.to===cur)));
+  const tabs=[...document.querySelectorAll('#shellnav button[data-dest]')];
+  const secs=[...document.querySelectorAll('#main>section[data-dest]')];
+  const names=tabs.map(t=>t.dataset.dest);
+  function show(){
+    // #runs/<id> is a run's detail inside the Runs destination.
+    const hp=(location.hash||'').replace('#','').split('/');
+    // From 1024 px Chat is the dock beside every destination, so #chat there means Now.
+    let cur=names.includes(hp[0])?hp[0]:'now';
+    if(cur==='chat' && matchMedia('(min-width:1024px)').matches) cur='now';
+    runSheet(cur==='runs' && hp[1] ? decodeURIComponent(hp.slice(1).join('/')) : null);
+    projSheetSet(cur==='projects' && hp[1] ? decodeURIComponent(hp.slice(1).join('/')) : null);
+    secs.forEach(s=>{ s.hidden=s.dataset.dest!==cur; });
+    tabs.forEach(t=>t.setAttribute('aria-current', String(t.dataset.dest===cur)));
   }
-  addEventListener('scroll',()=>{ if(!queued){ queued=true; requestAnimationFrame(mark); } },{passive:true});
-  addEventListener('resize',mark); mark();
+  tabs.forEach(t=>t.addEventListener('click',()=>{ location.hash=t.dataset.dest; }));
+  addEventListener('hashchange',show); addEventListener('resize',show); show();
 })();
 // A status line with a CSS dot (live or idle) or a warning icon in front of plain text.
 function dotted(el, on, text){ el.innerHTML=`<span class="sdot${on?' on':''}"></span>`+esc(text); }
 function warned(el, text){ el.innerHTML=ic('triangle-alert')+' '+esc(text); }
 async function gate(rid, decision){
-  if(decision==='rejected' && !confirm('Reject this run?')) return;
+  if(decision==='rejected'){
+    const r=runsAll.find(x=>x.run_id===rid), p=r&&r.proposal;
+    const what=p&&p.action ? p.action+(p.target?' to '+p.target:'') : 'this action';
+    if(!await askSheet('Reject run '+rid+'?', 'Nothing will happen: '+what+' is dropped and the run ends as declined. '+
+      'This cannot be undone.', 'Reject')) return;
+  }
   const btns=document.querySelectorAll(`[data-rid="${rid}"]`); btns.forEach(b=>b.disabled=true);
   const body={run_id:rid,decision};
   // An approval must name the proposal the operator was shown: the hash this page drew the row
@@ -2396,8 +3257,86 @@ function renderLanes(runs){
 }
 // run_id → proposal_hash of the proposal as this page last drew it. gate() approves with this.
 const shownHash={};
-const openRuns=new Set();
-function toggleDetail(rid){ if(openRuns.has(rid)) openRuns.delete(rid); else openRuns.add(rid); tick(); }
+/* The stage filter (#1177). Runs only exist from Process on, and the engine records four states, so
+   these are the pipeline stages a run can actually be in; Capture, Clarify and Route have no runs. */
+const STAGES=[['process','PROCESS'],['gate','HUMAN GATE'],['execute','EXECUTE'],['done','LOG&amp;LEARN']];
+let stageFilter='all';
+function runStage(r){
+  if(r.lane===AP_LANE){ const o=r.outcome; return o==='running'?'execute':o==='needs_operator'?'gate':'done'; }
+  const s=r.status;
+  return s==='awaiting-approval'?'gate':s==='executing'?'execute':s==='new'?'process':'done';
+}
+function setStage(s){ stageFilter=s; tick(); }
+function renderStages(runs){
+  const ct={all:runs.length}; STAGES.forEach(s=>ct[s[0]]=0);
+  runs.forEach(r=>{ ct[runStage(r)]++; });
+  const chip=(k,label)=>`<button type=button class="chip ${stageFilter===k?'on':''}" aria-pressed="${stageFilter===k}" onclick="setStage('${k}')">`+
+    `${label}<span class=ct>${ct[k]||0}</span></button>`;
+  document.getElementById('stagebar').innerHTML=chip('all','ALL')+STAGES.map(s=>chip(s[0],s[1])).join('');
+}
+/* Run detail: a sheet inside Runs, opened by the hash #runs/<id> so Back closes it. The shell calls
+   runSheet on every hash change. The decision buttons are the sticky bar at the bottom. */
+function openRun(rid){ location.hash='runs/'+encodeURIComponent(rid); }
+function rowTap(e,rid){ if(rid && !e.target.closest('a,button')) openRun(rid); }
+function runSheet(rid){
+  sheetRid=rid||null;
+  const sh=document.getElementById('runsheet'), ls=document.getElementById('runslist');
+  if(!sh||!ls) return;
+  sh.hidden=!sheetRid; ls.hidden=!!sheetRid;
+  if(!sheetRid){ sheetBuilt=null; return; }
+  if(sheetBuilt!==sheetRid){
+    sheetBuilt=sheetRid;
+    sh.innerHTML=`<div class=rs-head><button type=button class=rs-back onclick="location.hash='runs'">${ic('arrow-left')}<span>Runs</span></button>`+
+      `<a class=rpage href="/cockpit/run/${encodeURIComponent(sheetRid)}" target=_blank rel=noopener aria-label="open the run page in a new tab">${ic('external-link')}</a></div>`+
+      `<h2 class=rs-title>${esc(sheetRid)}</h2><div id=rs-meta class=rs-meta></div><div id=rs-prop></div>`+
+      `<div id="det-${escA(sheetRid)}" class=mut>loading…</div><div id=gatebar class=gatebar></div>`;
+    scrollTo(0,0);
+  }
+  refreshRunSheet();
+}
+function gateBarHtml(r){
+  const a=escA(r.run_id);
+  if(r.status==='awaiting-approval') return `<button type=button class="gb no" data-rid="${a}" onclick="gate(this.dataset.rid,'rejected')">${ic('x')} Reject</button>`+
+    `<button type=button class="gb ok" data-rid="${a}" onclick="gate(this.dataset.rid,'approved')"${shownHash[r.run_id]?'':' disabled'}>${ic('check')} Approve</button>`;
+  if(r.status==='failed') return `<button type=button class="gb retry" data-rid="${a}" onclick="retry(this.dataset.rid)">${ic('rotate-cw')} Retry</button>`;
+  return '';
+}
+function refreshRunSheet(){
+  const meta=document.getElementById('rs-meta'), prop=document.getElementById('rs-prop'), bar=document.getElementById('gatebar');
+  if(!meta||!prop||!bar) return;
+  const r=runsAll.find(x=>x.run_id===sheetRid);
+  if(!r){ meta.innerHTML='<span>Not in the recent list. The detail below is read from the engine.</span>'; prop.innerHTML=''; bar.innerHTML=''; }
+  else{
+    meta.innerHTML=`<span class="tag ${escA(r.status)}">${esc((r.status||'').toUpperCase())}</span>`+
+      `<span>${ldot(r.lane)}${esc(r.lane||'')}</span>`+(r.type?`<span>${esc(r.type)}</span>`:'')+
+      (r.from_agent?`<span>from ${esc(r.from_agent)}</span>`:'')+`<span>${esc(whenCell(r.created_at))}</span>`;
+    const p=r.proposal;
+    prop.innerHTML = r.status==='awaiting-approval' && p
+      ? `<div class=rs-prop><span class=act>${ic('flag')} ${esc(p.action)||'action'}${p.target?' → '+esc(p.target):''}</span>`+
+        (p.preview?`<div class=pv>${esc(p.preview)}</div>`:'')+
+        (p.warning?`<div class=pv style="color:var(--warn)">${ic('triangle-alert')} ${esc(p.warning)}</div>`:'')+`</div>` : '';
+    bar.innerHTML=gateBarHtml(r);
+  }
+  loadDetail(sheetRid);
+}
+// A confirm sheet that says what happens, with the safe answer focused. Resolves true to go ahead.
+function askSheet(title, body, okLabel){
+  return new Promise(res=>{
+    const w=document.getElementById('csheetwrap');
+    w.className='';
+    w.innerHTML=`<div class=csheet-bg></div><div class=csheet role=dialog aria-modal=true aria-labelledby=cs-t>`+
+      `<h3 id=cs-t>${esc(title)}</h3><p>${esc(body)}</p><div class=csheet-btns>`+
+      `<button type=button class="gb cs-no" style="background:var(--surface-2);color:var(--text)">Keep it</button>`+
+      `<button type=button class="gb no cs-ok">${esc(okLabel)}</button></div></div>`;
+    const done=v=>{ document.removeEventListener('keydown',key); w.className='cs-hidden'; w.innerHTML=''; res(v); };
+    const key=e=>{ if(e.key==='Escape') done(false); };
+    document.addEventListener('keydown',key);
+    w.querySelector('.csheet-bg').onclick=()=>done(false);
+    w.querySelector('.cs-no').onclick=()=>done(false);
+    w.querySelector('.cs-ok').onclick=()=>done(true);
+    w.querySelector('.cs-no').focus();
+  });
+}
 async function loadDetail(rid){
   const el=document.getElementById('det-'+rid); if(!el) return;
   try{ const r=await (await fetch('/run?id='+encodeURIComponent(rid))).json();
@@ -2407,10 +3346,10 @@ async function loadDetail(rid){
     // showing two versions at once, so neither may be approved until the next refresh agrees.
     if(r.status==='awaiting-approval' && shownHash[rid] && r.proposal_hash!==shownHash[rid]){
       shownHash[rid]=null;
-      h+=`<div class=kv><span class=k>${ic('triangle-alert')} changed</span><span style="color:#ff8c5a">This proposal changed after the list was drawn. Approve is off until it refreshes.</span></div>`; }
+      h+=`<div class=kv><span class=k>${ic('triangle-alert')} changed</span><span style="color:var(--warn)">This proposal changed after the list was drawn. Approve is off until it refreshes.</span></div>`; }
     h+=kv('goal',r.goal)+kv('intent',r.intent)+kv('target',r.target)+kv('action',r.action);
-    if(r.project_warning) h+=`<div class=kv><span class=k>${ic('triangle-alert')} project</span><span style="color:#ff8c5a">${esc(String(r.project_warning))}</span></div>`;
-    if(r.error) h+=`<div class=kv><span class=k>${ic('triangle-alert')} error</span><span style="color:#ff8c5a">${esc(String(r.error))}</span></div>`;
+    if(r.project_warning) h+=`<div class=kv><span class=k>${ic('triangle-alert')} project</span><span style="color:var(--warn)">${esc(String(r.project_warning))}</span></div>`;
+    if(r.error) h+=`<div class=kv><span class=k>${ic('triangle-alert')} error</span><span style="color:var(--warn)">${esc(String(r.error))}</span></div>`;
     // Every argument the approval covers, whole. arg_fields() in the engine sets the order.
     (r.arg_fields||[]).forEach(f=>{
       if(!f.long){ h+=`<div class=kv><span class=k>${esc(f.key)}</span>${f.text?esc(f.text):'<span class=mut>empty</span>'}</div>`; return; }
@@ -2422,13 +3361,13 @@ async function loadDetail(rid){
     // wait expired and it may have gone out anyway, which is the one case where retrying can double
     // send. Colour follows that ladder rather than a pass/fail split.
     if(r.delivery && r.delivery.length){
-      const COL={sent:'#33dd88',accepted:'#e8c33a',unknown:'#ff8c5a',failed:'#ff5a5a',unrecorded:'#6b6b80'};
+      const COL={sent:'var(--ok)',accepted:'#e8c33a',unknown:'var(--warn)',failed:'#ff5a5a',unrecorded:'#6b6b80'};
       h+='<div class=log>';
       r.delivery.forEach(d=>{
         const st=(d.status||'unrecorded').toLowerCase();
         h+=`<div class=le><b style="color:${COL[st]||'#6b6b80'}">${esc(st.toUpperCase())}</b> · `+
            `${esc(d.to||'')}${d.provider_id?` <span class=mut>id ${esc(d.provider_id)}</span>`:''}`+
-           `${d.error?` <span style="color:#ff8c5a">${esc(d.error)}</span>`:''}</div>`;
+           `${d.error?` <span style="color:var(--warn)">${esc(d.error)}</span>`:''}</div>`;
       });
       h+='</div>'; }
     /* What it filed. A research run's whole product is a document, and until this was drawn the
@@ -2437,7 +3376,7 @@ async function loadDetail(rid){
     if(r.artifacts && r.artifacts.length){
       h+='<div class=log>';
       r.artifacts.forEach(a=>{
-        h+=`<div class=le><b style="color:#33dd88">FILED</b> · `+
+        h+=`<div class=le><b style="color:var(--ok)">FILED</b> · `+
            `<span class=mut>${esc(a.sink)}#${esc(String(a.id))}</span> ${esc(a.title||'')} `+
            `<span class=mut>${a.chars} chars${a.truncated?', shown truncated':''}</span></div>`;
         /* \\n, not \n. COCKPIT is a plain Python string, so a single backslash-n here is a real
@@ -2460,7 +3399,7 @@ function announce(all){
   all.forEach(r=>{ if(c[r.status]!=null) c[r.status]++; });
   const sm=document.getElementById('summary');
   if(sm) sm.innerHTML=`${ic('flag')} ${c['awaiting-approval']} awaiting · ${ic('play')} ${c['executing']} executing · `+
-    `<span style="color:${c.failed?'#ff8c5a':'inherit'}">${ic('x')} ${c.failed} failed</span>`;
+    `<span style="color:${c.failed?'var(--warn)':'inherit'}">${ic('x')} ${c.failed} failed</span>`;
   navBadge('nb-runs', c['awaiting-approval']);
   // speak transitions (only after the first load, only if confirmations are on)
   all.forEach(r=>{
@@ -2504,9 +3443,11 @@ function apRunRow(r){
 }
 async function tick(){
   try{ const [d, ap]=await Promise.all([fetch('/runs').then(x=>x.json()), apRuns()]);
-    const eng=d.runs||[]; announce(eng);
-    const all=[...eng, ...ap].sort((a,b)=>runTime(b)-runTime(a)); renderLanes(all);
-    const runs = laneFilter==='all' ? all : all.filter(r=>r.lane===laneFilter);
+    const eng=d.runs||[]; announce(eng); nowRuns=eng; drawNow();
+    const all=[...eng, ...ap].sort((a,b)=>runTime(b)-runTime(a)); renderLanes(all); runsAll=eng;
+    const inLane = laneFilter==='all' ? all : all.filter(r=>r.lane===laneFilter);
+    renderStages(inLane);
+    const runs = stageFilter==='all' ? inLane : inLane.filter(r=>runStage(r)===stageFilter);
     document.getElementById('rows').innerHTML = runs.map(r=>{
       if(r.lane===AP_LANE) return apRunRow(r);
       const wait = r.status==='awaiting-approval';
@@ -2517,7 +3458,7 @@ async function tick(){
       const rid=r.run_id||'';
       // The run page (#799) is the same run on its own URL: the one Zulip and OpenProject link to.
       const page=rid?`<a class=rpage href="/cockpit/run/${encodeURIComponent(rid)}" target=_blank rel=noopener title="open the run page in a new tab" aria-label="open the run page in a new tab">${ic('chevron-right')}</a>`:'';
-      let row=`<tr><td><span class=rlink onclick="toggleDetail('${rid}')">${rid||'—'}</span>${page}</td>`+
+      let row=`<tr class=rrow onclick="rowTap(event,'${escA(rid)}')"><td><button type=button class=rlink onclick="openRun('${escA(rid)}')">${esc(rid)||'—'}</button>${page}</td>`+
         `<td>${ldot(r.lane)}${r.lane||''}</td><td>${r.from_agent||''}</td>`+
         `<td>${r.type||''}</td><td><span class="tag ${r.status}">${(r.status||'').toUpperCase()}</span>${acts}</td>`+
         `<td class=mut>${whenCell(r.created_at)}</td></tr>`;
@@ -2526,12 +3467,11 @@ async function tick(){
       if(wait && p){ const tgt=p.target?` → ${esc(p.target)}`:'';
         row+=`<tr class=prop><td colspan=6><span class=act>${ic('flag')} ${esc(p.action)||'action'}${tgt}</span>`+
           (p.preview?`<div class=pv>${esc(p.preview)}</div>`:'')+
-          (p.warning?`<div class=pv style="color:#ff8c5a">${ic('triangle-alert')} ${esc(p.warning)}</div>`:'')+`</td></tr>`; }
-      if(openRuns.has(rid)) row+=`<tr class=detail><td colspan=6 id="det-${rid}" class=mut>loading…</td></tr>`;
+          (p.warning?`<div class=pv style="color:var(--warn)">${ic('triangle-alert')} ${esc(p.warning)}</div>`:'')+`</td></tr>`; }
       return row;
     }).join('') ||
-      `<tr><td class=mut colspan=6>${all.length?'no runs in this lane':'no runs yet — POST a goal to /capture'}</td></tr>`;
-    openRuns.forEach(rid=>{ if(document.getElementById('det-'+rid)) loadDetail(rid); });
+      `<tr><td class=mut colspan=6>${all.length?'no runs in this view':'no runs yet — POST a goal to /capture'}</td></tr>`;
+    if(sheetRid) refreshRunSheet();
   }catch(e){}
 }
 tick();
@@ -2565,13 +3505,20 @@ async function csend(msg, capture, speak){
   clogAdd('you', msg); clogAdd('nomad', '…');
   const ph=clog.lastChild;
   try{
-    const r=await (await fetch('/chat',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({message:msg, capture:!!capture, session_id:chatSession, history:chatHist.slice(-6)})})).json();
+    /* #973: the typed chat only answers. Capture goes to /capture, and a spoken turn is flagged
+       voice, the one chat surface that may still approve and capture. */
+    const post=(u,b)=>fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
+    let r;
+    if(capture){
+      r=await (await post('/capture',{goal:msg})).json();
+      r.captured=!!r.run_id && !r.error;
+      r.reply=r.captured ? `Captured. Routed to ${r.lane} — awaiting your approval.` : 'Capture failed: '+(r.error||'no run');
+    } else r=await (await post('/chat',{message:msg, voice:!!speak, session_id:chatSession, history:chatHist.slice(-6)})).json();
     const priv = r.remembered===false ? ' <span class=mut title="not stored to memory" aria-label="not stored to memory">'+ic('lock')+'</span>' : '';
     ph.innerHTML=`<b>NOMAD</b>${esc(r.reply||'(no reply)')}${priv}`;
     chatHist.push({role:'user',content:msg},{role:'assistant',content:r.reply||''});
     /* A spoken turn is spoken back. An action turn moved the pipeline, so refresh the board:
-       the router runs diagnostics, files captures and clears the gate from here now. */
+       a capture, or a spoken approve or capture, changes what the board shows. */
     if(speak) await vspeak(r.reply);
     else if(r.captured) vspeak(r.reply);
     if(r.captured || (r.intent && r.intent!=='chat')) tick();
@@ -2632,7 +3579,7 @@ async function vspeak(t){ if(!spkOn||!t) return;
   }catch(e){}
 }
 const spk=document.getElementById('spk');
-spk.onclick=()=>{ spkOn=!spkOn; spk.style.background=spkOn?'#33dd88':'#334'; spk.style.color=spkOn?'#000':'#9aa';
+spk.onclick=()=>{ spkOn=!spkOn; spk.style.background=spkOn?'var(--ok)':'#334'; spk.style.color=spkOn?'#000':'var(--text-muted)';
   const say='spoken replies: '+(spkOn?'on':'off');
   spk.innerHTML=ic(spkOn?'volume-2':'volume-x'); spk.title=say; spk.setAttribute('aria-label',say);
   spk.setAttribute('aria-pressed',spkOn); };
@@ -2671,7 +3618,7 @@ async function toggleMic(){
   pttRec.ondataavailable=e=>{ if(e.data && e.data.size) ch.push(e.data); };
   pttRec.onstop=async()=>{
     const r=pttRec; pttRec=null;
-    mic.innerHTML=ic('mic')+'<span>Speak</span>'; mic.style.background='#ffb000';
+    mic.innerHTML=ic('mic')+'<span>Speak</span>'; mic.style.background='var(--info)';
     const blob=new Blob(ch,{type:r.mimeType||'audio/webm'});
     if(blob.size<1200){ vs.textContent=''; return; }
     vs.textContent='transcribing…';
@@ -2679,7 +3626,7 @@ async function toggleMic(){
     if(!t){ vs.textContent='(didn’t catch that)'; return; }
     vs.textContent=''; await csend(t,false,true);
   };
-  pttRec.start(); dotted(mic,true,'recording — click to stop'); mic.style.background='#e3554f'; vs.textContent='';
+  pttRec.start(); dotted(mic,true,'recording — click to stop'); mic.style.background='var(--danger)'; vs.textContent='';
 }
 
 /* conversation mode: say the wake word once, then keep talking. After each reply NOMAD listens
@@ -2687,7 +3634,7 @@ async function toggleMic(){
 let convoMode=false;
 async function onWake(){
   if(pttRec||convoMode) return;
-  convoMode=true; if(wakeBtn) wakeBtn.style.background='#33dd88';
+  convoMode=true; if(wakeBtn) wakeBtn.style.background='var(--ok)';
   try{
     let first=true;
     while(convoMode){
@@ -2701,7 +3648,7 @@ async function onWake(){
     }
   }catch(e){}
   finally{
-    convoMode=false; if(wakeBtn) wakeBtn.style.background=wakeOn?'#ffb000':'#334';
+    convoMode=false; if(wakeBtn) wakeBtn.style.background=wakeOn?'var(--info)':'#334';
     vs.textContent=wakeOn?'— say “Hey Jarvis” to talk again —':'';
   }
 }
@@ -2783,7 +3730,7 @@ function rtHangup(msg, warn){
   if(rtStream){ rtStream.getTracks().forEach(t=>{ try{t.stop();}catch(_){ } }); rtStream=null; }
   if(rtPc){ try{rtPc.close();}catch(_){ } rtPc=null; }
   const a=document.getElementById('rt-audio'); if(a) a.srcObject=null;
-  if(liveBtn){ liveBtn.style.background='#334'; liveBtn.style.color='#9aa'; }
+  if(liveBtn){ liveBtn.style.background='#334'; liveBtn.style.color='var(--text-muted)'; }
   if(msg){ if(warn) warned(vs,msg); else vs.textContent=msg; }
 }
 async function rtConnect(){
@@ -2818,7 +3765,7 @@ if(hasMic){
   mic.onclick=toggleMic;
   if(wakeBtn) wakeBtn.onclick=async()=>{
     if(wakeOn){ wakeOn=false; convoMode=false; wakeBtn.style.background='#334'; stopOWW(); vs.textContent=''; return; }
-    wakeOn=true; wakeBtn.style.background='#ffb000';
+    wakeOn=true; wakeBtn.style.background='var(--info)';
     try{ await startOWW(); vs.textContent='wake word armed — say “Hey Jarvis”'; return; }
     catch(e){ vs.textContent='listening for “Hey Jarvis” (local fallback, a touch slower)'; }
     wakeLoop();
@@ -2827,7 +3774,7 @@ if(hasMic){
     if(rtPc||rtStream){ rtHangup('— live voice ended —'); return; }
     /* One mic, one listener. Leaving the wake word armed would have both of them holding it. */
     if(wakeOn){ wakeOn=false; convoMode=false; wakeBtn.style.background='#334'; stopOWW(); }
-    liveBtn.style.background='#33dd88'; liveBtn.style.color='#000';
+    liveBtn.style.background='var(--ok)'; liveBtn.style.color='#000';
     await rtConnect();
   };
 }else{
@@ -2946,6 +3893,7 @@ async function projNext(id){
 }
 function drawProjects(){
   const box=document.getElementById('projects'), d=projData;
+  if(projSheet){ drawProjDetail(); apDrawOther(); return; }
   if(!d){ box.innerHTML=''; apDrawOther(); return; }
   const how=projSortGet();
   const opts=Object.entries(PROJ_SORTS).map(([k,v])=>`<option value=${k}${k===how?' selected':''}>${v}</option>`).join('');
@@ -2953,15 +3901,60 @@ function drawProjects(){
   box.innerHTML=`<div class=ph><span>PROJECTS · OpenProject · ${d.projects.length}</span><span class=sp></span>`+
       `<label>${ic('arrow-up-down')} <select aria-label="Sort projects" onchange="projSortSet(this.value)">${opts}</select></label></div>`+
     (d.stale?`<div class=stale>${ic('triangle-alert')} OpenProject unreachable. These counts are ${age} old.</div>`:'')+
-    projSorted(d.projects, how).map(projRow).join('');
+    projFilterBar(d.projects)+
+    (projFilter==='all'?d.projects:d.projects.filter(r=>projState(r.identifier)===projFilter))
+      .length ? projSorted(projFilter==='all'?d.projects:d.projects.filter(r=>projState(r.identifier)===projFilter), how).map(projListRow).join('')
+      : '<div class=nowempty>No project is in this state.</div>';
   apDrawOther();
+}
+/* Projects (#1176): a list with a state filter; a row opens the project's detail at #projects/<id>,
+   where the controls, the status lines and the board numbers live. The full card (projRow) is the
+   detail, so Run, Stop, Autopilot and the decisions are the same code as before. */
+const PROJ_STATE_LABEL={running:'RUNNING',needs_you:'NEEDS YOU',waiting:'WAITING',budget_paused:'PAUSED',error:'ERROR',idle:'IDLE',off:'OFF'};
+function projState(ident){
+  let best='off', rank=RUN_ORDER.length;
+  apPidsFor(ident).forEach(pid=>{ const s=apProj(pid).state, i=RUN_ORDER.indexOf(s); if(i>=0 && i<rank){ rank=i; best=s; } });
+  return best;
+}
+function projFilterBar(list){
+  const ct={all:list.length}; RUN_ORDER.forEach(s=>ct[s]=0);
+  list.forEach(r=>{ ct[projState(r.identifier)]++; });
+  const chip=(k,label)=>`<button type=button class="chip ${projFilter===k?'on':''}" aria-pressed="${projFilter===k}" onclick="projFilterSet('${k}')">${label}<span class=ct>${ct[k]||0}</span></button>`;
+  return `<div class=lanes>`+chip('all','ALL')+RUN_ORDER.filter(s=>ct[s]||projFilter===s).map(s=>chip(s,PROJ_STATE_LABEL[s])).join('')+`</div>`;
+}
+function projFilterSet(k){ projFilter=k; drawProjects(); }
+function projListRow(r){
+  const pr=r.by_priority||{}, hi=(pr.Immediate||0)+(pr.High||0), s=projState(r.identifier);
+  const ny=apPidsFor(r.identifier).reduce((n,pid)=>n+apNeedsYou(apProj(pid)).length,0);
+  return `<button type=button class="prow${r.open?'':' zero'}" data-ident="${escA(r.identifier)}" onclick="projOpen(this.dataset.ident)">`+
+    `<span class=pr1><span class=pt>${esc(r.name)}</span><span class="apst ${s}">${PROJ_STATE_LABEL[s]}</span></span>`+
+    `<span class=pr2><span>${r.open} open</span>`+(hi?`<span class=hi>${ic('flame')}${hi} high</span>`:'')+
+    (ny?`<span class=nyou>${ny} need${ny>1?'':'s'} you</span>`:'')+`<span class=mut>${esc(r.identifier)}</span></span></button>`;
+}
+function projOpen(ident){ location.hash='projects/'+encodeURIComponent(ident); }
+// Called by the shell on every hash change, while the script may still be evaluating: it only flips
+// state and visibility, and draws on the next microtask, after every `let` is initialised.
+function projSheetSet(ident){
+  const was=projSheet; projSheet=ident||null;
+  const sh=document.getElementById('projsheet'), box=document.getElementById('projects');
+  if(!sh||!box) return;
+  sh.hidden=!projSheet; box.hidden=!!projSheet;
+  if(was===projSheet) return;
+  Promise.resolve().then(()=>{ drawProjects(); drawBoard(); if(projSheet){ pollBoard(); scrollTo(0,0); } });
+}
+function drawProjDetail(){
+  const el=document.getElementById('projdetail'), d=projData;
+  const r=d&&d.projects.find(x=>x.identifier===projSheet);
+  el.innerHTML = !d ? '<span class=mut>loading…</span>' :
+    !r ? `<div class=nmsg>${ic('triangle-alert')} No project "${esc(projSheet)}" in OpenProject.</div>` :
+    (d.stale?`<div class=stale>${ic('triangle-alert')} OpenProject unreachable. These counts are old.</div>`:'')+projRow(r);
 }
 async function pollProjects(){
   try{
     const r=await fetch('/pm-projects'); const d=await r.json();
     if(r.ok && Array.isArray(d.projects)) projData=d;
   }catch(e){}
-  drawProjects();
+  if(!apHold()) drawProjects();   // #998: not under an open stop question
 }
 pollProjects(); setInterval(pollProjects, 30000);
 
@@ -2973,7 +3966,7 @@ pollProjects(); setInterval(pollProjects, 30000);
 const AP_STATES={off:'off',running:'running',waiting:'waiting',needs_you:'needs you',
   budget_paused:'budget paused',error:'error',idle:'idle'};
 let apData=null, apErr='';
-const apBusy=new Set(), apAsk=new Set(), apOpen=new Set(), apMsgs={};
+const apBusy=new Set(), apAsk=new Set(), apKill=new Map(), apOpen=new Set(), apMsgs={};
 let apFormMsg={text:'',ok:false};
 function apUsd(v){ return v==null||isNaN(v)?'—':'$'+Number(v).toFixed(2); }
 function apAge(sec){ sec=Math.max(0,Math.round(sec)); return sec<60?sec+' s':sec<3600?Math.round(sec/60)+' min':
@@ -3031,7 +4024,7 @@ function apActs(pid, sw){
   if(p.enabled) acts+=`<button class="apbtn stop" data-pid="${a}" onclick="apStop(this.dataset.pid)"${dis}>${ic('square')}<span>Stop</span></button>`;
   else {
     if(runnable) acts+=`<button class="apbtn run" data-pid="${a}" onclick="apRun(this.dataset.pid)" title="${p.autopilot?'Run: keep working the board until stopped':'Run: the top-priority task only, then stop'}"${dis}>${ic('play')}<span>Run</span></button>`;
-    if(workers.length) acts+=`<button class="apbtn kill" data-pid="${a}" onclick="apStopMode(this.dataset.pid,'kill')"${dis}>${ic('x')}<span>Kill ${workers.length} worker${workers.length>1?'s':''}</span></button>`;
+    if(workers.length) acts+=`<button class="apbtn kill" data-pid="${a}" onclick="apKillAsk(this.dataset.pid)"${dis}>${ic('x')}<span>Kill ${workers.length} worker${workers.length>1?'s':''}</span></button>`;
   }
   return acts;
 }
@@ -3051,10 +4044,16 @@ function apLine(pid, ctl){
   const workers=p.workers||[], evs=p.events||[], a=escA(pid);
   const st=AP_STATES[p.state]?p.state:'error';
   const acts=ctl===false?'':apActs(pid, true);
-  const ask=apAsk.has(pid) ? `<div class=ask><span>Stop ${esc(pid)}. ${workers.length} worker${workers.length===1?'':'s'} running:</span>`+
-    `<button class="apbtn plain" data-pid="${a}" onclick="apStopMode(this.dataset.pid,'finish')"${dis}>Let them finish</button>`+
-    `<button class="apbtn kill" data-pid="${a}" onclick="apStopMode(this.dataset.pid,'kill')"${dis}>${ic('x')}<span>Kill them</span></button>`+
-    `<button class="apbtn plain" data-pid="${a}" onclick="apAskOff(this.dataset.pid)">Cancel</button></div>` : '';
+  // #998: Let them finish first and green (the default), Cancel, then Kill on the far side. Kill
+  // only arms the confirm row; nothing sends mode kill on one click.
+  const nw=`${workers.length} worker${workers.length===1?'':'s'}`;
+  const ask=apKill.has(pid) ? `<div class=ask><span>Kill ${nw} of ${esc(pid)}? Their runs end now and can't be resumed; branches are kept.</span>`+
+    `<button class="apbtn run" data-pid="${a}" onclick="apKillOff(this.dataset.pid)">Cancel</button><span class=sp></span>`+
+    `<button class="apbtn kill" data-pid="${a}" onclick="apKillConfirm(this.dataset.pid)"${dis}>${ic('x')}<span>Confirm kill</span></button></div>` :
+    apAsk.has(pid) ? `<div class=ask><span>Stop ${esc(pid)}. ${nw} running:</span>`+
+    `<button class="apbtn run" data-pid="${a}" onclick="apStopMode(this.dataset.pid,'finish')"${dis}>Let them finish</button>`+
+    `<button class="apbtn plain" data-pid="${a}" onclick="apAskOff(this.dataset.pid)">Cancel</button><span class=sp></span>`+
+    `<button class="apbtn kill" data-pid="${a}" onclick="apKillAsk(this.dataset.pid)"${dis}>${ic('x')}<span>Kill them</span></button></div>` : '';
   const board=(d.boards||{})[pid], task=id=>apTask(id, board);
   const wk=workers.map(w=>{ const age=w.started?' '+apAge(now-w.started):'';
     return `<span class=wk title="${escA((w.branch||'')+' started '+(w.started?new Date(w.started*1000).toLocaleTimeString():'?'))}">${task(w.task)}${esc(age)}</span>`; }).join(' ');
@@ -3142,6 +4141,7 @@ async function apAct(pid, path, body, done){
   apBusy.delete(pid); apAsk.delete(pid);
   apMsgs[pid]=res.ok?{ok:true,text:done}:{ok:false,text:res.error};
   await apPoll();
+  if(apHold()) drawProjects();   // the poll held back for another line's question; show this result anyway
 }
 function apRun(pid){ return apAct(pid, `/projects/${encodeURIComponent(pid)}/start`, null,
   apProj(pid).autopilot?'Autopilot on; a pass is running.':'Running the top task only; the project stops when it is done.'); }
@@ -3155,7 +4155,28 @@ function apStop(pid){
 }
 function apStopMode(pid, mode){
   return apAct(pid, `/projects/${encodeURIComponent(pid)}/stop`, {mode},
-    mode==='kill'?'Stopped; workers killed, their branches kept.':'Stopped; running workers finish.');
+    mode==='kill'?'Stop sent (kill): workers killed, their branches kept.':'Stop sent (finish): running workers finish; none were killed.');
+}
+// #998: kill is the one stop that can't be undone, so both kill buttons only arm this confirm. A
+// confirm that comes too soon after arming is the same click landing twice, and is ignored.
+const AP_KILL_ARM_MS=600;
+function apKillAsk(pid){ apKill.set(pid, Date.now()); apMsgs[pid]=null; drawProjects(); }
+function apKillOff(pid){ apKill.delete(pid); drawProjects(); }   // back to the stop question, if Stop opened it
+function apKillConfirm(pid){
+  const t=apKill.get(pid);
+  if(t==null || Date.now()-t<AP_KILL_ARM_MS) return;
+  apKill.delete(pid);
+  return apStopMode(pid,'kill');
+}
+// A poll does not redraw the project lines while a stop or kill question is open, or for a while
+// after the pointer went over an autopilot button, so the button under a click never moves (#998).
+const AP_HOVER_HOLD_MS=30000;
+let apHoverAt=0;
+function apHold(){ return apAsk.size>0 || apKill.size>0 || (apHoverAt>0 && Date.now()-apHoverAt<AP_HOVER_HOLD_MS); }
+if(typeof document!=='undefined' && document.addEventListener){
+  document.addEventListener('pointerover', e=>{
+    const t=e.target, on=!!(t && t.closest && t.closest('.ap .acts, .ap .ask, .pctl'));
+    if(on){ if(!apHoverAt) apHoverAt=Date.now(); } else apHoverAt=0; });
 }
 // The strip. The form is redrawn only while nobody is editing it, so a poll never eats a keystroke.
 let apFormDirty=false;
@@ -3226,10 +4247,198 @@ async function apPoll(){
     if(r.ok && d.ok!==false){ apData=d; apErr=''; }
     else { apData=null; apErr=(d.error||('HTTP '+r.status))+(d.detail?': '+d.detail:''); }
   }catch(e){ apData=null; apErr='Could not reach the engine.'; }
-  apDrawStrip(); if(!apDecideBusy()) drawProjects();
-  navBadge('nb-ap', Object.values((apData&&apData.projects)||{}).filter(p=>p.state==='needs_you').length);
+  apDrawStrip(); if(!apDecideBusy() && !apHold()) drawProjects();
+  drawNow();
 }
 apPoll(); setInterval(apPoll, 10000);
+
+/* Now (#1175): the queue of what waits on the operator. Engine runs at the gate and failed runs come
+   from the runs feed, tasks in Awaiting approval (and blocked ones) from the autopilot poll. A task's
+   question is read from its ticket the first time it shows, and kept until it leaves the queue.
+   Short questions and options are shown whole; a long or structured comment says "read the ticket". */
+let nowRuns=[];
+const nowTasks={};   // task id -> {q, loading, sel, rej, text, busy, msg}
+/* Agent asks (#1363): a question or a permission ask from an OWUI agent run, waiting in the bridge.
+   Answered here, the run continues the same way as when the operator answers in the chat. */
+let nowAsks=[];
+const nowAskS={};    // ask id -> {sel:{q:[option index]}, other:{q:text}, note, busy, msg}
+function nowAge(ms){ return ms?apAge((Date.now()-ms)/1000)+' ago':''; }
+function nowHold(){ const a=document.activeElement; return !!(a && a.closest && a.closest('#nowq') && a.tagName==='TEXTAREA'); }
+async function nowLoadAsks(){
+  try{ const r=await fetch('/api/asks?state=pending'); const d=await r.json();
+    nowAsks=(r.ok&&d.ok!==false&&Array.isArray(d.asks))?d.asks.filter(a=>a&&a.ask_id&&a.state==='pending'):[]; }
+  catch(e){ nowAsks=[]; }
+  drawNow();
+}
+function nowAskQs(a){ return Array.isArray(a.questions)?a.questions:[]; }
+function nowItems(){
+  const waiting=[], failed=[], seen=new Set();
+  nowAsks.slice().sort((a,b)=>(+a.created||0)-(+b.created||0)).forEach(a=>waiting.push({kind:'ask',a}));
+  nowRuns.filter(r=>r.status==='awaiting-approval' && r.lane!==AP_LANE)
+    .sort((a,b)=>runTime(a)-runTime(b)).forEach(r=>waiting.push({kind:'run',r}));
+  const projs=(apData&&apData.projects)||{};
+  Object.keys(projs).sort().forEach(pid=>{
+    const p=projs[pid], aw=apAwaiting(p);
+    apNeedsYou(p).forEach(id=>{ if(seen.has(id)) return; seen.add(id);
+      waiting.push({kind:'task', id, pid, awaiting:aw.has(id)}); });
+  });
+  nowRuns.filter(r=>r.status==='failed').sort((a,b)=>runTime(b)-runTime(a)).slice(0,5)
+    .forEach(r=>failed.push({kind:'fail',r}));
+  return waiting.concat(failed);
+}
+async function nowLoadQ(id){
+  const s=nowTasks[id]||(nowTasks[id]={}); if(s.q||s.loading) return;
+  s.loading=true;
+  try{ const r=await fetch('/api/autopilot/tasks/'+encodeURIComponent(id)+'/question'); const d=await r.json();
+    s.q=(r.ok&&d.ok!==false)?{...d,options:d.options||[]}:{error:d.error||('HTTP '+r.status)}; }
+  catch(e){ s.q={error:'Could not read the ticket.'}; }
+  s.loading=false; drawNow();
+}
+function nowRunCard(r){
+  const p=r.proposal||{}, rid=r.run_id||'', a=escA(rid);
+  const what=p.action?esc(p.action)+(p.target?' → '+esc(p.target):''):esc(r.type||'action');
+  const pv=p.preview?`<div class=ns>${esc(String(p.preview).slice(0,320))}${String(p.preview).length>320?'…':''}</div>`:'';
+  const warn=p.warning?`<div class=nmsg>${ic('triangle-alert')} ${esc(p.warning)}</div>`:'';
+  return `<article class=nq data-run="${a}"><div class=nh><span class=ntag>${ic('flag')} Approve?</span>${ldot(r.lane)}${esc(r.lane||'')}`+
+    `<span>${esc(rid)}</span><span>${nowAge(runTime(r))}</span></div>`+
+    `<div class=nt>${what}</div>${pv}${warn}`+
+    `<div class=nact><button class="nq-btn stop" data-rid="${a}" onclick="gate(this.dataset.rid,'rejected')">${ic('x')} Reject</button>`+
+    `<button class="nq-btn go" data-rid="${a}" onclick="gate(this.dataset.rid,'approved')">${ic('check')} Approve</button>`+
+    `<a class=nq-btn href="/cockpit/run/${encodeURIComponent(rid)}" target=_blank rel=noopener>Open run</a></div></article>`;
+}
+function nowFailCard(r){
+  const rid=r.run_id||'', a=escA(rid);
+  return `<article class="nq fail" data-run="${a}"><div class=nh><span class=ntag>${ic('x')} Failed</span>${ldot(r.lane)}${esc(r.lane||'')}`+
+    `<span>${esc(rid)}</span><span>${nowAge(runTime(r))}</span></div>`+
+    `<div class=nt>${esc(r.type||'run')} failed</div>`+
+    `<div class=nact><button class="nq-btn" data-rid="${a}" onclick="retry(this.dataset.rid)">${ic('rotate-cw')} Retry</button>`+
+    `<a class=nq-btn href="/cockpit/run/${encodeURIComponent(rid)}" target=_blank rel=noopener>Open run</a></div></article>`;
+}
+function nowTaskCard(it){
+  const id=it.id, s=nowTasks[id]||{}, q=s.q, a=escA(id), board=((apData&&apData.boards)||{})[it.pid];
+  const link=apTask(id, board).replace('class=wp','class=wp');
+  let head=`<div class=nh><span class=ntag>${it.awaiting?ic('flag')+' Needs you':ic('triangle-alert')+' Blocked'}</span>${link}<span>${esc(it.pid)}</span></div>`;
+  if(!it.awaiting){
+    return `<article class="nq blocked" data-task="${a}">${head}<div class=nhint>Blocked: open the ticket to unblock it.</div></article>`;
+  }
+  let body='';
+  if(!q) body=`<div class=nhint>${s.loading?'Reading the ticket…':'…'}</div>`;
+  else if(q.error) body=`<div class=nmsg>${esc(q.error)} Open the ticket.</div>`;
+  else {
+    body=(q.subject?`<div class=nt>${esc(q.subject)}</div>`:'')+(q.stem?`<div class=ns>${esc(q.stem)}</div>`:'');
+    if(q.options.length) body+=`<div class=nopts role=radiogroup aria-label="Options">`+q.options.map((o,i)=>
+      `<button class=nopt role=radio aria-checked=${s.sel===i} data-id="${a}" data-i="${i}" onclick="nowPick(this.dataset.id,+this.dataset.i)">`+
+      `<b>${esc(o.key)}</b><span>${esc(o.text)}</span></button>`).join('')+`</div>`;
+    if(q.complex) body+=`<div class=nhint>${ic('triangle-alert')} This one is long or detailed. Read it in the ticket before you answer.</div>`;
+  }
+  const needPick=q&&q.options&&q.options.length&&s.sel==null;
+  const dis=s.busy?' disabled':'';
+  const rej=s.rej?`<textarea id="nr-${a}" data-id="${a}" placeholder="Why? The worker gets this as its instruction." oninput="nowText(this)">${esc(s.text||'')}</textarea>`+
+    `<div class=nact><button class="nq-btn stop" data-id="${a}" onclick="nowSend(this.dataset.id,'reject')"${dis}>Send rejection</button>`+
+    `<button class=nq-btn data-id="${a}" onclick="nowRej(this.dataset.id,false)">Cancel</button></div>`:'';
+  const acts=s.rej?'':`<div class=nact><button class="nq-btn stop" data-id="${a}" onclick="nowRej(this.dataset.id,true)"${dis}>${ic('x')} Reject</button>`+
+    `<button class="nq-btn go" data-id="${a}" onclick="nowSend(this.dataset.id,'approve')"${dis||(needPick?' disabled':'')}>${ic('check')} Approve${q&&q.options&&s.sel!=null?' option '+esc(q.options[s.sel].key):''}</button>`+
+    (needPick?`<span class=nhint>Pick an option first</span>`:'')+`</div>`;
+  const msg=s.msg?`<div class="nmsg${s.msg.ok?' ok':''}">${esc(s.msg.text)}</div>`:'';
+  return `<article class=nq data-task="${a}">${head}${body}${rej}${acts}${msg}</article>`;
+}
+function nowAskAnswer(q,qi,s){
+  const opts=q.options||[], o=((s.other||{})[qi]||'').trim();
+  const sel=((s.sel||{})[qi]||[]).map(i=>opts[i]&&opts[i].label).filter(Boolean);
+  if(!q.multiSelect && o) return o;                 // one answer: what was typed wins over a pick
+  return (o?sel.concat(o):sel).join(', ');
+}
+function nowAskCard(a){
+  const id=a.ask_id, x=escA(id), s=nowAskS[id]||{}, dis=s.busy?' disabled':'', isQ=a.kind==='question';
+  const head=`<div class=nh><span class=ntag>${ic('flag')} ${isQ?'Question':'Approve?'}</span><span>agent chat</span>`+
+    `<span>${esc(a.tool||'')}</span><span>${nowAge((+a.created||0)*1000)}</span></div>`;
+  let body='';
+  if(isQ) body=nowAskQs(a).map((q,qi)=>{
+    const opts=q.options||[], sel=(s.sel||{})[qi]||[], multi=!!q.multiSelect;
+    let h=`<div class=nt>${esc((q.header?q.header+': ':'')+(q.question||''))}</div>`;
+    if(multi && opts.length) h+=`<div class=nhint>Pick one or more.</div>`;
+    if(opts.length) h+=`<div class=nopts role=${multi?'group':'radiogroup'} aria-label="${escA(q.header||'Options')}">`+opts.map((o,oi)=>
+      `<button class=nopt role=${multi?'checkbox':'radio'} aria-checked=${sel.includes(oi)} data-id="${x}" data-q="${qi}" data-o="${oi}" onclick="nowAskPick(this)"${dis}>`+
+      `<b>${esc(o.label)}</b>${o.description&&o.description!==o.label?`<span>${esc(o.description)}</span>`:''}</button>`).join('')+`</div>`;
+    return h+`<textarea data-id="${x}" data-q="${qi}" aria-label="${opts.length?'Other answer':'Answer'}" placeholder="${opts.length?'Other (optional)':'Your answer'}" oninput="nowAskText(this)">${esc((s.other||{})[qi]||'')}</textarea>`;
+  }).join('');
+  else body=`<div class=nt>${esc(a.tool||'tool')}${a.summary?': '+esc(String(a.summary).slice(0,320)):''}</div>`+
+    (a.reason?`<div class=ns>${esc(a.reason)}</div>`:'')+
+    `<textarea data-id="${x}" data-q="note" aria-label="Deny note" placeholder="Note if you deny (optional): the agent gets it" oninput="nowAskText(this)">${esc(s.note||'')}</textarea>`;
+  const acts=`<div class=nact><button class="nq-btn stop" data-id="${x}" onclick="nowAskSend(this.dataset.id,'deny')"${dis}>${ic('x')} Deny</button>`+
+    `<button class="nq-btn go" data-id="${x}" onclick="nowAskSend(this.dataset.id,'approve')"${dis}>${ic('check')} ${isQ?'Submit':'Approve'}</button></div>`;
+  const msg=s.msg?`<div class="nmsg${s.msg.ok?' ok':''}">${esc(s.msg.text)}</div>`:'';
+  return `<article class=nq data-ask="${x}">${head}${body}${acts}${msg}</article>`;
+}
+function drawNow(){
+  const box=document.getElementById('nowq'); if(!box) return;
+  const items=nowItems();
+  navBadge('nb-now', items.length);
+  items.filter(i=>i.kind==='task' && i.awaiting).forEach(i=>nowLoadQ(i.id));
+  const ids=new Set(items.filter(i=>i.kind==='task').map(i=>i.id));
+  Object.keys(nowTasks).forEach(k=>{ if(!ids.has(k) && !(nowTasks[k].msg)) delete nowTasks[k]; });
+  const asks=new Set(nowAsks.map(a=>a.ask_id));
+  Object.keys(nowAskS).forEach(k=>{ if(!asks.has(k)) delete nowAskS[k]; });
+  const st=document.getElementById('nowstatus');
+  if(st){ const projs=Object.values((apData&&apData.projects)||{});
+    const running=projs.filter(p=>p.state==='running').length;
+    st.innerHTML=`<span><span class="sdot on"></span>${items.length?items.length+' waiting on you':'nothing waiting on you'}</span>`+
+      `<span class=mut>${apData?running+' project'+(running===1?'':'s')+' running':'autopilot unreachable'}</span>`;
+  }
+  if(nowHold()) return;
+  box.innerHTML=items.length?items.map(i=>i.kind==='ask'?nowAskCard(i.a):i.kind==='run'?nowRunCard(i.r):i.kind==='fail'?nowFailCard(i.r):nowTaskCard(i)).join('')
+    :`<div class=nowempty>${ic('check')} Nothing waits on you.</div>`;
+}
+function nowPick(id,i){ const s=nowTasks[id]||(nowTasks[id]={}); s.sel=s.sel===i?null:i; drawNow(); }
+function nowRej(id,on){ const s=nowTasks[id]||(nowTasks[id]={}); s.rej=on; s.msg=null; drawNow(); }
+function nowText(el){ const s=nowTasks[el.dataset.id]||(nowTasks[el.dataset.id]={}); s.text=el.value; }
+async function nowSend(id, decision){
+  const s=nowTasks[id]; if(!s) return;
+  let text='';
+  if(decision==='reject'){ text=(s.text||'').trim();
+    if(!text){ s.msg={ok:false,text:'Write the reason: it is what the worker gets.'}; drawNow(); return; } }
+  else if(s.q && s.q.options && s.sel!=null){ const o=s.q.options[s.sel]; text='Option '+o.key+': '+o.text; }
+  s.busy=true; s.msg=null; drawNow();
+  const res=await apPost('/tasks/'+encodeURIComponent(id)+'/decide', {decision, text});
+  s.busy=false;
+  if(res.ok){ s.msg={ok:true,text:'#'+id+' moved to '+res.data.status+'; the autopilot picks it up at its next pass.'}; s.rej=false; s.q=null; s.sel=null; s.text=''; }
+  else s.msg={ok:false,text:res.error};
+  await apPoll(); drawNow();
+}
+function nowAskPick(el){
+  const id=el.dataset.id, qi=+el.dataset.q, oi=+el.dataset.o, a=nowAsks.find(x=>x.ask_id===id); if(!a) return;
+  const q=nowAskQs(a)[qi]||{}, s=nowAskS[id]||(nowAskS[id]={}), sel=s.sel||(s.sel={}), cur=sel[qi]||[];
+  if(q.multiSelect) sel[qi]=cur.includes(oi)?cur.filter(i=>i!==oi):cur.concat(oi);
+  else { sel[qi]=cur.includes(oi)?[]:[oi]; if(s.other) s.other[qi]=''; }
+  s.msg=null; drawNow();
+}
+function nowAskText(el){
+  const s=nowAskS[el.dataset.id]||(nowAskS[el.dataset.id]={});
+  if(el.dataset.q==='note') s.note=el.value; else (s.other||(s.other={}))[+el.dataset.q]=el.value;
+}
+async function nowAskSend(id, decision){
+  const a=nowAsks.find(x=>x.ask_id===id); if(!a) return;
+  const s=nowAskS[id]||(nowAskS[id]={}), body={ask_id:id, decision};
+  if(a.kind==='question' && decision==='approve'){
+    const ans={};
+    for(const [qi,q] of nowAskQs(a).entries()){ const v=nowAskAnswer(q,qi,s);
+      if(!v){ s.msg={ok:false,text:'Answer every question first.'}; drawNow(); return; }
+      ans[q.question]=v; }
+    body.answers=ans;
+  } else if(a.kind!=='question' && decision==='deny' && (s.note||'').trim()) body.answers={_note:s.note.trim()};
+  s.busy=true; s.msg=null; drawNow();
+  let st=0, j={};
+  try{ const r=await fetch('/api/asks/decide',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    st=r.status; j=await r.json().catch(()=>({})); }
+  catch(e){ j={error:'Could not reach the engine.'}; }
+  s.busy=false;
+  if(st===200 && j.ok){ nowAsks=nowAsks.filter(x=>x.ask_id!==id); delete nowAskS[id]; }
+  else if(st===409 && j.state==='expired') s.msg={ok:false,text:'This ask expired when the bridge restarted. Nothing was applied.'};
+  else if(st===409) s.msg={ok:false,text:'Already answered elsewhere (chat or another tab). Nothing was changed.'};
+  else s.msg={ok:false,text:j.error||('HTTP '+st)};
+  drawNow();
+}
+nowLoadAsks(); setInterval(nowLoadAsks, 5000);
 
 /* BOARD panel: the OpenProject board in numbers (/pm-summary, PM-01 P4). Per-project detail is
    OpenProject's own overview, one click away. */
@@ -3237,12 +4446,20 @@ function pmBurn(b){
   const n=b.dates.length, max=Math.max(1,...b.scope), W=300, H=54;
   const pts=a=>a.map((v,i)=>`${n<2?0:(i*W/(n-1)).toFixed(1)},${(H-3-v*(H-6)/max).toFixed(1)}`).join(' ');
   return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio=none><polyline fill=none stroke="#556" stroke-width=1.5 points="${pts(b.scope)}"/>`+
-         `<polyline fill=none stroke="#33dd88" stroke-width=2 points="${pts(b.done)}"/></svg>`;
+         `<polyline fill=none style="stroke:var(--ok)" stroke-width=2 points="${pts(b.done)}"/></svg>`;
 }
 async function pollBoard(){
-  const box=document.getElementById('pmboard');
-  let d; try{ const r=await fetch('/pm-summary'); d=await r.json(); if(!r.ok) throw new Error(d.error||r.status); }
-  catch(e){ box.innerHTML=''; return; }
+  const id=projSheet; if(!id){ pmData=null; drawBoard(); return; }
+  try{ const r=await fetch('/pm-summary?project='+encodeURIComponent(id)); const d=await r.json();
+    if(!r.ok) throw new Error(d.error||r.status);
+    if(projSheet===id) pmData=d; }
+  catch(e){ if(projSheet===id) pmData=null; }
+  drawBoard();
+}
+function drawBoard(){
+  const box=document.getElementById('pmboard'); if(!box) return;
+  const d=projSheet?pmData:null;
+  if(!d){ box.innerHTML=''; return; }
   const types=[...new Set(d.by_status.flatMap(r=>Object.keys(r.types)))];
   const grid = d.by_status.length ? `<table><tr><th>status</th>${types.map(t=>`<th>${esc(t)}</th>`).join('')}<th>all</th></tr>`+
     d.by_status.map(r=>`<tr${r.status==='Blocked'?' class=blk':''}><td>${esc(r.status)}</td>${types.map(t=>`<td class=n>${r.types[t]||''}</td>`).join('')}<td class=n>${r.n}</td></tr>`).join('')+`</table>`
@@ -3259,14 +4476,14 @@ async function pollBoard(){
   const tmax=Math.max(1,...d.throughput.map(w=>w.agent+w.human));
   const tp = `<div class=tp>`+d.throughput.map(w=>`<div title="week of ${escA(w.week)}: ${w.agent} agent, ${w.human} human">`+
     `<i class=a style="height:${w.agent*46/tmax}px"></i><i class=h style="height:${w.human*46/tmax}px"></i></div>`).join('')+
-    `</div><span class=mut>done per week, last ${d.throughput.length}: <span style="color:#56b6ff">agent</span> · <span style="color:#ffb000">human</span></span>`;
+    `</div><span class=mut>done per week, last ${d.throughput.length}: <span style="color:var(--info)">agent</span> · <span style="color:var(--brand)">human</span></span>`;
   const burn = d.burnup.length ? d.burnup.map(b=>`<div>${esc(b.subject||'')} <span class=mut>${b.done.at(-1)}/${b.scope.at(-1)} · ${esc(b.status)}</span></div>${pmBurn(b)}`).join('')
     : '<span class=mut>no Features with tasks</span>';
   box.innerHTML = `<div class=pmb><div class=ph>BOARD · ${esc(d.project)} · ${d.open} open<a href="${escA(d.url)}" target=_blank rel=noopener>OpenProject ${ic('external-link')}</a></div>`+
     `<h4>OPEN BY STATUS AND TYPE</h4>${grid}<h4>BLOCKED</h4>${blocked}<h4>LANES</h4>${lanesT}`+
     `<h4>THROUGHPUT</h4>${tp}<h4>BURNUP PER FEATURE</h4>${burn}</div>`;
 }
-pollBoard(); setInterval(pollBoard, 30000);
+setInterval(pollBoard, 30000);
 </script></body></html>"""
 
 

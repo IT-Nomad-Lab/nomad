@@ -1,0 +1,12 @@
+[Unit]
+Description=NOMAD MCP: Figma (personal access token), loopback only; the auth proxy fronts it
+After=network.target
+
+[Service]
+Environment=PATH=%h/.local/bin:/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/nomad/mcp-gateway/figma.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

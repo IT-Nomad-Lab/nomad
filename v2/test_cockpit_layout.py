@@ -210,33 +210,47 @@ def test_the_cockpit_has_a_viewport_meta():
 
 
 def test_the_phone_rules_are_really_inside_a_phone_media_query():
-    assert "#phonenav{display:grid" in PHONE
+    assert "#shellnav{display:grid" in PHONE
     assert "#voicebar{flex-wrap:wrap}" in PHONE
-    assert "padding-bottom:calc(76px + env(safe-area-inset-bottom))" in PHONE, \
+    assert "padding-bottom:calc(var(--tabbar) + 18px + env(safe-area-inset-bottom))" in PHONE, \
         "the bottom bar would cover the last run row"
 
 
-def test_the_phone_tab_bar_is_hidden_on_the_laptop():
-    """Outside the media query the bar is display:none, and nothing but the phone block shows it."""
+def test_the_tab_bar_is_a_grid_only_on_the_phone():
+    """Outside the phone media query the nav is a rail (flex column), never the bottom grid."""
     outside = PAGE
     for block in _media_blocks(PAGE, "(max-width:600px)"):
         outside = outside.replace(block, "")
-    assert "#phonenav{display:none}" in outside
-    assert "#phonenav{display:grid" not in outside
+    assert "#shellnav{display:grid" not in outside
+    assert "#shellnav{display:flex;flex-direction:column" in outside
 
 
-def test_every_phone_tab_points_at_a_section_that_exists():
-    targets = re.findall(r"<button data-to=([\w-]+) aria-label=", PAGE)
-    assert targets == ["apstrip", "projects", "pmboard", "lanebar", "chat"]
+def test_every_destination_has_a_nav_item_and_a_section():
+    targets = re.findall(r"<button data-dest=([\w-]+) aria-label=", PAGE)
+    assert targets == ["now", "projects", "runs", "chat", "more"]
     for t in targets:
-        assert re.search(rf"<(div|table) id={t}[\s>]", PAGE), t
+        assert re.search(rf"<section id=dest-{t} data-dest={t}[\s>]", PAGE), t
 
 
-def test_the_phone_badges_are_fed_by_the_polls():
+def test_the_sections_keep_the_ids_the_scripts_read():
+    """The destinations move the old sections; the scripts still find them by id."""
+    for el in ("telem", "voicebar", "chat", "apstrip", "projects", "pmboard", "lanebar", "runs"):
+        assert re.search(rf"<(div|table) id={el}[\s>]", PAGE), el
+
+
+def test_the_chat_is_a_dock_from_1024_px():
+    wide = "\n".join(_media_blocks(PAGE, "(min-width:1024px)"))
+    assert "#shellnav button[data-dest=chat]{display:none}" in wide
+    assert "#main>section[data-dest=chat]{position:fixed" in wide
+    # Always shown from 1024 px (overrides `hidden`), as a column so the log fills the height.
+    assert "#main>section[data-dest=chat]{display:flex!important}" in wide
+
+
+def test_the_badges_are_fed_by_the_polls():
     """A badge nobody updates is a zero forever: the runs feed and the autopilot poll both set one."""
-    assert "id=nb-runs" in PAGE and "id=nb-ap" in PAGE
+    assert "id=nb-runs" in PAGE and "id=nb-now" in PAGE
     assert "navBadge('nb-runs', c['awaiting-approval'])" in PAGE
-    assert "navBadge('nb-ap'," in PAGE
+    assert "navBadge('nb-now', items.length)" in PAGE
 
 
 def test_every_link_in_the_cockpit_opens_a_new_tab():
@@ -246,3 +260,17 @@ def test_every_link_in_the_cockpit_opens_a_new_tab():
     assert links, "no links found"
     same_tab = [a for a in links if "target=_blank" not in a or "rel=noopener" not in a]
     assert not same_tab, same_tab
+
+
+def test_now_shows_options_as_text_and_sends_the_chosen_one():
+    """#1175: a question with options shows them whole; Approve is off until one is picked, and the
+    option goes to the worker as `Option K: text`. A long one is flagged and points at the ticket."""
+    assert "id=nowq" in PAGE and "function drawNow()" in PAGE
+    assert "/api/autopilot/tasks/'+encodeURIComponent(id)+'/question" in PAGE
+    assert "role=radiogroup" in PAGE and "Pick an option first" in PAGE
+    assert "text='Option '+o.key+': '+o.text" in PAGE
+    assert "Read it in the ticket before you answer." in PAGE
+
+
+def test_now_does_not_redraw_under_an_open_rejection_box():
+    assert "function nowHold()" in PAGE and "if(nowHold()) return;" in PAGE

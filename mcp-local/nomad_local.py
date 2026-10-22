@@ -15,9 +15,11 @@ from mcp.server.fastmcp import FastMCP
 
 # Friendly role aliases → installed Ollama tags (mirrors the LiteLLM aliases). Pass a full tag
 # (anything with a ':') to use it directly; an unknown alias falls back to the first chat model.
-ALIASES = {"fast": "llama3.1:8b", "private": "qwen3.6:35b-a3b", "code": "qwen2.5-coder:32b"}
-# Per-model request overrides: qwen3.6 fits fully on the GPU only at 8k ctx, and thinking is off.
-_MODEL_OPTS = {"qwen3.6:35b-a3b": ({"num_ctx": 8192}, {"think": False})}
+ALIASES = {"fast": "qwen3.5-heretic:9b", "private": "qwen3.6-heretic:35b-a3b", "code": "qwen3-coder:30b"}
+# Per-model request overrides: qwen3.6 fits fully on the GPU only at 8k ctx. Thinking is off on
+# both Qwen tags (the 9B's tag already pins 8k ctx).
+_MODEL_OPTS = {"qwen3.6-heretic:35b-a3b": ({"num_ctx": 8192}, {"think": False}),
+               "qwen3.5-heretic:9b": ({}, {"think": False})}
 
 _CANDIDATES = [c for c in (
     os.environ.get("OLLAMA_URL"),
@@ -67,8 +69,8 @@ def local_llm(prompt: str, system: str = "", model: str = "fast", max_tokens: in
 
     Use this to offload cheap, bulk, or PRIVATE sub-tasks you don't want to send to the cloud:
     summarizing, classifying, drafting, extracting, quick reasoning over local/sensitive data.
-    `model` is a role alias — 'fast' (llama3.1:8b, always-on workhorse), 'private' (qwen3.6:35b-a3b,
-    local reasoning), 'code' (qwen2.5-coder:32b) — or a full Ollama tag. Returns the text."""
+    `model` is a role alias — 'fast' (qwen3.5-heretic:9b, always-on workhorse), 'private' (qwen3.6-heretic:35b-a3b,
+    local reasoning), 'code' (qwen3-coder:30b) — or a full Ollama tag. Returns the text."""
     messages = ([{"role": "system", "content": system}] if system else []) + \
                [{"role": "user", "content": prompt}]
     tag = _resolve(model)

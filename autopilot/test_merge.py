@@ -3,9 +3,12 @@ worktree), fake gate commands run through the generated wrappers, a fake tracker
 
 Run: uv run --no-project --with pytest --with pyyaml --with requests python -m pytest autopilot -q
 """
+import dataclasses
 import hashlib
 import json
 import os
+import shutil
+import socket
 import subprocess
 import sys
 import textwrap
@@ -17,7 +20,7 @@ NOMAD = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, NOMAD)
 
 from autopilot import merge as mq  # noqa: E402
-from autopilot.projects import Autopilot, Command, Project  # noqa: E402
+from autopilot.projects import Autopilot, Command, Noise, Project  # noqa: E402
 
 FIXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures",
                        "nunit_unity_sample.xml")
@@ -129,7 +132,8 @@ class Env:
     def config(self, **cfg):
         self.cfg_path.write_text(json.dumps(cfg))
 
-    def project(self, results="nunit", gate=None, flakes=(), known=(), post=True):
+    def project(self, results="nunit", gate=None, flakes=(), known=(), post=True, regenerated=(),
+                noise=()):
         unit = Command(f"python3 {self.bin}/fake_test.py {{filter}}")
         step = Command(f"python3 {self.bin}/fake_step.py step")
         suite = Command(f"python3 {self.bin}/fake_step.py suite")
@@ -138,7 +142,8 @@ class Env:
         ap = Autopilot(test=tests, pre_merge_gate=pre, milestone_gate=pre,
                        post_test=(Command(f"python3 {self.bin}/fake_step.py post"),) if post else (),
                        flake_set=frozenset(flakes), known_failures=frozenset(known),
-                       worktree_root=str(self.wt_root), results=results)
+                       worktree_root=str(self.wt_root), results=results,
+                       regenerated=tuple(regenerated), noise=tuple(noise))
         return Project(id="p", path=str(self.repo), autopilot=ap)
 
     def task(self, tid="1", content="one\ntwo\nthree\nfour\n", fname="a.txt"):
@@ -210,9 +215,9 @@ def test_green_gate_fast_forwards_and_marks_done(env):
     env.config(tests={"T.A1_ok": "pass", "T.A2_ok": "pass", "T.S1": "skip"})
     p = env.project()
     f = env.task()
+    branch_head = sh(f["worktree"], "rev-parse", "HEAD")
     res = env.queue(p).merge(Ctx(), [f])
     assert [r["result"] for r in res] == ["merged"]
-    branch_head = sh(f["worktree"], "rev-parse", "HEAD")
     assert env.head() == branch_head == res[0]["commit"]
     assert (env.repo / "a.txt").read_text().endswith("four\n")      # main checkout moved too
     tid, status, comment = env.tracker.moves[-1]
@@ -401,13 +406,89 @@ def test_unrelated_local_edits_survive_a_merge(env):
 
 
 def test_main_checkout_on_another_branch_is_never_switched(env):
+    """#1010: master moves by ref; the main checkout stays on its branch, its files untouched."""
     p = env.project()
     f = env.task()
     sh(env.repo, "switch", "-q", "-c", "operator-work")
+    (env.repo / "notes.txt").write_text("operator editing notes\n")
+    before = sha256(env.repo / "notes.txt")
+    work = sh(env.repo, "rev-parse", "operator-work")
+    tip = sh(env.wt_root / "ap-1", "rev-parse", "HEAD")
     res = env.queue(p).merge(Ctx(), [f])[0]
-    assert res["result"] == "needs_operator" and "operator-work" in res["comment"]
+    assert res["result"] == "merged"
+    assert env.head() == tip
     assert sh(env.repo, "branch", "--show-current") == "operator-work"
-    assert sh(env.repo, "rev-parse", "master") == sh(env.repo, "rev-parse", "operator-work")
+    assert sh(env.repo, "rev-parse", "operator-work") == work
+    assert sha256(env.repo / "notes.txt") == before
+    assert sh(env.repo, "status", "--porcelain") == "M notes.txt"
+
+
+def test_default_checked_out_in_another_worktree_fast_forwards_there(env):
+    p = env.project()
+    f = env.task()
+    sh(env.repo, "switch", "-q", "-c", "operator-work")
+    other = env.tmp / "master-wt"
+    sh(env.repo, "worktree", "add", "-q", str(other), "master")
+    res = env.queue(p).merge(Ctx(), [f])[0]
+    assert res["result"] == "merged"
+    assert sh(other, "rev-parse", "HEAD") == env.head()
+    assert (other / "a.txt").read_text() == "one\ntwo\nthree\nfour\n"
+    assert sh(other, "status", "--porcelain") == ""
+
+
+def test_move_ref_only_moves_forward(env):
+    sh(env.repo, "switch", "-q", "-c", "side")
+    (env.repo / "b.txt").write_text("b\n")
+    sh(env.repo, "add", "b.txt")
+    sh(env.repo, "commit", "-qm", "side")
+    side = sh(env.repo, "rev-parse", "HEAD")
+    sh(env.repo, "switch", "-q", "master")
+    (env.repo / "c.txt").write_text("c\n")
+    sh(env.repo, "add", "c.txt")
+    sh(env.repo, "commit", "-qm", "master moved")
+    master = env.head()
+    sh(env.repo, "switch", "-q", "side")
+    status, why = mq.move_ref(str(env.repo), "master", side)
+    assert status == "not_ff" and master[:10] in why
+    assert env.head() == master
+    assert mq.move_ref(str(env.repo), "nope", side)[0] == "refused"
+    assert mq.checkouts_of(str(env.repo), "master") == []
+    assert mq.checkouts_of(str(env.repo), "side") == [str(env.repo)]
+
+
+def test_merged_worktree_and_branch_are_removed(env):
+    """#1011"""
+    p = env.project()
+    res = env.queue(p).merge(Ctx(), [env.task()])[0]
+    assert res["result"] == "merged" and res["cleanup"] == "removed"
+    assert not (env.wt_root / "ap-1").exists()
+    assert sh(env.repo, "branch", "--list", "feat/1-x") == ""
+    assert str(env.wt_root / "ap-1") not in sh(env.repo, "worktree", "list")
+
+
+def test_merged_worktree_with_untracked_files_is_kept(env):
+    p = env.project()
+    f = env.task()
+    q = env.queue(p, after_merge=lambda ctx, res: (env.wt_root / "ap-1" / "scratch.txt").write_text("x"))
+    ctx = Ctx()
+    res = q.merge(ctx, [f])[0]
+    assert res["result"] == "merged" and res["cleanup"] == "kept"
+    assert (env.wt_root / "ap-1" / "scratch.txt").exists()
+    assert sh(env.repo, "branch", "--list", "feat/1-x") != ""
+    assert env.tracker.moves[-1][1] == mq.DONE
+    assert any("kept the worktree" in e[1] for e in ctx.events)
+
+
+def test_cleanup_only_touches_the_tasks_own_worktree(env):
+    p = env.project()
+    other = env.wt_root / "other-1"
+    sh(env.repo, "worktree", "add", "-q", "-b", "feat/1-x", str(other), "master")
+    (other / "a.txt").write_text("one\ntwo\nthree\nfour\n")
+    sh(other, "commit", "-qam", "task 1")
+    f = {"task": "1", "outcome": "merge", "branch": "feat/1-x", "worktree": str(other)}
+    res = env.queue(p).merge(Ctx(), [f])[0]
+    assert res["result"] == "merged" and res["cleanup"] == "skipped"
+    assert other.exists() and sh(env.repo, "branch", "--list", "feat/1-x") != ""
 
 
 def test_default_moving_during_the_gate_merges_again(env):
@@ -453,6 +534,92 @@ def test_a_restart_resumes_the_persisted_queue(env):
     res = q.merge(Ctx(), [])[0]
     assert res["result"] == "resume" and res["conflicts"] == ["a.txt"]
     assert not mq.merge_in_progress(f["worktree"])
+
+
+def test_the_gate_is_marked_started_in_the_persisted_queue(env):
+    seen = env.tmp / "during-gate.json"
+    env.config(tests={"T.A1_ok": "pass"},
+               hook=f"cp {env.state_dir / 'merge-state.json'} {seen}")
+    res = env.queue(env.project()).merge(Ctx(), [env.task()])
+    assert res[0]["result"] == "merged"
+    [entry] = json.loads(seen.read_text())["projects"]["p"]["queue"]
+    assert entry["task"] == "1" and entry["gate_started"] > 0
+
+
+def interrupted_gate(env, p, f):
+    """#985: the supervisor was stopped mid-gate; the queue entry says so, and the test process
+    that outlived it rewrote a regenerated file after post_test should have run."""
+    state = mq.MergeState(str(env.state_dir / "merge-state.json"))
+    state.project("p")["queue"].append({"task": "1", "branch": f["branch"], "worktree": f["worktree"],
+                                        "queued": 0, "gate_started": 1.0})
+    state.save()
+    (env.wt_root / "ap-1" / "shot.png").write_text("rewritten by an orphaned Unity\n")
+    return env.queue(p)
+
+
+def test_a_restart_cleans_up_after_an_interrupted_gate(env):
+    p = env.project(regenerated=("shot.png",))
+    f = env.task(content="shot v1\n", fname="shot.png")
+    ctx = Ctx()
+    res = interrupted_gate(env, p, f).merge(ctx, [])[0]
+    assert res["result"] == "merged"
+    assert res["cleanup"] == "removed"      # removal needs a clean worktree: shot.png was reset
+    assert [c["cmd"] for c in env.calls_list()][:1] == ["post"]      # post_test ran first
+    assert any("interrupted gate" in m and "shot.png" in m for _, m in ctx.events)
+
+
+def test_cleanup_after_an_interrupted_gate_leaves_real_changes_dirty(env):
+    p = env.project(regenerated=("shot.png",))
+    f = env.task(content="shot v1\n", fname="shot.png")
+    (env.wt_root / "ap-1" / "a.txt").write_text("someone's edit\n")
+    res = interrupted_gate(env, p, f).merge(Ctx(), [])[0]
+    assert res["result"] == "resume" and "uncommitted" in res["comment"]
+    assert (env.wt_root / "ap-1" / "a.txt").read_text() == "someone's edit\n"
+
+
+UNITY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "unity_noise")
+META = open(os.path.join(UNITY, "rune.png.meta")).read()
+WEBGL = "  - serializedVersion: 3\n    buildTarget: WebGL\n"
+META_NOISE = META.replace(WEBGL, open(os.path.join(UNITY, "platforms.txt")).read() + WEBGL, 1)
+UNITY_NOISE = (Noise("*.meta", "unity-default-platforms"),
+               Noise("ProjectSettings.asset", "only-keys", ("productName",)))
+
+
+def unity_task(env):
+    """#996: a task branch whose worktree a Unity run left with import noise only."""
+    f = env.task(content=META, fname="rune.png.meta")
+    wt = env.wt_root / "ap-1"
+    (wt / "ProjectSettings.asset").write_text("PlayerSettings:\n  productName: RuneMatch\n")
+    sh(wt, "add", "ProjectSettings.asset")
+    sh(wt, "commit", "-qm", "settings")
+    (wt / "rune.png.meta").write_text(META_NOISE)
+    (wt / "ProjectSettings.asset").write_text("PlayerSettings:\n  productName: RuneMatch-ap-1\n")
+    return f, wt
+
+
+def test_unity_import_noise_does_not_block_the_merge(env):
+    f, wt = unity_task(env)
+    ctx = Ctx()
+    res = env.queue(env.project(noise=UNITY_NOISE)).merge(ctx, [f])[0]
+    assert res["result"] == "merged"
+    assert res["cleanup"] == "removed"      # removal needs a clean worktree: the noise was reset
+    assert any("reset noise" in m and "rune.png.meta" in m for _, m in ctx.events)
+
+
+def test_unity_noise_with_a_real_change_still_blocks_the_merge(env):
+    f, wt = unity_task(env)
+    real = META_NOISE.replace("spriteMode: 1", "spriteMode: 2")
+    (wt / "rune.png.meta").write_text(real)
+    res = env.queue(env.project(noise=UNITY_NOISE)).merge(Ctx(), [f])[0]
+    assert res["result"] == "resume" and "uncommitted" in res["comment"]
+    assert (wt / "rune.png.meta").read_text() == real
+
+
+def test_without_noise_rules_unity_noise_blocks_the_merge_as_before(env):
+    f, wt = unity_task(env)
+    res = env.queue(env.project()).merge(Ctx(), [f])[0]
+    assert res["result"] == "resume" and "uncommitted" in res["comment"]
+    assert (wt / "rune.png.meta").read_text() == META_NOISE
 
 
 def test_tracker_failure_does_not_stop_the_queue(env):
@@ -511,3 +678,49 @@ def test_the_result_is_written_with_the_dequeue_and_only_the_last_are_kept(env, 
                          "worktree": "/nope"}])
     st = json.loads((env.state_dir / "merge-state.json").read_text())["projects"]["p"]
     assert st["queue"] == [] and sorted(st["results"]) == ["8", "9"]
+
+
+# ---- gate_network (#1530, docs/prd/merge-gate-network.md) ---------------------------------------
+
+needs_bwrap = pytest.mark.skipif(not shutil.which("bwrap"), reason="bubblewrap not installed")
+
+FAKE_CONNECT = r'''#!/usr/bin/env python3
+import os, socket, sys
+try:
+    socket.create_connection(("127.0.0.1", int(os.environ["FAKE_PORT"])), timeout=3).close()
+except OSError as e:
+    print("connect failed:", e); sys.exit(1)
+print("connected")
+'''
+
+
+@needs_bwrap
+@pytest.mark.parametrize("network, ok", [("host", True), ("none", False)])
+def test_gate_network_none_cuts_the_parents_loopback(env, monkeypatch, network, ok):
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen()
+    monkeypatch.setenv("FAKE_PORT", str(srv.getsockname()[1]))
+    (env.bin / "fake_connect.py").write_text(FAKE_CONNECT)
+    p = env.project(gate=(Command(f"python3 {env.bin}/fake_connect.py"),), post=False)
+    p = dataclasses.replace(p, autopilot=dataclasses.replace(p.autopilot, gate_network=network))
+    try:
+        res = env.queue(p).merge(Ctx(), [env.task()])
+    finally:
+        srv.close()
+    assert (res[0]["result"] == "merged") is ok
+
+
+def test_gate_network_none_without_bubblewrap_never_runs_the_step(env, monkeypatch):
+    monkeypatch.setattr(mq.shutil, "which", lambda name: None)
+    p = env.project()
+    p = dataclasses.replace(p, autopilot=dataclasses.replace(p.autopilot, gate_network="none"))
+    res = env.queue(p).merge(Ctx(), [env.task()])
+    assert res[0]["result"] != "merged" and env.head() != res[0].get("commit")
+    assert env.calls_list() == []                              # nothing ran with the network on
+    _, _, comment = env.tracker.moves[-1]
+    assert "bubblewrap (bwrap) is not installed" in comment
+
+
+def test_gate_argv_leaves_host_alone():
+    assert mq.gate_argv("host", ["/w", "x"]) == ["/w", "x"]

@@ -27,9 +27,9 @@ nomad-image/install_service.sh        # optional: run ComfyUI on boot (systemd u
 ~/ComfyUI/venv/bin/python ~/ComfyUI/main.py --listen 127.0.0.1 --port 8188
 ```
 
-ComfyUI listens on `127.0.0.1:8188` only: it has no auth, and on `0.0.0.0` it answered in plain HTTP
+ComfyUI listens on `127.0.0.1:8188` and the Docker bridge, never `0.0.0.0`: it has no auth, and on `0.0.0.0` it answered in plain HTTP
 on the tailnet IP (#821). The v2 engine **container** still reaches it via `host.docker.internal:8188`,
-because Docker Desktop's gateway lands on the host loopback.
+because ComfyUI also listens on the Docker Engine bridge `172.17.0.1` (`nomad-comfyui.engine.conf`, #383).
 
 ### Switching the local model
 Set `COMFYUI_MODEL` in `.env` / the engine service env:

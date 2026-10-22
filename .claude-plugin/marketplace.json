@@ -9,6 +9,11 @@
       "name": "nomad",
       "source": "./nomad-plugin",
       "description": "NOMAD v2 orchestrator: capture/route/gate/execute across specialist lanes, with the build-team agents, the guard hook, operator commands, and lane MCP servers."
+    },
+    {
+      "name": "nomad-operator",
+      "source": "./nomad-operator",
+      "description": "The operator's Claude Code setup on both hosts: SDLC tier gate, nomad-pm tracking and MCP, ntfy, SDLC context, brand agents, Supabase skills. Logic runs in WSL through bin/nomad-run."
     }
   ]
 }
